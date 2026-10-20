@@ -16,6 +16,8 @@ import win32api
 import win32gui
 import win32process
 
+import worksafe
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(HERE, "data", "activity.jsonl")
 RECENT_DIR = os.path.join(os.environ["APPDATA"], "Microsoft", "Windows", "Recent")
@@ -25,6 +27,8 @@ MAX_LOG_BYTES = 5_000_000
 
 def _foreground() -> tuple[str, str]:
     hwnd = win32gui.GetForegroundWindow()
+    if worksafe.is_blocked(hwnd):
+        return "work app", "(hidden)"  # Outlook / Teams: never log what's in them
     title = win32gui.GetWindowText(hwnd).strip()
     try:
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -41,6 +45,7 @@ def _idle_seconds() -> float:
 def _logger_loop(interval: float):
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     last = None
+    reported = set()
     while True:
         try:
             current = ("idle", "") if _idle_seconds() > IDLE_AFTER_SECONDS else _foreground()
@@ -54,8 +59,10 @@ def _logger_loop(interval: float):
                     keep = f.readlines()[-5000:]
                 with open(LOG_PATH, "w", encoding="utf-8") as f:
                     f.writelines(keep)
-        except Exception:
-            pass
+        except Exception as e:
+            if repr(e) not in reported:  # say so once, rather than failing silently forever
+                reported.add(repr(e))
+                print(f"(activity logger error: {e!r})", flush=True)
         time.sleep(interval)
 
 

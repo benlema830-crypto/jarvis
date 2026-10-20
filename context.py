@@ -23,9 +23,16 @@ def _day_label(d: datetime.date) -> str:
     return d.strftime("%A %b %d")
 
 
+def calendar_urls() -> list[str]:
+    """ICS links from Outlook, Google, iCloud, etc. (GOOGLE_CALENDAR_ICS_URL is the old name)."""
+    raw = ",".join(os.getenv(k, "") for k in ("CALENDAR_ICS_URLS", "GOOGLE_CALENDAR_ICS_URL"))
+    urls = [u.strip() for u in raw.split(",") if u.strip()]
+    return ["https://" + u[len("webcal://"):] if u.lower().startswith("webcal://") else u for u in urls]
+
+
 def upcoming_events(days: int = 1) -> str:
     """Events from now until the end of the day `days` days from today."""
-    urls = [u.strip() for u in os.getenv("GOOGLE_CALENDAR_ICS_URL", "").split(",") if u.strip()]
+    urls = calendar_urls()
     if not urls:
         return "Calendar not connected."
 

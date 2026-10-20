@@ -22,6 +22,7 @@ else:
     link.TargetPath = os.path.join(HERE, "run.bat")
     link.WorkingDirectory = HERE
     link.WindowStyle = 7  # start minimized
+    link.IconLocation = os.path.join(HERE, "jarvis.ico") + ",0"
     link.Description = "JARVIS assistant"
     link.Save()
     print(f"Jarvis will start when you log in. Shortcut: {SHORTCUT}")

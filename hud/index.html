@@ -184,6 +184,16 @@
     background: var(--accent); border: 0; padding: 0 20px; cursor: pointer;
   }
   form.cmd button:hover { filter: brightness(1.15); }
+  form.cmd button.stop {
+    background: transparent; color: var(--red); border: 1px solid rgba(255,77,94,.5); border-left: 0;
+    display: none;
+  }
+  form.cmd button.stop:hover { background: rgba(255,77,94,.12); }
+  body.busy form.cmd button.stop, body.agent form.cmd button.stop { display: block; }
+  body.agent .hint { color: var(--amber); }
+  .msg.event .who { color: var(--amber); }
+  .msg.event .body { border-left-color: var(--amber); color: #ffe2b0; }
+  .hint { color: var(--dim); font-size: 12px; letter-spacing: .12em; margin-top: 10px; text-transform: uppercase; }
 
   /* ---------- weather / schedule ---------- */
   .wx-now { display: flex; align-items: center; gap: 14px; }
@@ -269,6 +279,10 @@
           <div class="stat"><div class="k">Power</div><div class="v" id="power">--</div></div>
           <div class="stat"><div class="k">Uplink</div><div class="v" id="up">--</div></div>
           <div class="stat"><div class="k">Downlink</div><div class="v" id="down">--</div></div>
+          <div class="stat"><div class="k">Voice</div><div class="v" id="voiceEngine">--</div></div>
+          <div class="stat"><div class="k">Hearing</div><div class="v" id="ears">--</div></div>
+          <div class="stat"><div class="k">AI Cache</div><div class="v" id="cache">--</div></div>
+          <div class="stat"><div class="k">Searches</div><div class="v" id="searches">0</div></div>
         </div>
       </div>
       <div class="panel grow">
@@ -287,12 +301,15 @@
         <button class="chip" data-cmd="What's on my schedule today?">Schedule</button>
         <button class="chip" data-cmd="How's the weather looking?">Weather</button>
         <button class="chip" data-cmd="What was I working on earlier?">Recent work</button>
-        <button class="chip" data-cmd="Switch to your lighter voice, I need the GPU">Free GPU</button>
+        <button class="chip" data-cmd="Take a look at my screen and tell me what you see">Look at screen</button>
+        <button class="chip" data-cmd="What's in the news today?">News</button>
       </div>
       <form class="cmd" id="cmd" autocomplete="off">
         <input id="cmdInput" placeholder="Type a command, sir..." maxlength="1000">
         <button type="submit">SEND</button>
+        <button type="button" class="stop" id="stopBtn" title="Stop talking">STOP</button>
       </form>
+      <div class="hint" id="hint">Say "Hey Jarvis" or press Ctrl+Alt+J — even mid-sentence</div>
     </section>
 
     <!-- right -->
@@ -335,6 +352,7 @@ function setState(s) {
   document.documentElement.style.setProperty("--state", css);
   $("stateLabel").textContent = st.label;
   $("chipText").textContent = linkUp ? st.label : "LINK LOST";
+  document.body.classList.toggle("busy", s === "thinking" || s === "speaking");
 }
 
 // ---------- reactor ----------
@@ -363,7 +381,8 @@ function frame(now) {
   spin += (st.spin - spin) * Math.min(1, dt * 2.5);
   rot += dt * spin;
   if (now - lastLevelAt > 200) voiceLevel *= 0.85;
-  const target = state === "speaking" ? Math.min(1, voiceLevel * 7) : 0;
+  const target = state === "speaking" ? Math.min(1, voiceLevel * 7)
+               : state === "listening" ? Math.min(0.6, voiceLevel * 5) : 0;
   energy += (target - energy) * Math.min(1, dt * 14);
   flash *= 0.92;
 
@@ -422,7 +441,7 @@ function frame(now) {
       const n = Math.abs(Math.sin(i * 1.71 + t * 9.3) * Math.sin(i * 0.53 - t * 5.1) + 0.35 * Math.sin(i * 3.1 + t * 13));
       v = energy * (0.25 + n);
     } else if (state === "listening") {
-      v = 0.12 + 0.1 * Math.sin(i / BARS * Math.PI * 6 + t * 4);
+      v = 0.12 + 0.1 * Math.sin(i / BARS * Math.PI * 6 + t * 4) + energy * 0.6 * Math.abs(Math.sin(i * 2.3 + t * 11));
     } else {
       v = 0.04 + 0.03 * Math.sin(i / BARS * Math.PI * 4 + t * 1.2);
     }
@@ -499,7 +518,8 @@ function addMsg(kind, text, ts) {
     el.className = "msg " + kind;
     const who = document.createElement("div");
     who.className = "who";
-    who.innerHTML = `${kind === "you" ? "YOU" : kind === "jarvis" ? "JARVIS" : "FAULT"}<time>${hhmm(ts)}</time>`;
+    const label = { you: "YOU", jarvis: "JARVIS", event: "SYSTEM", error: "FAULT" }[kind];
+    who.innerHTML = `${label}<time>${hhmm(ts)}</time>`;
     const body = document.createElement("div");
     body.className = "body"; body.textContent = text;
     el.append(who, body); comms.append(el);
@@ -519,10 +539,17 @@ function addLog(html, ts) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 const TOOL_NAMES = {
-  get_time: "CHRONOMETER", open_website: "BROWSER UPLINK", search_web: "WEB SEARCH", youtube: "YOUTUBE",
-  open_app: "LAUNCH APP", system_status: "DIAGNOSTICS", get_schedule: "CALENDAR SYNC",
-  get_weather: "ATMOSPHERICS", recent_activity: "ACTIVITY RECALL", switch_voice: "VOICE MATRIX",
+  open_website: "BROWSER UPLINK", show_search_results: "SEARCH DISPLAY", web_search: "WEB SEARCH",
+  youtube: "YOUTUBE", open_app: "LAUNCH APP", list_apps: "APP INVENTORY", find_files: "FILE SCAN", open_path: "OPEN FILE",
+  read_clipboard: "CLIPBOARD", look_at_screen: "VISUAL SCAN", media_control: "MEDIA", set_volume: "VOLUME",
+  system_status: "DIAGNOSTICS", get_schedule: "CALENDAR SYNC", get_weather: "ATMOSPHERICS",
+  recent_activity: "ACTIVITY RECALL", remember: "MEMORY WRITE", forget: "MEMORY ERASE",
+  set_reminder: "REMINDER SET", list_reminders: "REMINDERS", cancel_reminder: "REMINDER CANCEL",
+  switch_voice: "VOICE MATRIX", audio_output: "AUDIO ROUTING", do_on_computer: "AGENT DISPATCH",
+  agent_status: "AGENT STATUS", stop_agent: "AGENT ABORT", terminal_task: "TERMINAL DISPATCH",
+  terminal_status: "TERMINAL STATUS", stop_terminal_task: "TERMINAL ABORT", compaction: "MEMORY CONDENSE",
 };
+let searchCount = 0;
 
 // caption typewriter
 let capQueue = [], capBusy = false;
@@ -557,7 +584,22 @@ function handle(ev, replay = false) {
       break;
     }
     case "error": addMsg("error", ev.text, ev.t); addLog(`<span class="err">fault: ${esc(ev.text)}</span>`, ev.t); break;
+    case "event": addMsg("event", ev.text, ev.t); jarvisBubble = null; flash = 1; break;
     case "level": voiceLevel = ev.v; lastLevelAt = performance.now(); break;
+    case "agent":
+      document.body.classList.toggle("agent", ev.running);
+      $("hint").textContent = !ev.running ? 'Say "Hey Jarvis" or press Ctrl+Alt+J — even mid-sentence'
+        : ev.kind === "terminal" ? "Terminal task running in the background · say \"stop\", press Ctrl+Alt+J or STOP to cancel"
+        : "Agent at work — hands off the mouse · say \"stop\", press Ctrl+Alt+J or STOP to abort";
+      const who = ev.kind === "terminal" ? "TERMINAL" : "AGENT";
+      if (!replay) addLog(`<span class="nm">${who} ${ev.running ? "ENGAGED" : "STANDING DOWN"}</span> · ${esc(ev.task || "")}`, ev.t);
+      break;
+    case "usage": {
+      const total = ev.input + ev.cache_read + ev.cache_write;
+      $("cache").textContent = total ? Math.round(ev.cache_read / total * 100) + "%" : "--";
+      searchCount += ev.searches; $("searches").textContent = searchCount;
+      break;
+    }
   }
 }
 
@@ -590,6 +632,9 @@ async function send(text) {
 }
 $("cmd").addEventListener("submit", (e) => { e.preventDefault(); send($("cmdInput").value); $("cmdInput").value = ""; });
 document.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => send(b.dataset.cmd)));
+$("stopBtn").addEventListener("click", () =>
+  fetch("/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {}));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("stopBtn").click(); });
 document.addEventListener("keydown", (e) => { if (e.key === "/" && document.activeElement !== $("cmdInput")) { e.preventDefault(); $("cmdInput").focus(); } });
 
 // ---------- diagnostics ----------
@@ -632,6 +677,10 @@ async function pollStatus() {
     $("uptime").textContent = fmtUptime(s.uptime);
     $("power").textContent = s.battery ? `${Math.round(s.battery.percent)}%${s.battery.plugged ? " ⚡" : ""}` : "AC";
     $("up").textContent = rate(s.net_up); $("down").textContent = rate(s.net_down);
+    if (s.info) {
+      $("voiceEngine").textContent = { elevenlabs: "ELEVENLABS", kokoro: "KOKORO" }[s.info.voice] || "--";
+      $("ears").textContent = s.info.ears || "--";
+    }
     cpuHist.push(s.cpu); if (cpuHist.length > 60) cpuHist.shift();
     drawSpark();
   } catch { /* Jarvis is offline; the event stream shows that */ }

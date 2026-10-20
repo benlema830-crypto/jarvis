@@ -10,9 +10,13 @@ Endpoints:
   GET  /status    CPU / memory / disk / GPU / network / battery as JSON
   GET  /intel     weather and schedule as JSON (cached for 10 minutes)
   POST /command   {"text": "..."} - run a typed command
+  POST /stop      stop Jarvis mid-sentence
+
+Every conversation is also saved to data/transcripts/<date>.jsonl.
 """
 
 import collections
+import datetime
 import json
 import os
 import queue
@@ -31,8 +35,14 @@ PORT = int(os.getenv("JARVIS_HUD_PORT", "7777"))
 URL = f"http://127.0.0.1:{PORT}"
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 INTEL_TTL = 600
+TRANSCRIPTS = os.path.join(HERE, "data", "transcripts")
+TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
+LIVE_ONLY = {"level", "usage"}  # not replayed to pages that connect later
 
-commands: queue.Queue[str] = queue.Queue()  # typed into the HUD (or console); read by jarvis.py
+# Read by jarvis.py: typed commands (str) and background events (dict)
+commands: queue.Queue = queue.Queue()
+on_stop = None  # set by jarvis.py
+info: dict = {}  # shown on the HUD: voice engine, speech recognition device, model
 
 _subscribers: list[queue.Queue] = []
 _sub_lock = threading.Lock()
@@ -40,17 +50,29 @@ _history = collections.deque(maxlen=80)  # replayed to a page that opens mid-con
 _state = "booting"
 
 
-def emit(kind: str, **data):
+def emit(kind: str, /, **data):
     """Send an event to every open HUD page. Safe to call from any thread."""
     global _state
     event = {"type": kind, "t": time.time(), **data}
     if kind == "state":
         _state = data["state"]
-    elif kind != "level":
+    elif kind not in LIVE_ONLY:
         _history.append(event)
+    if kind in TRANSCRIBED:
+        _save_transcript(event)
     with _sub_lock:
         for q in _subscribers:
             q.put_nowait(event)
+
+
+def _save_transcript(event: dict):
+    try:
+        os.makedirs(TRANSCRIPTS, exist_ok=True)
+        day = datetime.date.today().isoformat()
+        with open(os.path.join(TRANSCRIPTS, f"{day}.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        pass
 
 
 # ---------- Live data ----------
@@ -94,6 +116,7 @@ def status() -> dict:
         "net_up": (net.bytes_sent - prev.bytes_sent) / dt,
         "net_down": (net.bytes_recv - prev.bytes_recv) / dt,
         "state": _state,
+        "info": info,
     }
 
 
@@ -162,8 +185,16 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return
         # Requiring JSON forces a CORS preflight, so other websites can't send commands
-        if self.path != "/command" or self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+        if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             self.send_error(400)
+            return
+        if self.path == "/stop":
+            if on_stop:
+                on_stop()
+            self._json({"ok": True})
+            return
+        if self.path != "/command":
+            self.send_error(404)
             return
         try:
             length = min(int(self.headers.get("Content-Length", 0)), 4000)
@@ -202,7 +233,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def track_voice(level_fn):
-    """Stream the voice's loudness so the reactor pulses as Jarvis speaks."""
+    """Stream audio loudness so the reactor pulses as Jarvis speaks (or you do)."""
     threading.Thread(target=_level_loop, args=(level_fn,), daemon=True).start()
 
 
