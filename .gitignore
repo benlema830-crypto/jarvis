@@ -1,0 +1,11 @@
+# secrets
+.env
+# environments and downloaded models
+.venv/
+tts-venv/
+models/
+__pycache__/
+# personal data: activity log, voiceprint, memory, transcripts
+data/
+# large audio
+voices/*.m4a
