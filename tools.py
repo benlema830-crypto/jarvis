@@ -71,7 +71,7 @@ def youtube(query: str) -> str:
 
 @beta_tool(eager_input_streaming=True)
 def open_app(name: str) -> str:
-    """Open any installed application by name, e.g. "Roblox Studio", "Spotify", "VS Code",
+    """Open any installed application by name, e.g. "Blender", "Spotify", "VS Code",
     "calculator", "task manager". Close misspellings are matched automatically.
 
     Args:
@@ -103,7 +103,7 @@ def find_files(query: str) -> str:
     Pictures, Videos and Music. Returns up to 10 matches, newest first.
 
     Args:
-        query: Words from the file or folder name, e.g. "rocket frontier" or "resume pdf".
+        query: Words from the file or folder name, e.g. "project atlas" or "resume pdf".
     """
     words = query.lower().split()
     found, deadline = [], time.time() + 4
@@ -276,7 +276,7 @@ def remember(fact: str) -> str:
     people, projects, plans, routines. Write it as a short standalone sentence.
 
     Args:
-        fact: e.g. "The user's Roblox game is called Rocket Frontier."
+        fact: e.g. "The user's game project is called Project Atlas."
     """
     return memory.remember(fact)
 

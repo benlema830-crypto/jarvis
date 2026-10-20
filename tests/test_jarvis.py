@@ -70,14 +70,14 @@ class StopPhraseTest(unittest.TestCase):
 
 
 class AppMatchTest(unittest.TestCase):
-    INDEX = {"roblox studio": "x", "roblox player": "y", "spotify": "z", "visual studio code": "w"}
+    INDEX = {"photo studio": "x", "photo viewer": "y", "spotify": "z", "visual studio code": "w"}
 
     def test_matching(self):
-        self.assertEqual(apps.match("Roblox Studio", self.INDEX), "roblox studio")
+        self.assertEqual(apps.match("Photo Studio", self.INDEX), "photo studio")
         self.assertEqual(apps.match("spotfy", self.INDEX), "spotify")
         self.assertEqual(apps.match("visual studio", self.INDEX), "visual studio code")
         self.assertEqual(apps.match("calculator", self.INDEX), "calculator")
-        self.assertIsNone(apps.match("photoshop", self.INDEX))
+        self.assertIsNone(apps.match("minecraft", self.INDEX))
 
 
 class MemoryTest(unittest.TestCase):
@@ -91,11 +91,11 @@ class MemoryTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_remember_and_forget(self):
-        memory.remember("The user's game is called Rocket Frontier.")
-        memory.remember("The user's game is called Rocket Frontier.")
+        memory.remember("The user's game is called Project Atlas.")
+        memory.remember("The user's game is called Project Atlas.")
         self.assertEqual(len(memory.facts()), 1)
-        self.assertIn("Rocket Frontier", memory.prompt_section())
-        self.assertIn("Forgot", memory.forget("rocket frontier"))
+        self.assertIn("Project Atlas", memory.prompt_section())
+        self.assertIn("Forgot", memory.forget("project atlas"))
         self.assertEqual(memory.facts(), [])
 
 
@@ -186,10 +186,10 @@ class ApprovalsTest(unittest.TestCase):
 class WorkSafeTest(unittest.TestCase):
     def test_outlook_and_teams_titles(self):
         import worksafe
-        for title in ("Inbox - ben@company.com - Outlook", "Mail - Ben Lema - Outlook - Google Chrome",
+        for title in ("Inbox - alex@company.com - Outlook", "Mail - Alex Smith - Outlook - Google Chrome",
                       "Outlook", "Chat | Microsoft Teams", "Microsoft Teams (work or school)"):
             self.assertTrue(worksafe.title_blocked(title), title)
-        for title in ("Weather outlook for the weekend - YouTube", "Roblox Studio", "teams.txt - Notepad"):
+        for title in ("Weather outlook for the weekend - YouTube", "Blender", "teams.txt - Notepad"):
             self.assertFalse(worksafe.title_blocked(title), title)
 
 

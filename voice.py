@@ -92,7 +92,7 @@ def output_devices() -> list[tuple[int, str]]:
 
 
 def find_output(name: str) -> int | None:
-    """Device index for a name (or part of one, e.g. "VG27"). None means the Windows default."""
+    """Device index for a name (or part of one, e.g. "Bose"). None means the Windows default."""
     name = name.strip().lower()
     if not name:
         return None
