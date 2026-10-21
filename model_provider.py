@@ -39,7 +39,9 @@ def catalog():
         codex_models = codex_brain.models()
     except Exception:
         codex_models = []
-    return {'anthropic': [CLAUDE_MODEL], 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models}
+    import ollama_brain
+    return {'anthropic': [CLAUDE_MODEL], 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
+            'ollama': ollama_brain.models()}
 
 
 class Responses:
@@ -159,7 +161,13 @@ class Selection:
         self.persist = persist or (lambda c: preferences.update(conversation_model=c))
 
     def _validate(self, config):
-        if config['provider'] == 'codex':
+        if config['provider'] == 'ollama':
+            import ollama_brain
+            try:
+                ollama_brain.validate(config['model'])
+            except ollama_brain.OllamaError as error:
+                raise ProviderError(str(error)) from None
+        elif config['provider'] == 'codex':
             import codex_brain
             try:
                 codex_brain.validate(config['model'])
@@ -190,9 +198,10 @@ class Selection:
             raise ValueError('Choose a provider and model.')
         if not all(isinstance(v, str) for v in config.values()):
             raise ValueError('Choose a provider and model.')
-        if preferences.read().get('subscription_only') and config['provider'] != 'codex':
-            raise ValueError('API providers are disabled in subscription-only mode. Choose Codex.')
-        if config['provider'] not in catalog() or config['model'] not in catalog()[config['provider']]:
+        if preferences.read().get('subscription_only') and config['provider'] not in ('codex', 'ollama'):
+            raise ValueError('Paid API providers are disabled in subscription-only mode. Choose Codex or an enabled local model.')
+        available = catalog()
+        if config['provider'] not in available or config['model'] not in available[config['provider']]:
             raise ValueError('Choose a listed model; discovery does not guarantee compatibility.')
         with self.lock:
             if not self.ready:

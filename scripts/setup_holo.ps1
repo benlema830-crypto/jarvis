@@ -14,17 +14,24 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 if (Test-Path (Join-Path $target 'server.py')) {
     Write-Host "Updating HOLO in $target ..."
     git -C $target pull --ff-only
+    if ($LASTEXITCODE -ne 0) { throw 'HOLO update failed. Existing files were preserved.' }
 } elseif (Test-Path $target) {
     Write-Host "$target exists but isn't HOLO. Move it aside or set HOLO_DIR in .env to another folder." -ForegroundColor Yellow
     exit 1
 } else {
     Write-Host "Cloning HOLO into $target ..."
     git clone --depth 1 $repo $target
+    if ($LASTEXITCODE -ne 0) { throw 'HOLO download failed. Setup is incomplete.' }
+}
+
+if (-not ((Test-Path (Join-Path $target 'server.py')) -and (Test-Path (Join-Path $target 'holo.html')))) {
+    throw 'HOLO source files are missing. Setup is incomplete.'
 }
 
 # Point HOLO at the JARVIS knowledge vault (the original holo.json is kept as holo.json.bak).
 $python = Join-Path $PSScriptRoot '..\.venv\Scripts\python.exe'
 & $python -c "import sys; sys.path.insert(0, r'$PSScriptRoot\..'); import holo_bridge, pathlib; print('HOLO', holo_bridge.configure(pathlib.Path(r'$target')))"
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure HOLO for the JARVIS vault.' }
 
 Write-Host ''
 Write-Host 'HOLO is ready.' -ForegroundColor Green

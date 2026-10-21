@@ -188,6 +188,9 @@ def serve():
                 except Exception:
                     return {"error": "Could not access the local connection store. "
                                      "No credentials are included in this response."}, 500
+            if route == "/mcp/oauth" and post:
+                import mcp_oauth
+                return mcp_oauth.manage(self.payload(16000)), 200
             if route == "/build-plan" and get:
                 plan = ROOT / "docs" / "plans" / "NIGHT-BUILD-PROMPT.txt"
                 return {"text": plan.read_text(encoding="utf-8") if plan.is_file() else ""}, 200

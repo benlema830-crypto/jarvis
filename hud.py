@@ -207,10 +207,25 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # keep the console for the conversation
 
+    def _reject(self, code):
+        # Windows can reset a socket when closing with an unread POST body,
+        # hiding the intended HTTP error. Drain only small bodies, briefly.
+        previous_timeout = self.connection.gettimeout()
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if self.command == 'POST' and 0 < length <= 16000:
+                self.connection.settimeout(.25)
+                self.rfile.read(length)
+        except (ValueError, OSError):
+            pass
+        finally:
+            self.connection.settimeout(previous_timeout)
+        self.send_error(code)
+
     def _host_ok(self) -> bool:
         # Blocks DNS-rebinding: only pages actually served from this PC may talk to Jarvis
         if self.headers.get("Host") not in ALLOWED_HOSTS:
-            self.send_error(403)
+            self._reject(403)
             return False
         return True
 
@@ -259,7 +274,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         # Requiring JSON forces a CORS preflight, so other websites can't send commands
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
-            self.send_error(400)
+            self._reject(400)
             return
         if self.path == '/models':
             from model_provider import SELECTION

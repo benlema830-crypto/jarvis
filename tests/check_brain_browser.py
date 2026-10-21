@@ -108,9 +108,33 @@ addEventListener('load', async () => {
     $('mcp_name').value = 'Test'; $('mcp_url').value = 'https://example.com/mcp'; $('mcp_token').value = 'secret';
     document.querySelector('#mcpDialog form').requestSubmit();
     await wait(() => !$('mcpDialog').open, 'mcp connect'); assert(!$('mcp_token').value && !$('mcp_url').value, 'mcp secrets cleared');
+    stage('oauth');
+    const openOAuth = () => {
+      [...document.querySelectorAll('#armoryDialog .tile')].find(t => t.textContent.includes('Add your own tool')).click();
+      $('mcp_auth').value = 'oauth'; $('mcp_auth').dispatchEvent(new Event('change'));
+      assert($('mcp_token').hidden, 'bearer token hidden for OAuth');
+      $('mcp_name').value = 'OAuth test'; $('mcp_url').value = 'https://example.com/mcp';
+      document.querySelector('#mcpDialog form').requestSubmit();
+    };
+    openOAuth();
+    await wait(() => !$('mcp_oauth_link').hidden, 'OAuth sign-in link');
+    assert($('mcp_oauth_link').href === 'https://example.com/authorize?state=fake', 'authorization link');
+    assert($('mcp_oauth_link').rel.includes('noreferrer'), 'OAuth link does not send referrer');
+    $('mcpDialog').close();
+    await wait(() => window.posts.some(p => p.path === '/mcp/oauth' && p.body.action === 'cancel'), 'OAuth cancellation on close');
+    assert(!$('mcp_oauth_link').hasAttribute('href'), 'OAuth link cleared');
+    openOAuth();
+    await wait(() => !$('mcpDialog').open, 'OAuth completion');
+    assert($('armoryDialog').textContent.includes('OAuth saved'), 'OAuth result shown');
     $('armoryDialog').close();
 
-    stage('model'); $('modelPill').click(); await wait(() => $('modelDialog').textContent.includes('Active: codex'), 'model status'); $('modelDialog').close();
+    stage('model'); $('modelPill').click(); await wait(() => $('modelDialog').textContent.includes('Active: codex'), 'model status');
+    const provider = $('modelDialog').querySelector('select');
+    assert([...provider.options].find(o => o.value === 'openai').disabled, 'paid API blocked');
+    assert(![...provider.options].find(o => o.value === 'ollama').disabled, 'local provider allowed');
+    provider.value = 'ollama'; provider.dispatchEvent(new Event('change'));
+    assert($('modelDialog').querySelectorAll('select')[1].value === 'local:test', 'local model listed');
+    $('modelDialog').close();
 
     stage('focus'); document.querySelector('[data-mode=focus]').click(); assert(!$('modePanel').hidden, 'focus panel');
     await wait(() => $('modePanel').querySelector('select').options.length === 2, 'focus apps');
@@ -147,6 +171,7 @@ def serve():
     visual = {"state": "off", "mode": None, "session": "", "reason": "Not started.", "error": "", "target": "", "remaining_seconds": 0,
               "samples": 0, "drift_count": 0, "evidence": [], "preview": None, "observation": "Not observed.", "needs_heartbeat": True}
 
+    oauth_starts = [0]
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -170,7 +195,7 @@ def serve():
                 "/voice-health": HEALTH, "/status": {"state": "standby", "info": {"model": "gpt-test"}},
                 "/settings": {"listening_mode": "wake"}, "/visual-modes": visual, "/focus-apps": {"apps": ["chrome.exe", "code.exe"]},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
-                            "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"]}},
+                            "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": []}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
@@ -193,6 +218,11 @@ def serve():
                               drift_count=0, session="s1", needs_heartbeat=body["mode"] != "focus", reason="Observing locally.")
             if self.path == "/mcp":
                 return self.send({"name": body.get("name"), "tools": []})
+            if self.path == "/mcp/oauth":
+                if body.get('action') == 'start':
+                    oauth_starts[0] += 1
+                return self.send({'id': 'fake-flow', 'state': 'complete' if body.get('action') == 'status' and oauth_starts[0] > 1 else 'waiting',
+                                  'authorization_url': 'https://example.com/authorize?state=fake', 'message': 'OAuth saved'})
             if self.path == "/settings":
                 return self.send({"listening_mode": body.get("listening_mode", "wake")})
             return self.send(visual if self.path == "/visual-modes" else {"ok": True})

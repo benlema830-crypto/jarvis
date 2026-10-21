@@ -8,15 +8,27 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 import win32crypt
+from filelock import FileLock
 
 STORE = Path(__file__).resolve().parent / "data" / "mcp_connections.json"
 LOCK = threading.RLock()
 VERSIONS = {"2025-03-26", "2025-06-18", "2025-11-25"}
+
+
+@contextmanager
+def store_lock():
+    # The Brain companion and assistant both use this store. Serialize token
+    # rotation across processes as well as threads to avoid stale refresh tokens.
+    with LOCK:
+        STORE.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(STORE) + '.lock', timeout=60):
+            yield
 
 
 def seal(value):
@@ -59,14 +71,42 @@ def public(item):
     result = {k: item[k] for k in ("id", "name", "host", "enabled", "tools", "checked_at")}
     # Discovery is historical evidence, never a live health check or execution.
     result.update(transport="Streamable HTTP", live_verified=False,
+                  auth_type=item.get('auth_type', 'bearer'),
                   discovery_state=item.get("discovery_state", "discovered"),
                   last_attempt_at=item.get("last_attempt_at", item["checked_at"]))
     return result
 
 
 def connections():
-    with LOCK:
+    with store_lock():
         return [public(item) for item in _load()]
+
+
+def save_connection(name, secret, tools):
+    item = dict(id=uuid.uuid4().hex, name=name, host=urlsplit(secret['url']).netloc,
+                secret=seal(json.dumps(secret)), enabled=True, tools=tools,
+                checked_at=time.time(), discovery_state='discovered', last_attempt_at=time.time(),
+                auth_type='oauth' if 'oauth' in secret else 'bearer')
+    with store_lock():
+        items = _load()
+        if any(json.loads(unseal(x['secret']))['url'] == secret['url'] for x in items):
+            raise ValueError('This endpoint is already saved. Remove it before signing in again.')
+        items.append(item)
+        _save(items)
+    return public(item)
+
+
+def client_settings(item, items):
+    """Called under store_lock, including refresh and atomic encrypted save."""
+    secret = json.loads(unseal(item['secret']))
+    if 'oauth' not in secret:
+        return secret
+    import mcp_oauth
+    token, updated = mcp_oauth.access(secret)
+    if updated != secret:
+        item['secret'] = seal(json.dumps(updated))
+        _save(items)
+    return {'url': secret['url'], 'token': token}
 
 
 class Client:
@@ -111,7 +151,7 @@ class Client:
         try:
             with self.http.post(self.url, json=message, stream=True, timeout=(8, 25), allow_redirects=False) as response:
                 if response.status_code in (401, 403):
-                    raise ValueError("Authentication required or denied. Supply a bearer token; browser OAuth is not supported yet.")
+                    raise ValueError("Authentication required or denied. Supply a bearer token or use OAuth sign-in. Existing OAuth connections may need to be removed and authorized again.")
                 if 300 <= response.status_code < 400:
                     raise ValueError("Endpoint redirected. Paste the server's final MCP URL; credentials are never forwarded through redirects.")
                 if not response.ok:
@@ -192,31 +232,23 @@ def manage(payload):
         token = payload.get("token", "")
         with Client(url, token) as client:
             tools = client.tools()
-        item = dict(id=uuid.uuid4().hex, name=name, host=urlsplit(url).netloc,
-                    secret=seal(json.dumps({"url": url, "token": token})), enabled=True,
-                    tools=tools, checked_at=time.time(), discovery_state="discovered",
-                    last_attempt_at=time.time())
-        with LOCK:
-            items = _load()
-            if any(unseal(x["secret"]) == unseal(item["secret"]) for x in items):
-                raise ValueError("This endpoint is already saved. Use Refresh on its connection.")
-            items.append(item); _save(items)
-        return public(item)
-    with LOCK:
+        return save_connection(name, {'url': url, 'token': token}, tools)
+    with store_lock():
         items = _load()
         item = next((x for x in items if x["id"] == payload.get("id")), None)
         if not item:
             raise ValueError("Connection not found.")
         if action == "remove":
+            secret = json.loads(unseal(item['secret']))
             _save([x for x in items if x["id"] != item["id"]])
-            return {"removed": True}
+            import mcp_oauth
+            return {"removed": True, "message": mcp_oauth.revoke(secret) if 'oauth' in secret else 'Removed locally.'}
         if action == "toggle":
             item["enabled"] = not item["enabled"]
         elif action == "refresh":
             item["last_attempt_at"] = time.time()
             try:
-                secret = json.loads(unseal(item["secret"]))
-                with Client(**secret) as client:
+                with Client(**client_settings(item, items)) as client:
                     discovered = client.tools()
             except Exception:
                 # Keep the old catalog, but persist that it could not be refreshed.
@@ -241,11 +273,12 @@ def catalog(connection_id=""):
 def call(connection_id, tool_name, arguments):
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
-    with LOCK:
-        item = next((x for x in _load() if x["id"] == connection_id and x["enabled"]), None)
+    with store_lock():
+        items = _load()
+        item = next((x for x in items if x["id"] == connection_id and x["enabled"]), None)
         if not item or not any(t["name"] == tool_name for t in item["tools"]):
             raise ValueError("Tool is unavailable or its connection is disabled.")
-        secret = json.loads(unseal(item["secret"]))
+        secret = client_settings(item, items)
     with Client(**secret) as client:
         result = client.rpc("tools/call", {"name": tool_name, "arguments": arguments})
     return json.dumps(result, ensure_ascii=False)[:30000]

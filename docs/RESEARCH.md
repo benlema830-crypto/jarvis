@@ -1,5 +1,11 @@
 # Research notes (2026-10-21)
 
+Workday implementation update: the historical backlog below has advanced. OAuth public-client
+support and an optional local Ollama provider are now implemented, with fake-service regression
+tests. HOLO is installed and its inert gesture probe passes. See [STATUS.md](STATUS.md) for current
+evidence and [SETUP-TOMORROW.md](SETUP-TOMORROW.md) for compatibility limits and activation.
+Real account authorization and hardware acceptance remain pending.
+
 What the reference video does, what comparable open-source assistants do, which free tools are worth
 adding, and how each maps onto this codebase. Reddit could not be read by the research tools (blocked for
 automated access), so findings come from the video transcript, GitHub, and official docs.

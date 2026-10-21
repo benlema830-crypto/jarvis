@@ -907,7 +907,7 @@ def switch_model(model: str) -> str:
     snapshot = model_provider.SELECTION.snapshot()
     provider = snapshot["active"]["provider"]
     options = {p: m for p, m in snapshot["models"].items()
-               if not snapshot["subscription_only"] or p == "codex"}
+               if not snapshot["subscription_only"] or p in ("codex", "ollama")}
     flat = [(p, m) for p, ms in options.items() for m in ms]
     want = model.lower().strip().replace(" ", "-")
     names = [m.lower() for _, m in flat]

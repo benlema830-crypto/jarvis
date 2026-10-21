@@ -75,11 +75,11 @@ class IntegrationTests(unittest.TestCase):
         server = ThreadingHTTPServer(('127.0.0.1', 0), holder['handler'])
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        def call(method='GET', path='/integration-status', headers=None):
+        def call(method='GET', path='/integration-status', headers=None, payload=None):
             connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
             fields = {'Host': '127.0.0.1:7781', 'Content-Type': 'application/json'}
             fields.update(headers or {})
-            connection.request(method, path, headers=fields)
+            connection.request(method, path, body=json.dumps(payload) if payload is not None else None, headers=fields)
             response = connection.getresponse()
             result = response.status, response.getheader('Cache-Control'), response.read()
             connection.close()
@@ -94,6 +94,13 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(call(headers={'Origin': 'https://other.example'})[0], 403)
                 self.assertEqual(call(path='/panels.js')[0], 200)
                 client.assert_not_called()
+            with patch('mcp_oauth.manage', return_value={'state': 'waiting'}) as oauth:
+                self.assertEqual(call('GET', '/mcp/oauth')[0], 404)
+                self.assertEqual(call('POST', '/mcp/oauth', {'Origin': 'https://other.example'}, {'action': 'start'})[0], 403)
+                self.assertEqual(call('POST', '/mcp/oauth', {'Host': 'other.example'}, {'action': 'start'})[0], 403)
+                oauth.assert_not_called()
+                self.assertEqual(call('POST', '/mcp/oauth', payload={'action': 'status', 'id': 'test'})[0], 200)
+                oauth.assert_called_once_with({'action': 'status', 'id': 'test'})
         finally:
             server.shutdown()
             server.server_close()

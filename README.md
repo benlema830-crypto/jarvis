@@ -59,6 +59,8 @@ You can switch modes by voice too: "Jarvis, turn on your eyes", "turn on hand co
 - **PC control without the mouse:** open apps/files/sites, move/snap/minimize/close windows across monitors, per-app volume and mute, media keys, speaker choice, clipboard, personal file list/copy/rename, screenshots.
 - **Agents:** named Codex project sessions ("Have Frontier find the next task"), terminal jobs routed to Codex.
 - **Tools you connect:** any Streamable HTTP MCP server (Zapier for Gmail/Google Docs/Sheets/Calendar/Notion, GitHub, Home Assistant…). Every external call asks for your spoken OK.
+- **OAuth sign-in:** compatible public-client MCP servers can use browser approval, encrypted tokens, automatic refresh, and revocation on removal. Pre-registered client IDs and dynamic registration are supported; service-specific acceptance is still required.
+- **Optional local brain:** Ollama models with local weights and tool support can be selected explicitly. Codex remains the daily default; there is no automatic fallback or paid-provider activation. See the [setup guide](docs/SETUP-TOMORROW.md#6-optional-offline-conversation-model).
 - **Phone:** Telegram text or voice notes; he replies by text, and with a voice note when you sent one. "Send me that on Telegram" works too.
 - **Switch brains** by voice ("switch your brain to …") or the model pill; changes are validated first.
 - **Memory:** facts you tell him (`remember`/`forget`) plus the last 20 exchanges, carried across restarts.
@@ -84,6 +86,7 @@ You can switch modes by voice too: "Jarvis, turn on your eyes", "turn on hand co
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests     # 200+ inert unit tests
 .venv\Scripts\python.exe tests\check_brain_browser.py      # drives the Brain in headless Chrome against a fake backend
+.venv\Scripts\python.exe scripts\verify_project.py         # all inert checks, with a local report
 ```
 
 Source layout and runtime files: [docs/PROJECT-MAP.md](docs/PROJECT-MAP.md). Feature status against the

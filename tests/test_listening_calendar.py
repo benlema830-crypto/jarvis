@@ -127,7 +127,10 @@ class PreferencesTest(unittest.TestCase):
                 self.assertNotIn("PRIVATE", body)
                 self.assertEqual(request("GET", "/intel?refresh=1")[0], 200)
                 intel.assert_called_once_with(refresh=True)
-                self.assertEqual(request("POST", "/settings", {"listening_mode": "wake"}, "text/plain")[0], 400)
+                # Exercise consecutive rejections: unread bodies used to cause
+                # intermittent Windows socket resets instead of HTTP 400.
+                for _ in range(5):
+                    self.assertEqual(request("POST", "/settings", {"listening_mode": "wake"}, "text/plain")[0], 400)
                 self.assertEqual(preferences.listening_mode(), "continuous")
                 self.assertEqual(request("POST", "/calendar", {"action": "disconnect"})[0], 200)
                 self.assertFalse(context.calendar_urls())

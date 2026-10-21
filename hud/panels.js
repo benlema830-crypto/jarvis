@@ -121,7 +121,7 @@
       const actions = make('div', null, 'actions');
       for (const [action, label] of [['refresh', 'Refresh'], ['toggle', c.enabled ? 'Pause' : 'Enable'], ['remove', 'Remove']]) {
         const b = make('button', label); b.type = 'button';
-        b.onclick = async () => { b.disabled = true; armoryNotice.textContent = 'Updating…'; try { await J.api('/mcp', { action, id: c.id }); armoryNotice.textContent = 'Updated.'; } catch (e) { armoryNotice.textContent = e.message; } loadArmory(); };
+        b.onclick = async () => { b.disabled = true; armoryNotice.textContent = 'Updating…'; try { const r = await J.api('/mcp', { action, id: c.id }, { timeout: 90000 }); armoryNotice.textContent = r.message || 'Updated.'; } catch (e) { armoryNotice.textContent = e.message; } loadArmory(); };
         actions.append(b);
       }
       const state = c.discovery_state === 'refresh_failed' ? ['refresh failed', 'bad'] : c.enabled ? ['configured', 'warn'] : ['paused', 'warn'];
@@ -147,6 +147,11 @@
 
   const mcp = dialog('mcpDialog', 'Add a tool', "Paste the server's MCP endpoint (Streamable HTTP). Connecting only discovers tools; JARVIS asks you before each call.", true);
   const form = make('form', null, 'form');
+  const authMethod = make('select'); authMethod.id = 'mcp_auth';
+  for (const [value, text] of [['bearer', 'Bearer token / endpoint URL'], ['oauth', 'Sign in with OAuth']]) {
+    const o = make('option', text); o.value = value; authMethod.append(o);
+  }
+  form.append(make('label', 'Connection method'), authMethod);
   const fields = {};
   for (const [key, label, type, placeholder] of [['name', 'Connection name', 'text', 'My tools'], ['url', 'MCP endpoint URL', 'url', 'https://your-server.example/mcp'], ['token', 'Bearer token (optional)', 'password', 'Leave blank for token-in-URL endpoints']]) {
     const l = make('label', label), i = make('input'); i.type = type; i.placeholder = placeholder; i.autocomplete = 'off'; i.maxLength = key === 'token' ? 8192 : 4096; i.required = key !== 'token';
@@ -154,16 +159,73 @@
   }
   const mcpHelp = make('p', '', 'muted'), connectBtn = make('button', 'Test & connect', 'primary'), mcpResult = make('p', '', 'muted');
   connectBtn.type = 'submit'; mcpResult.setAttribute('role', 'status');
-  form.append(make('p', 'URLs and tokens are encrypted for your Windows account. HTTPS is required except for localhost. OAuth-only servers are not supported yet — use their token/URL option or Zapier.', 'muted'), mcpHelp, connectBtn, mcpResult);
+  const oauthOptions = make('details'), oauthClient = make('input'), oauthScope = make('input'), oauthPort = make('input');
+  oauthOptions.append(make('summary', 'OAuth options (usually leave blank)'));
+  oauthClient.id = 'mcp_client_id'; oauthClient.placeholder = 'Pre-registered public client ID';
+  oauthScope.id = 'mcp_scope'; oauthScope.placeholder = 'Scopes requested by the server';
+  oauthPort.id = 'mcp_callback_port'; oauthPort.type = 'number'; oauthPort.min = '1024'; oauthPort.max = '65535'; oauthPort.placeholder = 'Automatic loopback port';
+  for (const [label, input] of [['Client ID', oauthClient], ['Scopes', oauthScope], ['Callback port', oauthPort]]) {
+    input.autocomplete = 'off'; oauthOptions.append(make('label', label), input);
+  }
+  oauthOptions.append(make('p', 'For a pre-registered client, register http://127.0.0.1:PORT/callback with the service and enter that port here. Otherwise JARVIS tries dynamic public-client registration.', 'muted'));
+  const oauthLink = make('a', 'Continue to service sign-in'); oauthLink.id = 'mcp_oauth_link'; oauthLink.target = '_blank'; oauthLink.rel = 'noopener noreferrer'; oauthLink.hidden = true;
+  const oauthCancel = make('button', 'Cancel sign-in'); oauthCancel.type = 'button'; oauthCancel.hidden = true;
+  let oauthId = '', oauthTimer = null, oauthEpoch = 0;
+  function authFields() {
+    const oauth = authMethod.value === 'oauth';
+    fields.token.hidden = oauth;
+    document.querySelector('label[for="mcp_token"]').hidden = oauth;
+    oauthOptions.hidden = !oauth; connectBtn.textContent = oauth ? 'Prepare sign-in' : 'Test & connect';
+  }
+  authMethod.onchange = authFields;
+  form.append(make('p', 'Credentials are encrypted for your Windows account. OAuth supports public clients with PKCE. Some services require a pre-registered client ID; account approval happens on the service website.', 'muted'), oauthOptions, mcpHelp, connectBtn, oauthLink, oauthCancel, mcpResult);
   mcp.body.append(form);
+  authFields();
+  async function cancelOAuth() {
+    ++oauthEpoch; clearTimeout(oauthTimer);
+    const id = oauthId; oauthId = ''; oauthLink.hidden = oauthCancel.hidden = true; oauthLink.removeAttribute('href');
+    connectBtn.disabled = false; authMethod.disabled = false;
+    if (id) { try { await J.api('/mcp/oauth', { action: 'cancel', id }); } catch {} }
+  }
+  oauthCancel.onclick = async () => { await cancelOAuth(); mcpResult.textContent = 'Sign-in cancelled.'; };
+  async function pollOAuth(epoch) {
+    if (!oauthId || epoch !== oauthEpoch || !mcp.open) return;
+    try {
+      const r = await J.api('/mcp/oauth', { action: 'status', id: oauthId });
+      if (epoch !== oauthEpoch) return;
+      if (r.state === 'complete') { oauthId = ''; mcp.close(); armoryNotice.textContent = r.message; loadArmory(); return; }
+      if (['failed', 'cancelled'].includes(r.state)) { await cancelOAuth(); mcpResult.textContent = r.message; return; }
+      mcpResult.textContent = r.state === 'exchanging' ? 'Finishing sign-in and discovering tools…' : 'Complete sign-in in the service tab. This request expires in five minutes.';
+      oauthTimer = setTimeout(() => pollOAuth(epoch), 1000);
+    } catch (e) { if (epoch === oauthEpoch) { await cancelOAuth(); mcpResult.textContent = e.message; } }
+  }
   function openMcp(name = '', hint = '', help = '') {
     const fixedUrl = /^https:\/\/[^\s…]+$/.test(hint) ? hint : '';  // known servers have one public endpoint
     fields.name.value = name; fields.url.value = fixedUrl; fields.url.placeholder = hint || 'https://your-server.example/mcp'; fields.token.value = '';
+    authMethod.value = 'bearer'; oauthClient.value = oauthScope.value = oauthPort.value = ''; authFields();
     mcpHelp.textContent = help; mcpResult.textContent = ''; mcp.showModal(); (fixedUrl ? fields.token : name ? fields.url : fields.name).focus();
   }
-  mcp.addEventListener('close', () => { fields.token.value = ''; fields.url.value = ''; });
+  function clearMcp() { cancelOAuth(); fields.token.value = ''; fields.url.value = ''; }
+  const nativeMcpClose = mcp.close.bind(mcp);
+  mcp.close = (...args) => { clearMcp(); nativeMcpClose(...args); };
+  mcp.addEventListener('cancel', clearMcp);
+  // Native close events can arrive after a rapid reopen; do not cancel a new flow.
+  mcp.addEventListener('close', () => { if (!mcp.open) clearMcp(); });
   form.onsubmit = async e => {
     e.preventDefault(); connectBtn.disabled = true; mcpResult.textContent = 'Testing connection and discovering tools…';
+    if (authMethod.value === 'oauth') {
+      const epoch = ++oauthEpoch; authMethod.disabled = true;
+      mcpResult.textContent = 'Discovering authorization settings…';
+      try {
+        const r = await J.api('/mcp/oauth', { action: 'start', name: fields.name.value, url: fields.url.value,
+          client_id: oauthClient.value.trim(), scope: oauthScope.value.trim(), callback_port: Number(oauthPort.value || 0) }, { timeout: 120000 });
+        if (epoch !== oauthEpoch || !mcp.open) { await J.api('/mcp/oauth', { action: 'cancel', id: r.id }); return; }
+        oauthId = r.id; oauthLink.href = r.authorization_url; oauthLink.hidden = oauthCancel.hidden = false;
+        mcpResult.textContent = 'Click Continue to service sign-in to review and approve access.';
+        oauthTimer = setTimeout(() => pollOAuth(epoch), 1000);
+      } catch (err) { if (epoch === oauthEpoch) { mcpResult.textContent = err.message; connectBtn.disabled = authMethod.disabled = false; } }
+      return;
+    }
     const payload = { action: 'connect', name: fields.name.value, url: fields.url.value, token: fields.token.value };
     fields.token.value = '';
     try { const r = await J.api('/mcp', payload, { timeout: 60000 }); mcp.close(); armoryNotice.textContent = `Saved ${r.name}: discovered ${r.tools.length} tools.`; loadArmory(); }
@@ -175,7 +237,7 @@
   const model = dialog('modelDialog', "JARVIS's brain", 'Pick the conversation model. Codex uses your ChatGPT sign-in and plan limits — no API key. Changes are validated with a short test and apply after the current turn. You can also say "Jarvis, switch your brain to …".', true);
   const modelStatus = make('p', '', 'muted'), provider = make('select'), choice = make('select'), apply = make('button', 'Validate and apply', 'primary');
   modelStatus.setAttribute('role', 'status'); apply.type = 'button';
-  for (const [id, label] of [['codex', 'Codex / ChatGPT subscription'], ['anthropic', 'Anthropic / Claude API'], ['openai', 'OpenAI API']]) { const o = make('option', label); o.value = id; provider.append(o); }
+  for (const [id, label] of [['codex', 'Codex / ChatGPT subscription'], ['ollama', 'Ollama / local models'], ['anthropic', 'Anthropic / Claude API'], ['openai', 'OpenAI API']]) { const o = make('option', label); o.value = id; provider.append(o); }
   const modelForm = make('div', null, 'form'); modelForm.append(make('label', 'Provider'), provider, make('label', 'Model'), choice, apply, modelStatus);
   model.body.append(modelForm);
   let modelData = null, modelBusy = false;
@@ -187,10 +249,10 @@
   }
   function renderModel(value, first) {
     modelData = value;
-    for (const o of provider.options) o.disabled = !!value.subscription_only && o.value !== 'codex';
+    for (const o of provider.options) o.disabled = !!value.subscription_only && !['codex', 'ollama'].includes(o.value);
     if (first) { provider.value = value.active.provider; choices(); choice.value = value.active.model; } else choices();
     const pending = value.pending ? ` Pending: ${value.pending.model}${value.validating ? ' (validating…)' : ' (after this turn)'}.` : '';
-    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (value.subscription_only ? ' Subscription-only mode: API providers are off.' : '');
+    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (value.subscription_only ? ' Paid API providers are off.' : '') + (provider.value === 'ollama' ? ' Local models require Ollama and JARVIS_OLLAMA_ENABLED=1. Models must be installed and support tools. No automatic fallback.' : '');
     el('modelName').textContent = value.active.model;
   }
   async function refreshModel(first) {

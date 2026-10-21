@@ -197,12 +197,12 @@ class Brain:
         self.cancel = threading.Event()
         self._speech_lock = threading.Lock()
         saved = preferences.read().get('conversation_model')
-        if preferences.read().get('subscription_only') and (not saved or saved.get('provider') != 'codex'):
-            raise RuntimeError('Subscription-only mode needs a saved Codex model. API fallback is disabled.')
+        if preferences.read().get('subscription_only') and (not isinstance(saved, dict) or saved.get('provider') not in ('codex', 'ollama')):
+            raise RuntimeError('Subscription-only mode needs a saved Codex or local model. Paid API fallback is disabled.')
         if saved:
             if (isinstance(saved, dict) and set(saved) == {'provider', 'model'} and
-                saved.get('provider') in ('openai', 'anthropic', 'codex') and isinstance(saved.get('model'), str) and
-                re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}', saved['model'])):
+                saved.get('provider') in ('openai', 'anthropic', 'codex', 'ollama') and isinstance(saved.get('model'), str) and
+                re.fullmatch(r'[A-Za-z0-9_./:-]{1,100}', saved['model'])):
                 # This file is written only after successful validation. Reuse the
                 # preference without a paid startup probe or provider fallback.
                 self.selection.active = dict(saved)
@@ -270,6 +270,8 @@ class Brain:
             self.selection.end()
 
     def _run(self, speak):
+        if self.config['provider'] == 'ollama':
+            return self._run_ollama(speak)
         if self.config['provider'] == 'codex':
             return self._run_codex(speak)
         if self.config['provider'] == 'openai':
@@ -340,6 +342,27 @@ class Brain:
                 results.append(run_tool(b))
             self.messages.append({"role": "user", "content": results})
         raise RuntimeError("too many tool rounds")
+
+    def _run_ollama(self, speak):
+        import ollama_brain
+        buf = SentenceBuffer()
+        def delta(text):
+            for sentence in buf.feed(text):
+                speak(sentence)
+        voice_health.api_state('requesting')
+        try:
+            answer = ollama_brain.ask(self.config['model'], self.system, self.messages,
+                                      TOOL_DEFS, run_tool, delta, self.cancel)
+        except InterruptedError:
+            raise Interrupted()
+        except ollama_brain.OllamaError as error:
+            raise model_provider.ProviderError(str(error)) from None
+        if self.cancel.is_set():
+            raise Interrupted()
+        voice_health.api_state('responded')
+        if rest := buf.flush():
+            speak(rest)
+        self.messages.append({'role': 'assistant', 'content': answer})
 
     def _run_codex(self, speak):
         import codex_brain
