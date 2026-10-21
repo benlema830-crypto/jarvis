@@ -53,5 +53,24 @@ calendar heads-ups, speech never reads links.
 - Optional Telegram pairing and one harmless approved MCP call, plus a declined call.
 
 Automated checks: `python -m unittest discover -s tests` and `python tests/check_brain_browser.py`.
-Latest unit result: 232 tests passed. Brain UI and HOLO probe pass in the repeatable verification report at `data/reports/project-verification.json`.
+Latest unit result: 243 tests passed. Brain UI and HOLO probe pass in the repeatable verification report at `data/reports/project-verification.json`.
 These checks use inert fixtures and do not establish live camera, headset or external-account behavior.
+
+## Project continuity additions (2026-10-21)
+
+- Project memory and handoffs: read-only recall for Jarvis/Rocket Frontier, current Git evidence,
+  attributed status/validation files, agent reports, dated persistent handoffs, unresolved items,
+  relevant files and next actions. Available through voice tools and More > Project tools.
+- Local semantic vault retrieval: installed `embeddinggemma:300m`, incremental SQLite vectors,
+  bounded vault-only chunks, invalidation on edit/delete/model/root changes, and explicit keyword
+  fallback. Real synthetic inference ranked a persistence note first for "player progress between
+  visits" (0.5129 vs unrelated cooking note 0.1680). The actual vault indexed seven chunks in 8.34 s.
+  This verifies local retrieval, not spoken delivery or subjective search quality across a large vault.
+- Named routines: editable Development mode and Wrap up templates; exact-step previews and one-use
+  approvals, expiry/change invalidation, stop-on-error and cancellation between steps. UI supports
+  choosing/reordering steps; voice runs ask for approval. Tests execute injected effects only.
+  No real routine, Focus session, project agent or account operation was started during this build.
+- Conversation remains on Codex. Local embeddings are separate from the optional conversation model.
+- Quiet activation passed: live project recall, routine list/preview (cancelled without running),
+  semantic search and new UI asset all responded. Assistant returned ready/listening with its listener
+  alive, mic active, no speech pending/output error, and Codex `gpt-6.1-sol` still selected.

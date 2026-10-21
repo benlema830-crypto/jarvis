@@ -79,6 +79,7 @@ def snapshot():
 
 
 ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "text/javascript"),
+          "/productivity.js": ("productivity.js", "text/javascript"),
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
@@ -135,6 +136,33 @@ def serve():
             get, post = self.command == "GET", self.command == "POST"
             if route == "/brain-data" and get:
                 return snapshot(), 200
+            if route == "/project-memory" and post:
+                import project_memory
+                payload = self.payload(26000)
+                if payload.get('action', 'status') == 'status':
+                    return project_memory.status(payload.get('project', 'Jarvis')), 200
+                if payload.get('action') == 'handoff':
+                    return project_memory.handoff(payload.get('project', 'Jarvis'),
+                        **{k: payload.get(k, '') for k in ('summary', 'unresolved', 'next_action', 'files')}), 200
+                raise ValueError('Unknown project memory action.')
+            if route == "/knowledge-search" and post:
+                import semantic_search
+                return semantic_search.search(self.payload(4000).get('query', '')), 200
+            if route == "/routines" and (get or post):
+                import routines
+                if get:
+                    return {'routines': routines.catalog()}, 200
+                payload = self.payload(16000)
+                action = payload.get('action')
+                if action == 'preview':
+                    return routines.preview(payload.get('name', '')), 200
+                if action == 'save':
+                    return routines.save(payload.get('name', ''), payload.get('definition')), 200
+                if action == 'run':
+                    return routines.run(payload.get('token', '')), 200
+                if action == 'cancel':
+                    return routines.cancel(), 200
+                raise ValueError('Unknown routine action.')
             if route == "/visual-modes" and (get or post):
                 if get:
                     return visuals.snapshot(), 200
@@ -217,6 +245,8 @@ def serve():
             except (ValueError, UnicodeError) as error:
                 return self.reply({"error": str(error)}, 400)
             if route == "/stop" and self.command == "POST":
+                import routines
+                routines.cancel()
                 visuals.stop()  # Brain's Stop also ends local observation, even with the assistant offline
             if self.path not in PROXY.get(self.command, set()):
                 return self.send_error(404)

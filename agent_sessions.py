@@ -401,7 +401,8 @@ class SessionManager:
                 except OSError:
                     pass
             with self.lock:
-                entry.update(status="completed" if ok else "interrupted" if self.cancelled.is_set() else "failed", report=report, progress=report)
+                entry.update(status="completed" if ok else "interrupted" if self.cancelled.is_set() else "failed",
+                             report=report, progress=report, reported_at=time.time())
                 self.active, self.connection, self.turn_id, self.claude_worker = None, None, None, None
                 try:
                     self._save()

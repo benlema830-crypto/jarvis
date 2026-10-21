@@ -33,7 +33,8 @@ models, credentials and the registered Obsidian vault retain their real paths.
 | Conversation providers | codex_brain.py (Codex + live web search), ollama_brain.py (optional local models), model_provider.py, model_credentials.py |
 | Tools the AI can call | tools.py (registry), plus tasks.py, documents.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
 | Voice and hearing | voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
-| Knowledge vault | knowledge.py, knowledge_events.py |
+| Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
+| Project continuity and routines | project_memory.py, routines.py, hud/productivity.js |
 | Brain page | hud/brain.html, hud/brain.css, hud/brain.js (graph, inspector, reactor, chat), hud/panels.js (dialogs), hud/modes.js (Eyes/Watch/Holo/Focus) |
 | Brain server | brain.py, eyes.py, visual_modes.py, integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
@@ -53,3 +54,8 @@ Documents JARVIS writes go to `Documents\JARVIS Documents`; to-dos live in the v
 The isolated Ollama runtime, weights, log, and synthetic inference report live in
 `data/local-brain/`. OAuth credentials share the encrypted MCP store in `data/`;
 pending authorization codes and PKCE verifiers are never saved to disk.
+
+Project handoffs are dated JSON entries in `data/handoffs/`. Named routine definitions live
+in `data/routines.json`; approval tokens stay in memory and expire. The local semantic index is
+`data/vault-vectors.sqlite3`, rebuilt incrementally from the selected vault with the installed
+`embeddinggemma:300m` model. These files contain personal context and are not committed.

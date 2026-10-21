@@ -152,6 +152,23 @@ addEventListener('load', async () => {
     [...$('moreMenu').querySelectorAll('button')].find(b => b.textContent === 'Voice health').click();
     assert($('healthDialog').open && $('healthDialog').textContent.includes('Mock mic'), 'health'); $('healthDialog').close();
 
+    stage('project tools'); $('projectToolsBtn').click();
+    await wait(() => $('routineSelect').options.length, 'routines loaded');
+    const clickTool = label => [...$('projectToolsDialog').querySelectorAll('button')].find(b => b.textContent === label).click();
+    assert(!window.posts.some(p => p.path === '/routines' && p.body.action === 'run'), 'opening ran routine');
+    clickTool('Review saved steps');
+    await wait(() => $('projectToolResult').textContent.includes('Review only'), 'review displayed');
+    assert(!window.posts.some(p => p.path === '/routines' && p.body.action === 'run'), 'preview ran routine');
+    clickTool('Approve and run once');
+    await wait(() => $('projectToolResult').textContent.includes('completed'), 'routine result');
+    assert(window.posts.filter(p => p.path === '/routines' && p.body.action === 'run').length === 1, 'run once');
+    clickTool('Where did we leave off?');
+    await wait(() => $('projectToolResult').textContent.includes('fixture evidence'), 'project evidence');
+    const query = $('projectToolsDialog').querySelector('[aria-label="Search vault by meaning"]'); query.value = 'player progress';
+    clickTool('Search notes');
+    await wait(() => $('projectToolResult').textContent.includes('Persistence.md'), 'semantic sources');
+    assert($('projectToolResult').querySelector('a[href^="obsidian:"]'), 'semantic source link');
+    $('projectToolsDialog').close();
     stage('dimension'); $('dimension').click(); assert($('dimension').textContent === '2D', '2D');
     document.documentElement.dataset.check = 'passed';
   } catch (e) { document.documentElement.dataset.check = e.message; }
@@ -188,7 +205,7 @@ def serve():
             path = self.path.split("?")[0]
             if path == "/":
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + CHECK, 1), "text/html")
-            if path in ("/brain.js", "/panels.js", "/modes.js", "/brain.css"):
+            if path in ("/brain.js", "/panels.js", "/modes.js", "/productivity.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": NODES, "links": LINKS, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},
@@ -200,6 +217,7 @@ def serve():
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": []}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
                 "/workspace": {"folders": []}, "/build-plan": {"text": ""}, "/eyes": {"on": False, "age": None},
+                "/routines": {"routines": {"Wrap up": {"project":"Jarvis", "steps":[{"action":"tasks"}]}}},
             }
             if path == "/integration-status":
                 from unittest.mock import patch
@@ -213,6 +231,14 @@ def serve():
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            if self.path == '/routines':
+                return self.send({'name':'Wrap up', 'project':'Jarvis', 'descriptions':['Review only'],
+                    'notice':'Review only', 'token':'fixture', 'status':'completed'} if body.get('action') == 'preview'
+                    else {'status':'completed'})
+            if self.path == '/project-memory':
+                return self.send({'project':'Jarvis', 'checked_at':'2026-10-21', 'verified':[{'source':'fixture','text':'fixture evidence'}]})
+            if self.path == '/knowledge-search':
+                return self.send({'mode':'semantic', 'results':[{'path':'Persistence.md', 'excerpt':'Saved state', 'uri':'obsidian://open?path=Persistence.md'}]})
             if self.path == "/visual-modes" and body.get("action") == "start":
                 visual.update(state="running", mode=body["mode"], target=body.get("target", ""), remaining_seconds=1800,
                               drift_count=0, session="s1", needs_heartbeat=body["mode"] != "focus", reason="Observing locally.")

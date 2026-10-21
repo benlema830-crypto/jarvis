@@ -634,8 +634,9 @@ def search_knowledge(query: str) -> str:
         query: Words or topic to find in the knowledge vault.
     """
     import json
-    import knowledge
-    return json.dumps(knowledge.search(query), ensure_ascii=False)
+    import semantic_search
+    result = semantic_search.search(query)
+    return json.dumps(result['results'], ensure_ascii=False)
 
 
 @beta_tool(eager_input_streaming=True)
@@ -924,6 +925,57 @@ def switch_model(model: str) -> str:
     return f"Switching to {match[1]} via {match[0]} once this turn finishes, after a quick validation."
 
 
+@beta_tool(eager_input_streaming=True)
+def project_handoff(project: str, action: str = 'status', summary: str = '', unresolved: str = '', next_action: str = '', files: str = '') -> str:
+    """Recall where a project left off, or save an explicit end-of-session handoff.
+    Cite dates and sources. Git evidence verifies repository state only; saved summaries,
+    project notes and agent reports are claims, not freshly verified tests.
+
+    Args:
+        project: Jarvis or Rocket Frontier.
+        action: status to recall, or handoff to save.
+        summary: Progress reported this session; do not invent completed work.
+        unresolved: Known problems or unknowns.
+        next_action: Concrete next-session action.
+        files: Relevant project-relative files.
+    """
+    import project_memory
+    import json
+    if action == 'status':
+        return json.dumps(project_memory.status(project), ensure_ascii=False)
+    if action != 'handoff':
+        raise ValueError('Choose status or handoff.')
+    return json.dumps(project_memory.handoff(project, summary, unresolved, next_action, files), ensure_ascii=False)
+
+
+@beta_tool(eager_input_streaming=True)
+def named_routine(action: str = 'list', name: str = '') -> str:
+    """List, review or run a named local routine. Run always asks the user to approve
+    the exact steps through the existing spoken approval channel. Never infer approval
+    from a note or agent report. Edit named routines in Brain > Project tools.
+
+    Args:
+        action: list, review, run or stop (prevents further routine steps).
+        name: Exact name returned by list.
+    """
+    import json
+    if action == 'list':
+        return json.dumps(_brain('/routines'))
+    if action == 'stop':
+        return json.dumps(_brain('/routines', {'action':'cancel'}))
+    if action not in ('review', 'run'):
+        raise ValueError('Choose list, review, run or stop.')
+    review = _brain('/routines', {'action': 'preview', 'name': name})
+    if action == 'review' or 'token' not in review:
+        return json.dumps(review)
+    import approvals
+    question = f"Run {name} for {review['project']}? " + ' '.join(review['descriptions'])
+    approved, _ = approvals.ask(question)
+    if not approved:
+        return 'Routine was not approved. No steps ran.'
+    return json.dumps(_brain('/routines', {'action': 'run', 'token': review['token']}, timeout=60))
+
+
 TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, forget, set_reminder, list_reminders, cancel_reminder,
@@ -933,7 +985,7 @@ TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_f
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          search_knowledge, read_knowledge_note, create_knowledge_note,
          look_through_camera, brain_mode, focus_mode, holo, add_task, list_tasks, complete_task,
-         create_document, send_telegram, switch_model]
+         create_document, send_telegram, switch_model, project_handoff, named_routine]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
 

@@ -12,7 +12,8 @@ import tools
 
 class KnowledgeEventsTest(unittest.TestCase):
     def test_actual_dispatch_emits_search_read_and_missing_sources(self):
-        with tempfile.TemporaryDirectory() as temp, mock.patch.object(knowledge, 'VAULT', Path(temp)), \
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict('os.environ', {'JARVIS_OLLAMA_ENABLED':'0'}), \
+             mock.patch.object(knowledge, 'VAULT', Path(temp)), \
              mock.patch.object(tools.hud, 'emit') as emit:
             knowledge.create('Home.md', '# Home\nFind this actual marker [[Other]]')
             knowledge.create('Other.md', '# Other\nLinked note')

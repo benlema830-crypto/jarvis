@@ -143,6 +143,55 @@ Runs unit tests, the Brain browser fixture, and the optional installed-HOLO gest
 The report is saved to `data/reports/project-verification.json`. Camera, microphone,
 external-account calls, and writes to the real HOLO event file are not part of these checks.
 
+## 8. Project memory, semantic search, and named routines
+
+Brain **More > Project tools** contains all three. Voice examples:
+
+- "Where did we leave Rocket Frontier?"
+- "Save a Jarvis handoff: completed …, unresolved …, next action …"
+- "Search my notes for keeping player progress between visits."
+- "Review Development mode" or "Run Wrap up."
+
+Project recall reads the selected project's Git state, maintained handoff/validation files,
+and saved agent reports. Git evidence verifies repository state only; reports and notes are
+attributed claims, not new test runs. Rocket Frontier's `fresh/` handoff and validation take
+precedence over its archived game. Saved handoffs live in `data/handoffs/`, with dates,
+sources, previous-entry IDs and separate progress/problems/next-action/file fields.
+Project folders are never modified by saving a handoff. Old agent reports without timestamps
+remain undated; newly completed reports include `reported_at`.
+
+Semantic search uses local `embeddinggemma:300m` on the isolated Ollama server at
+`127.0.0.1:11435`. The model is installed on this PC. To restore it after reinstalling Ollama:
+
+```powershell
+$env:OLLAMA_HOST='127.0.0.1:11435'
+.\data\local-brain\runtime\ollama.exe pull embeddinggemma:300m
+```
+
+Start the local server with `start-local-model.bat` first. Search uses only validated Markdown
+notes in the configured Obsidian vault; it does not index arbitrary project files or accounts.
+An incremental SQLite index lives in `data/vault-vectors.sqlite3`. Edits, deletions, vault-root
+changes and model-digest changes invalidate cached chunks. Embeddings unload after each batch
+to reduce idle GPU use. Cold requests can take tens of seconds. Scores below 0.30 are excluded;
+scores indicate similarity, not truth. Search falls back to labeled keyword results if the
+local model is unavailable or disabled (`JARVIS_OLLAMA_ENABLED=0`). No remote embedding fallback.
+
+The supplied **Development mode** opens Rocket Frontier's folder, reads its status and the
+vault task list, then starts 30 minutes of Focus on `RobloxStudioBeta.exe`. It does not launch
+Studio. **Wrap up** reads status/tasks and saves an evidence snapshot and checklist. Vault tasks
+are labeled as all-project tasks. Edit the project, steps, app and duration before saving.
+Change the name to create another routine. Saving and reviewing never execute steps.
+
+Every run requires a fresh review and explicit approval. Review tokens expire after five minutes,
+are consumed once, and are revoked when routines change. Voice runs use the existing spoken
+approval channel. Execution stops on the first failed step; completed effects are shown and not
+automatically undone. Stop routine prevents subsequent steps; the main Stop control also ends
+Focus. Only the listed local actions are supported, with no arbitrary commands, publication,
+messages or automatic agent work. Nothing runs on a schedule or at startup.
+
+Embedding API references: [Ollama embeddings](https://github.com/ollama/ollama/blob/main/docs/capabilities/embeddings.mdx)
+and [EmbeddingGemma](https://ollama.com/library/embeddinggemma).
+
 ## Restarting
 
 - Python changes: say **"Jarvis, power down"**, then open the **JARVIS Brain** shortcut.
