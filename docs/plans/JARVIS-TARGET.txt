@@ -1,0 +1,78 @@
+JARVIS: REFERENCE TARGET AND ACCEPTANCE CHECKLIST
+Owner direction, 2026-10-21: replicate the video's appearance and behavior as
+closely as practical. Do not substitute a new dashboard concept.
+
+REFERENCE
+https://www.youtube.com/watch?v=mitzci4FsOg
+Transcript: https://prepublish.ai/youtube-transcript/mitzci4FsOg
+Visual reference: Documents/Jarvis Agent/06 References/Video screenshots.
+Latest 1:30 frame: OneDrive/Pictures/Screenshots/Screenshot 2026-10-21 005748.png.
+Only 1:30 is confirmed against the owner's timestamp; do not invent other times.
+
+PURPOSE
+Latest owner decision: Codex through ChatGPT subscription for conversation and
+Qwen local cloned speech. No direct API credit purchases or ElevenLabs usage.
+Preserve subscription-only mode. The original video remains the UI/feature target.
+
+JARVIS is the personal assistant: it listens, speaks, retrieves knowledge and
+performs tasks. The second brain is the owner's Obsidian vault. The graph is its
+interactive visualization. Tools and activity may be separate optional layers;
+they must not replace the user's actual knowledge with a synthetic tool inventory.
+
+REFERENCE FEATURE INVENTORY (paraphrased from the demo)
+Color-coded knowledge graph; search and related files; spoken and typed requests;
+wake word; interruptible speech; online research; camera Eyes; screen Watch;
+timed Focus with distraction count; ring/cube/face appearances; tool armory and
+custom connections; Telegram text/voice; document creation using existing context;
+model switching. Holo gesture interaction is described as unfinished in the video.
+
+VISUAL CONTRACT (owner screenshots)
+Dark, graph-dominant canvas. Compact inspector/search/hubs on the left; compact
+filters and JARVIS reactor on the right; conversation and controls at the bottom.
+Keep the galaxy spacious. No large marketing headline, oversized navigation,
+generic dashboard cards over the graph, or invented counts. Match screenshot
+proportions first, then tune atmosphere. Use the owner's actual knowledge and
+configured model name. Do not copy the creator's private data or fake his node count.
+Put settings, diagnostics and build management behind compact controls.
+
+BASELINE / ACCEPTANCE (as of this document; verify before changing a status)
+1. Visual fidelity: PARTIAL. Graph exists; recent hero/panel styling drifted.
+   Pass: comparable screenshot at the same viewport, with reference proportions.
+2. Second brain: PARTIAL. Obsidian read/search/create and real links exist.
+   Pass: a real note can be found, focused, read, opened, and cited in an answer.
+   Related-note navigation must follow real links; do not infer fabricated edges.
+3. Voice conversation: IMPLEMENTED, LIVE RELIABILITY UNVERIFIED. Current job owns
+   health diagnostics and lifecycle fixes. Pass requires owner wake/speak/interrupt
+   test on the actual headset. Preserve voice identity and existing thresholds.
+4. Knowledge-to-graph actions: PARTIAL. Search/inspection exist. Verify whether a
+   spoken retrieval actually focuses matching nodes; implement if absent.
+5. Research/tools: EXISTING CORE, DEMO PARITY UNVERIFIED. Verify source rendering
+   and command-to-result behavior with mocks, then a user-run live scenario.
+6. Eyes/Watch/Focus: AUDIT REQUIRED. On-demand screenshot tool exists; the full
+   reference modes are not verified. Pass: explicit start/stop, real capture state,
+   bounded capture, no capture after stop, useful errors, focus timer/drift evidence.
+7. Reactor appearances: PARTIAL. Ring/cube exist; face and speech animation need
+   audit. Decorative animation must never claim actual audio measurement.
+8. Armory: PARTIAL. HTTP MCP discovery/storage exists; OAuth/legacy compatibility
+   incomplete. Pass: supported transports explicit, usable errors, actual tool
+   results. A URL alone cannot guarantee every server's compatibility.
+9. Telegram/cloud documents: NOT VERIFIED/ACCOUNT SETUP REQUIRED. Build adapters
+   only where feasible; never label connected until a real connection succeeds.
+10. Model switching: OWNER REQUESTED OPENAI, UI provider/model selector. Prioritize
+    docs/plans/OPENAI-SWITCH.txt. Current Claude remains active until real OpenAI
+    validation/activation. A video model name does not establish an API model ID.
+11. Holo: EXPERIMENTAL BACKLOG. Do not spend tonight chasing an undemonstrated mode.
+
+CHANGE RULE
+Every implementation task names checklist IDs and records changed files, checks,
+screenshots where relevant, limitations and next action. Use: NOT STARTED,
+PARTIAL, IMPLEMENTED / NEEDS LIVE TEST, VERIFIED, or BLOCKED (with reason).
+Never equate a button, mock test or installed package with end-to-end verification.
+Do not redesign unrelated areas, reorganize personal files again, or expand vault
+indexing beyond the chosen vault. Windows remains the platform; no Linux install.
+
+MORNING WALKTHROUGH
+Open JARVIS once. Compare layout to reference. Wake it by name; ask about a real
+vault note; inspect the highlighted source; interrupt speech; ask a sourced research
+question. Explicitly enable and stop each implemented visual mode. Inspect armory
+connection states and any account setup checklist. Record failures against IDs.

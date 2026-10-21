@@ -11,3 +11,7 @@ data/
 voices/*.m4a
 # personal or copyrighted audio
 voices/
+# voice samples (your cloned voice)
+*.wav
+# Machine-specific voice identity and output settings
+voice-profile.json

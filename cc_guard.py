@@ -4,7 +4,7 @@ Claude Code runs this before every tool call. It reads the call as JSON on stdin
   - lets ordinary work run (Claude Code is in bypass-permissions mode),
   - blocks risky actions - deleting, installing/uninstalling software, changing system
     settings - until the user has approved that kind of action out loud,
-  - always blocks Outlook and Teams data, which are off-limits.
+  - always blocks Teams data, and Outlook's too unless JARVIS_ALLOW_OUTLOOK=1 (see worksafe.py).
 
 Approvals live in data/cc_approvals.json, written by terminal.py when the user says yes.
 """
@@ -20,6 +20,8 @@ APPROVALS = os.path.join(HERE, "data", "cc_approvals.json")
 PENDING = os.path.join(HERE, "data", "cc_pending.json")
 
 RISKY = {
+    "destructive git": re.compile(r"\bgit\s+(?:reset\s+--hard|push\b[^\n]*(?:--force|-f\b)|checkout\s+--\s|restore\s+(?:--worktree\s+)?\.)", re.I),
+    "publish or external message": re.compile(r"\b(?:git\s+push|npm\s+publish|gh\s+(?:release\s+create|pr\s+merge|issue\s+comment|pr\s+comment)|Send-MailMessage)\b", re.I),
     "delete": re.compile(
         r"\b(Remove-Item|rm|rmdir|rd|del|erase|Clear-RecycleBin|Clear-Content)\b|\bri\s|"
         r"\[(System\.)?IO\.(File|Directory)\]::Delete|\.Delete\(|shred|git\s+clean", re.I),
@@ -38,21 +40,30 @@ RISKY = {
         r"Enable-WindowsOptionalFeature|Disable-WindowsOptionalFeature|dism)\b|\bsfc\s+/|\bformat(\.com)?\s+[a-z]:|\bsc(\.exe)?\s+(config|delete|create|stop)\b",
         re.I),
 }
-# Outlook and Teams apps and data: never, approval or not
-OFF_LIMITS = re.compile(
-    r"\\Microsoft\\(Outlook|Teams|Olk)\b|\\Packages\\(MSTeams|Microsoft\.OutlookForWindows)|"
-    r"\.(pst|ost|nst)\b|\b(outlook|olk|ms-teams|msteams|teams)\.exe\b|Microsoft\.Office\.Interop\.Outlook|"
-    r"Outlook\.Application", re.I)
+# Teams apps and data: never, approval or not. Outlook too, unless JARVIS_ALLOW_OUTLOOK=1.
+TEAMS_OFF_LIMITS = re.compile(
+    r"\\Microsoft\\Teams\b|\\Packages\\MSTeams|\b(ms-teams|msteams|teams)\.exe\b", re.I)
+OUTLOOK_OFF_LIMITS = re.compile(
+    r"\\Microsoft\\(Outlook|Olk)\b|\\Packages\\Microsoft\.OutlookForWindows|"
+    r"\.(pst|ost|nst)\b|\b(outlook|olk)\.exe\b|Microsoft\.Office\.Interop\.Outlook|Outlook\.Application", re.I)
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 FILE_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep"}
 
 
+def outlook_allowed() -> bool:
+    # Same switch as worksafe.outlook_allowed(); not imported to keep this hook light. Jarvis's
+    # .env reaches it through the environment terminal.py passes to Claude Code.
+    return os.getenv("JARVIS_ALLOW_OUTLOOK", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def decide(tool: str, tool_input: dict) -> tuple[str, str]:
     """('allow' | 'approval' | 'blocked', detail)."""
-    text = json.dumps(tool_input) if tool in SHELL_TOOLS | FILE_TOOLS else ""
-    if text and OFF_LIMITS.search(text.replace("\\\\", "\\")):
-        return "blocked", "Outlook and Microsoft Teams (their apps and data) are off-limits."
+    text = json.dumps(tool_input).replace("\\\\", "\\") if tool in SHELL_TOOLS | FILE_TOOLS else ""
+    if text and TEAMS_OFF_LIMITS.search(text):
+        return "blocked", "Microsoft Teams (its app and data) is off-limits."
+    if text and not outlook_allowed() and OUTLOOK_OFF_LIMITS.search(text):
+        return "blocked", "Outlook (its app and data) is off-limits."
     if tool in SHELL_TOOLS:
         command = str(tool_input.get("command", ""))
         for category, pattern in RISKY.items():

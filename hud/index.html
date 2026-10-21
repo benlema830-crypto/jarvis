@@ -170,6 +170,18 @@
     padding: 6px 12px; cursor: pointer; transition: all .2s;
   }
   .chip:hover { color: var(--accent); border-color: var(--line-strong); background: var(--accent-soft); }
+  .listen-control { margin: 0 0 12px; text-align: center; }
+  .listen-control button { font: 600 14px var(--body); color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); padding: 8px 14px; cursor: pointer; }
+  .listen-control button[aria-checked="true"] { border-color: var(--amber); color: var(--amber); }
+  .listen-control small { display: block; color: var(--muted); margin-top: 5px; max-width: 560px; }
+  .calendar-settings { margin-top: 12px; font-size: 14px; }
+  .calendar-settings summary { color: var(--accent); cursor: pointer; }
+  .calendar-settings p { line-height: 1.4; color: var(--muted); }
+  .calendar-settings a { color: var(--accent); }
+  .calendar-settings label { display: block; margin: 8px 0; }
+  .calendar-settings input { display: block; width: 100%; margin-top: 5px; padding: 8px; color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); }
+  .calendar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  button:disabled { opacity: .5; cursor: wait; }
   form.cmd { width: 100%; max-width: 720px; display: flex; position: relative; }
   form.cmd input {
     flex: 1; background: rgba(4, 16, 26, .85); border: 1px solid var(--line-strong);
@@ -296,9 +308,14 @@
       <div class="reactor-wrap" id="reactorWrap"><canvas id="reactor"></canvas></div>
       <div class="state-label" id="stateLabel">INITIALIZING</div>
       <div class="caption" id="caption"></div>
+      <div class="listen-control">
+        <button type="button" role="switch" aria-checked="false" aria-label="Listen without a wake word" id="listenToggle" disabled>Wake word required</button>
+        <small id="listenHelp" aria-live="polite">Loading listening preference...</small>
+      </div>
       <div class="chips">
         <button class="chip" data-cmd="Give me a status report">Status report</button>
-        <button class="chip" data-cmd="What's on my schedule today?">Schedule</button>
+        <button class="chip" data-cmd="What's on my schedule today?">Read schedule</button>
+        <button class="chip" type="button" id="calendarSetup">Connect calendar</button>
         <button class="chip" data-cmd="How's the weather looking?">Weather</button>
         <button class="chip" data-cmd="What was I working on earlier?">Recent work</button>
         <button class="chip" data-cmd="Take a look at my screen and tell me what you see">Look at screen</button>
@@ -315,12 +332,34 @@
     <!-- right -->
     <section class="col">
       <div class="panel">
+        <h2>Agent sessions</h2>
+        <div id="agentSessions" style="max-height:220px;overflow:auto;white-space:pre-wrap;font-size:12px" aria-live="polite">No sessions open.</div>
+        <button class="chip" data-cmd="Open an agent session named Frontier in Rocket Frontier">Open Frontier</button>
+        <button class="chip" data-cmd="Open a Claude agent session named Frontier Claude in Rocket Frontier">Open Claude</button>
+        <button class="chip" data-cmd="Stop the running project agent session">Stop agent</button>
+      </div>
+      <div class="panel">
         <h2>Environment</h2>
         <div id="wx"><div class="empty">Acquiring atmospheric data...</div></div>
       </div>
       <div class="panel">
         <h2>Schedule</h2>
         <div id="sched"><div class="empty">Syncing calendar...</div></div>
+        <details class="calendar-settings" id="calendarSettings">
+          <summary>Connect calendar</summary>
+          <p>In Outlook Settings, choose Calendar → Shared calendars → Publish a calendar. Select the details Jarvis may read, publish, then copy the <strong>ICS link</strong>.</p>
+          <p>Anyone with the published link can read those details. Keep it private. Jarvis saves it only on this computer. Reads work with Outlook closed; published updates may take time to appear.</p>
+          <a href="https://outlook.live.com/calendar/0/options/calendar/SharedCalendars" target="_blank" rel="noopener noreferrer">Open Outlook calendar settings</a>
+          <form id="calendarForm" autocomplete="off">
+            <label>Calendar ICS link<input type="password" id="calendarUrl" placeholder="Paste the ICS link here" maxlength="12000" autocomplete="off" spellcheck="false"></label>
+            <div class="calendar-actions">
+              <button type="submit" class="chip" id="calendarConnect">Connect</button>
+              <button type="button" class="chip" id="calendarDisconnect" hidden>Disconnect</button>
+              <button type="button" class="chip" id="calendarRefresh">Refresh</button>
+            </div>
+          </form>
+          <p id="calendarFeedback" role="status"></p>
+        </details>
       </div>
       <div class="panel grow">
         <h2>Comms <span class="tag" id="msgCount">0</span></h2>
@@ -332,6 +371,66 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+let listeningMode = "wake", settingsBusy = false;
+
+function listeningHint() {
+  return listeningMode === "continuous"
+    ? "Speak naturally when Jarvis is listening; no name needed. Ctrl+Alt+J interrupts."
+    : 'Say "Jarvis" or "Hey Jarvis", or press Ctrl+Alt+J.';
+}
+
+function showSettings(s) {
+  listeningMode = s.listening_mode;
+  const continuous = listeningMode === "continuous";
+  $("listenToggle").setAttribute("aria-checked", String(continuous));
+  $("listenToggle").textContent = continuous ? "Continuous listening ON" : "Wake word required";
+  $("listenToggle").disabled = settingsBusy || !s.microphone_enabled;
+  $("listenHelp").textContent = !s.microphone_enabled ? "Microphone is off in text mode."
+    : continuous ? "No wake word while Jarvis is ready. Voice lock stays on if enrolled. Accepted speech goes to the AI service."
+    : 'Say "Jarvis" or "Hey Jarvis" first. Short follow-ups still work without repeating his name.';
+  if (!document.body.classList.contains("agent")) $("hint").textContent = listeningHint();
+  $("calendarDisconnect").hidden = !s.calendar_connected;
+  $("calendarSettings").querySelector("summary").textContent = s.calendar_connected ? "Calendar connected · settings" : "Connect calendar";
+}
+
+async function settingsRequest(path, payload) {
+  const response = await fetch(path, payload ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)} : {});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Request failed.");
+  return data;
+}
+
+$("listenToggle").addEventListener("click", async () => {
+  settingsBusy = true; $("listenToggle").disabled = true;
+  try {
+    const s = await settingsRequest("/settings", {listening_mode: listeningMode === "wake" ? "continuous" : "wake"});
+    settingsBusy = false; showSettings(s);
+  } catch (e) {
+    settingsBusy = false; $("listenToggle").disabled = false;
+    $("listenHelp").textContent = "Mode was not changed. " + e.message;
+  }
+});
+
+async function calendarAction(action) {
+  $("calendarConnect").disabled = $("calendarDisconnect").disabled = true;
+  $("calendarFeedback").textContent = action === "connect" ? "Checking calendar..." : "Disconnecting...";
+  try {
+    const payload = action === "connect" ? {action, url: $("calendarUrl").value.trim()} : {action};
+    const s = await settingsRequest("/calendar", payload);
+    $("calendarUrl").value = ""; showSettings(s);
+    $("calendarFeedback").textContent = s.calendar_connected ? "Connected. The startup briefing will read this calendar with Outlook closed." : "Disconnected from Jarvis. You can also unpublish the link in Outlook.";
+    pollIntel();
+  } catch (e) { $("calendarFeedback").textContent = e.message; }
+  finally { $("calendarConnect").disabled = $("calendarDisconnect").disabled = false; }
+}
+$("calendarForm").addEventListener("submit", (event) => { event.preventDefault(); calendarAction("connect"); });
+$("calendarDisconnect").addEventListener("click", () => calendarAction("disconnect"));
+$("calendarRefresh").addEventListener("click", () => pollIntel(true));
+$("calendarSetup").addEventListener("click", () => {
+  $("calendarSettings").open = true;
+  $("calendarUrl").scrollIntoView({behavior: "smooth", block: "center"});
+  $("calendarUrl").focus({preventScroll: true});
+});
 
 // ---------- state ----------
 const STATES = {
@@ -568,8 +667,17 @@ function typeNext() {
 }
 
 // ---------- event stream ----------
+function showSessions(data) {
+  $("agentSessions").textContent = (data.sessions || []).map(s =>
+    `${s.name} (${s.provider || "codex"}) · ${s.status}\n${s.progress || "Ready for a task."}`
+  ).join("\n\n") || "No sessions open.";
+}
+fetch("/sessions").then(r => r.json()).then(showSessions).catch(() => {});
+
 function handle(ev, replay = false) {
   switch (ev.type) {
+    case "settings": showSettings(ev); break;
+    case "sessions": showSessions(ev); break;
     case "state":
       setState(ev.state);
       if (ev.state === "thinking") jarvisBubble = null;
@@ -613,6 +721,8 @@ function connect() {
       $("comms").innerHTML = ""; jarvisBubble = null; msgCount = 0;
       ev.history.forEach((h) => handle(h, true));
       setState(ev.state);
+      settingsRequest("/settings").then(showSettings).catch(() => {});
+      fetch("/sessions").then(r => r.json()).then(showSessions).catch(() => {});
       addLog(`link established`, Date.now() / 1000);
     } else handle(ev);
   };
@@ -631,11 +741,11 @@ async function send(text) {
   }
 }
 $("cmd").addEventListener("submit", (e) => { e.preventDefault(); send($("cmdInput").value); $("cmdInput").value = ""; });
-document.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => send(b.dataset.cmd)));
+document.querySelectorAll(".chip[data-cmd]").forEach((b) => b.addEventListener("click", () => send(b.dataset.cmd)));
 $("stopBtn").addEventListener("click", () =>
   fetch("/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {}));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("stopBtn").click(); });
-document.addEventListener("keydown", (e) => { if (e.key === "/" && document.activeElement !== $("cmdInput")) { e.preventDefault(); $("cmdInput").focus(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "/" && !document.activeElement.matches("input, textarea, select")) { e.preventDefault(); $("cmdInput").focus(); } });
 
 // ---------- diagnostics ----------
 const cpuHist = [];
@@ -708,13 +818,14 @@ function renderSchedule(text) {
     return `<li><span class="when">${esc(when.replace(/^Today /, ""))}</span><span>${esc(title)}${loc ? `<div class="loc">${esc(loc)}</div>` : ""}</span></li>`;
   }).join("") + "</ul>";
 }
-async function pollIntel() {
+async function pollIntel(refresh = false) {
   try {
-    const d = await (await fetch("/intel")).json();
+    const d = await (await fetch(refresh ? "/intel?refresh=1" : "/intel")).json();
     renderWeather(d.weather); renderSchedule(d.schedule);
   } catch { /* retry on next poll */ }
 }
 setTimeout(pollIntel, 600); setInterval(pollIntel, 5 * 60 * 1000);
+settingsRequest("/settings").then(showSettings).catch(() => { $("listenHelp").textContent = "Listening controls unavailable. Restart Jarvis to load the update."; });
 </script>
 </body>
 </html>

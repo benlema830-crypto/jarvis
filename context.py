@@ -3,11 +3,15 @@
 import datetime
 import functools
 import os
+from urllib.parse import urlsplit
 
 import icalendar
 import psutil
 import recurring_ical_events
 import requests
+
+import worksafe
+import preferences
 
 
 def _fmt_time(dt: datetime.datetime) -> str:
@@ -25,16 +29,53 @@ def _day_label(d: datetime.date) -> str:
 
 def calendar_urls() -> list[str]:
     """ICS links from Outlook, Google, iCloud, etc. (GOOGLE_CALENDAR_ICS_URL is the old name)."""
+    saved = preferences.read()
+    if "calendar_urls" in saved:
+        return saved["calendar_urls"]
     raw = ",".join(os.getenv(k, "") for k in ("CALENDAR_ICS_URLS", "GOOGLE_CALENDAR_ICS_URL"))
     urls = [u.strip() for u in raw.split(",") if u.strip()]
     return ["https://" + u[len("webcal://"):] if u.lower().startswith("webcal://") else u for u in urls]
 
 
-def upcoming_events(days: int = 1) -> str:
-    """Events from now until the end of the day `days` days from today."""
+def fetch_calendar(url):
+    """Read a bounded calendar feed. Never include its private URL in errors."""
+    try:
+        with requests.get(url, timeout=(5, 10), stream=True) as response:
+            response.raise_for_status()
+            content = bytearray()
+            for chunk in response.iter_content(65536):
+                content.extend(chunk)
+                if len(content) > 5 * 1024 * 1024:
+                    raise ValueError("Calendar is larger than the 5 MB limit.")
+        if not bytes(content).lstrip().startswith(b"BEGIN:VCALENDAR"):
+            raise ValueError("That is not an ICS calendar feed. Copy the ICS link, not the HTML link.")
+        return icalendar.Calendar.from_ical(bytes(content))
+    except requests.RequestException:
+        raise ValueError("Could not reach the calendar feed. Check the ICS link and internet connection.") from None
+
+
+def connect_calendar(url):
+    url = url.strip()
+    if url.lower().startswith("webcal://"):
+        url = "https://" + url[len("webcal://"):]
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        raise ValueError("Paste a complete HTTPS calendar subscription link.")
+    fetch_calendar(url)  # Keep the previous working connection if validation fails.
+    preferences.update(calendar_urls=[url])
+
+
+def upcoming_events(days: int = 1, open_outlook: bool = False) -> str:
+    """Events from now until the end of the day `days` days from today.
+
+    Background reads never automate Outlook. An explicit open_outlook=True retains
+    the existing window-based reader for callers that deliberately request it."""
     urls = calendar_urls()
+    if not urls and open_outlook and worksafe.outlook_allowed():
+        import outlook_calendar  # only loaded when used: it sets up UI Automation
+        return outlook_calendar.upcoming(days, launch=open_outlook)
     if not urls:
-        return "Calendar not connected."
+        return "Calendar not connected. Use Connect calendar in the Schedule panel to add your Outlook ICS link."
 
     now = datetime.datetime.now().astimezone()
     end = datetime.datetime.combine(
@@ -43,9 +84,7 @@ def upcoming_events(days: int = 1) -> str:
 
     events = []
     for url in urls:
-        resp = requests.get(url, timeout=8)
-        resp.raise_for_status()
-        cal = icalendar.Calendar.from_ical(resp.content)
+        cal = fetch_calendar(url)
         for ev in recurring_ical_events.of(cal).between(now, end):
             start = ev.get("DTSTART").dt
             title = str(ev.get("SUMMARY", "Untitled event"))
@@ -62,6 +101,18 @@ def upcoming_events(days: int = 1) -> str:
         return "Nothing scheduled."
     events.sort(key=lambda e: e[0])
     return "\n".join(line for _, line in events[:15])
+
+
+def starting_soon(minutes: int = 15) -> list[tuple[datetime.datetime, str]]:
+    """Timed events (not all-day) starting within the next `minutes`, as (start, title)."""
+    now = datetime.datetime.now().astimezone()
+    soon = []
+    for url in calendar_urls():
+        for ev in recurring_ical_events.of(fetch_calendar(url)).between(now, now + datetime.timedelta(minutes=minutes)):
+            start = ev.get("DTSTART").dt
+            if isinstance(start, datetime.datetime) and start.astimezone() >= now:
+                soon.append((start.astimezone(), str(ev.get("SUMMARY", "Untitled event"))))
+    return sorted(soon)
 
 
 @functools.lru_cache(maxsize=1)

@@ -13,10 +13,12 @@ audio goes through one continuously open stream so there are no gaps or clicks.
 """
 
 import collections
+import json
 import os
 import queue
 import re
 import threading
+import time
 
 import numpy as np
 import requests
@@ -24,9 +26,31 @@ import sounddevice as sd
 from kokoro_onnx import Kokoro
 
 import hud
+import voice_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(HERE, "models")
+PROFILE_PATH = os.path.join(HERE, "voice-profile.json")
+if os.path.isfile(PROFILE_PATH):
+    with open(PROFILE_PATH, encoding="utf-8") as _profile_file:
+        VOICE_PROFILE = json.load(_profile_file)
+else:
+    VOICE_PROFILE = {}
+KOKORO_ONLY = VOICE_PROFILE.get("kokoro_only", False)
+
+
+def custom_voice_style():
+    """Read a complete snapshot; release the archive so fitting can keep saving."""
+    path = VOICE_PROFILE.get("voice_file")
+    if not path:
+        return None
+    with np.load(path, allow_pickle=False) as archive:
+        style = archive[VOICE_PROFILE.get("voice_name", "assistant_custom")].copy()
+    if style.shape != (510, 1, 256) or not np.isfinite(style).all():
+        raise ValueError(f"Invalid custom Kokoro voice: {path}")
+    return style.astype(np.float32)
+
+
 RATE = 24000  # Kokoro's rate, and the PCM format we ask ElevenLabs for
 # Sound cues Jarvis may write. Expressive ElevenLabs models perform them; other engines would read them out.
 SOUND_TAGS = re.compile(r"\s*\[(chuckle|laugh|sigh|clear throat|cough|gasp|groan|sniff)\]\s*", re.I)
@@ -37,6 +61,10 @@ PAUSE_SECONDS = 0.18   # breath between chunks
 FADE_SECONDS = 0.008   # tiny fade in/out so chunk edges never click
 
 _REPLACEMENTS = [
+    # Links belong in the interface, never in speech: keep a markdown link's label only.
+    (re.compile(r"\[([^\]\n]+)\]\((?:https?://|www\.)[^)\s]*\)"), r"\1"),
+    (re.compile(r"\(\s*(?:https?://|www\.)[^)\s]*\s*\)"), ""),
+    (re.compile(r"(?:https?://|www\.)\S+"), ""),
     (re.compile(r"[*#`_]+"), ""),
     (re.compile(r"°\s*F\b"), " degrees Fahrenheit"),
     (re.compile(r"°\s*C\b"), " degrees Celsius"),
@@ -55,12 +83,11 @@ def clean_for_speech(text: str) -> str:
 class SentenceBuffer:
     """Collects streamed text and releases it in sentence-sized pieces.
 
-    Very short sentences ("Good evening, sir.") are held until the next one
-    arrives, so they're spoken together instead of as a clipped fragment.
+    Release short complete sentences promptly, including quick confirmations.
     """
 
     _END = re.compile(r"[.!?…]+[\"')\]]*\s|\n+")
-    MIN_CHARS = 40
+    MIN_CHARS = 1
 
     def __init__(self):
         self.buf = ""
@@ -111,6 +138,7 @@ class _Player:
         self._lock = threading.Lock()
         self._stream = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._fill,
                                        device=device)
+        self.device_name = sd.query_devices(self._stream.device, kind="output")["name"]
         self._stream.start()
 
     def play(self, samples: np.ndarray, on_done=None):
@@ -136,6 +164,7 @@ class _Player:
     def _fill(self, outdata, frames, time_info, status):
         out = outdata[:, 0]
         filled = 0
+        callbacks = []
         with self._lock:
             while filled < frames:
                 if self._cur is None:
@@ -149,10 +178,14 @@ class _Player:
                 self._pos += n
                 if self._pos >= len(self._cur):
                     if self._on_done:
-                        self._on_done()
+                        callbacks.append(self._on_done)
                     self._cur = None
         out[filled:] = 0
         self.level = float(np.sqrt(np.mean(out * out))) if filled else 0.0
+        # Never call into Voice while holding the player lock: stop() takes
+        # these locks in the opposite order and could otherwise deadlock.
+        for callback in callbacks:
+            callback()
 
 
 class ElevenLabsError(Exception):
@@ -218,9 +251,14 @@ class Voice:
             os.path.join(MODELS_DIR, "kokoro-v1.0.onnx"),
             os.path.join(MODELS_DIR, "voices-v1.0.bin"),
         )
-        self.voice = voice
+        custom_style = custom_voice_style()
+        self.voice = custom_style if custom_style is not None else voice
         self.speed = speed
         self.eleven = None
+        self.local = None
+        if engine == 'qwen':
+            import qwen_voice
+            self.local = qwen_voice.create()
         self._eleven_failures = 0
         if engine == "elevenlabs":
             self._start_elevenlabs()
@@ -230,7 +268,7 @@ class Voice:
         self._lock = threading.Lock()
         self._idle = threading.Event()
         self._idle.set()
-        self.kokoro.create("Ready.", voice=voice, speed=speed, lang="en-gb")  # warm-up
+        self.kokoro.create("Ready.", voice=self.voice, speed=speed, lang="en-gb")  # warm-up
         self._fade = np.linspace(0, 1, int(RATE * FADE_SECONDS), dtype=np.float32)
         self._pause = np.zeros(int(RATE * PAUSE_SECONDS), dtype=np.float32)
         self._chime = _chime()
@@ -242,10 +280,29 @@ class Voice:
         self._player = _Player(RATE, device)
         self._player_lock = threading.Lock()  # held while swapping devices, so no chunk lands on a closed player
         threading.Thread(target=self._synth_worker, daemon=True).start()
+        if self.local is not None:
+            threading.Thread(target=self._warm_local, daemon=True).start()
+
+    def _warm_local(self):
+        local = self.local
+        hud.info['voice_warming'] = True
+        started = time.monotonic()
+        try:
+            local.render('Ready.')  # Load the clone before the first spoken request; do not play it.
+            print(f'(Qwen warmed in {time.monotonic() - started:.1f}s)', flush=True)
+        except Exception:
+            hud.emit('error', text='Qwen warm-up failed; the next reply will retry loading it.')
+        finally:
+            hud.info['voice_warming'] = False
 
     def _play(self, samples: np.ndarray, on_done=None):
         with self._player_lock:
             self._player.play(samples, on_done)
+
+    def _play_current(self, samples, gen, on_done=None):
+        with self._lock:
+            if gen == self._gen:
+                self._play(samples, on_done)
 
     def set_output(self, name: str) -> str:
         """Play through another device ("" = Windows default). Returns its name."""
@@ -270,9 +327,13 @@ class Voice:
 
     @property
     def engine(self) -> str:
+        if self.local is not None:
+            return 'qwen'
         return "elevenlabs" if self.eleven else "kokoro"
 
     def _start_elevenlabs(self) -> bool:
+        if KOKORO_ONLY:
+            return False
         key = os.getenv("ELEVENLABS_API_KEY", "").strip()
         if not key:
             return False
@@ -287,6 +348,18 @@ class Voice:
 
     def switch_engine(self, engine: str) -> str:
         """Switch between 'elevenlabs' and 'kokoro' while running. Returns the engine now in use."""
+        if engine not in ('qwen', 'kokoro', 'elevenlabs'):
+            raise ValueError('Unknown voice engine.')
+        local = getattr(self, 'local', None)
+        if engine == 'qwen':
+            if local is None:
+                import qwen_voice
+                self.local = qwen_voice.create()
+            self.eleven = None
+            return self.engine
+        if local is not None:
+            local.cancel()
+        self.local = None
         if engine == "kokoro":
             self.eleven = None
         elif not self.eleven:
@@ -308,6 +381,13 @@ class Voice:
 
     def _render(self, text: str):
         """Yield audio pieces for `text`, from ElevenLabs if possible, else Kokoro."""
+        if self.local is not None:
+            started = time.monotonic()
+            samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())
+            print(f'(Qwen generated {len(samples) / RATE:.1f}s audio in {time.monotonic() - started:.1f}s)', flush=True)
+            if len(samples):
+                yield samples
+            return
         el = self.eleven
         if el:
             started = False
@@ -344,6 +424,12 @@ class Voice:
             self._idle.clear()
             self._text_q.put((self._gen, text))
 
+    def synthesize(self, text: str) -> np.ndarray:
+        """Render text to one float32 array at RATE without playing it (e.g. a Telegram voice note)."""
+        text = clean_for_speech(text)
+        pieces = list(self._render(text)) if text else []
+        return np.concatenate(pieces).astype(np.float32) if pieces else np.zeros(0, np.float32)
+
     def chime(self):
         """Play the "listening" chime right away."""
         self._play(self._chime)
@@ -360,10 +446,21 @@ class Voice:
             self._player.clear()
             self._pending = 0
             self._idle.set()
+        # Playback is stopped immediately. Let in-flight local synthesis finish
+        # and discard it via _gen, retaining the costly Qwen model for the next turn.
+        # Explicit engine switches and process shutdown still unload the worker.
 
     def wait(self):
         """Block until everything queued has finished playing."""
-        self._idle.wait()
+        while not self._idle.wait(0.1):
+            # A stopped/failed PortAudio stream can never deliver its completion
+            # callback. This is a device-state check, not a speech time limit.
+            with self._player_lock:
+                active = voice_health.stream_active(self._player._stream)
+            if not active:
+                voice_health.output_failed()
+                self.stop()
+                return
 
     @property
     def level(self) -> float:
@@ -380,18 +477,10 @@ class Voice:
 
     def _synth_worker(self):
         while True:
-            # Take the next sentence plus anything else already waiting, so the
-            # whole run is spoken in one natural breath.
+            # Process one sentence at a time. Draining the queue here could
+            # swallow a new turn arriving just after stop() changed generation.
             gen, text = self._text_q.get()
             count = 1
-            while len(text) < MAX_CHUNK_CHARS:
-                try:
-                    g, more = self._text_q.get_nowait()
-                except queue.Empty:
-                    break
-                if g == gen:
-                    text += " " + more
-                    count += 1
             if gen != self._gen:
                 continue
             try:
@@ -401,15 +490,16 @@ class Voice:
                     if gen != self._gen:
                         break
                     if held is not None:
-                        self._play(self._shape(held, first, False))
+                        self._play_current(self._shape(held, first, False), gen)
                         first = False
                     held = piece
                 if gen != self._gen:
                     continue
                 if held is not None:
-                    self._play(self._shape(held, first, True))
-                self._play(self._pause, lambda c=count, g=gen: self._done(c, g))
+                    self._play_current(self._shape(held, first, True), gen)
+                self._play_current(self._pause, gen, lambda c=count, g=gen: self._done(c, g))
             except Exception as e:  # never let one bad chunk kill the voice
+                voice_health.output_failed()
                 print(f"(voice error: {e})", flush=True)
                 self._done(count, gen)
 

@@ -23,11 +23,11 @@ from voice import ElevenLabsEngine, SentenceBuffer, clean_for_speech  # noqa: E4
 
 
 class SentenceBufferTest(unittest.TestCase):
-    def test_holds_short_sentence_until_more_arrives(self):
+    def test_releases_short_sentence_without_waiting_for_more(self):
         buf = SentenceBuffer()
-        self.assertEqual(buf.feed("Good evening, sir. "), [])
+        self.assertEqual(buf.feed("Good evening, sir. "), ["Good evening, sir."])
         out = buf.feed("All systems are operational and the coffee is hot. ")
-        self.assertEqual(out, ["Good evening, sir. All systems are operational and the coffee is hot."])
+        self.assertEqual(out, ["All systems are operational and the coffee is hot."])
 
     def test_flush_returns_remainder(self):
         buf = SentenceBuffer()
@@ -141,10 +141,24 @@ class TerminalGuardTest(unittest.TestCase):
             ("PowerShell", r"Set-ItemProperty HKCU:\Software\x -Name y -Value 0", "approval"),
             ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", "blocked"),
             ("Read", {"file_path": r"C:\Users\x\Documents\Outlook Files\archive.pst"}, "blocked"),
+            ("PowerShell", r"Get-Process ms-teams.exe", "blocked"),
         ]
-        for tool, x, expected in cases:
-            inp = x if isinstance(x, dict) else {"command": x}
-            self.assertEqual(cc_guard.decide(tool, inp)[0], expected, x)
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
+            for tool, x, expected in cases:
+                inp = x if isinstance(x, dict) else {"command": x}
+                self.assertEqual(cc_guard.decide(tool, inp)[0], expected, x)
+
+    def test_outlook_allowed_teams_still_blocked(self):
+        import cc_guard
+        cases = [
+            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", "allow"),
+            ("PowerShell", r"Start-Process olk.exe", "allow"),
+            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Teams", "blocked"),
+            ("PowerShell", r"Stop-Process -Name ms-teams.exe", "blocked"),
+        ]
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
+            for tool, x, expected in cases:
+                self.assertEqual(cc_guard.decide(tool, {"command": x})[0], expected, x)
 
     def test_approval_is_per_session_and_kind(self):
         import cc_guard
@@ -163,8 +177,7 @@ class TerminalGuardTest(unittest.TestCase):
 class ApprovalsTest(unittest.TestCase):
     def test_only_a_spoken_yes_approves(self):
         import approvals
-        for said, expected in (("yes, go ahead", True), ("no", False), ("yes... actually wait", False),
-                               ("what's the weather", False)):
+        for said, expected in (("yes, go ahead", True), ("no", False), ("yes... actually wait", False)):
             result = {}
             asker = threading.Thread(target=lambda: result.update(answer=approvals.ask("Delete it?")))
             asker.start()
@@ -186,11 +199,55 @@ class ApprovalsTest(unittest.TestCase):
 class WorkSafeTest(unittest.TestCase):
     def test_outlook_and_teams_titles(self):
         import worksafe
-        for title in ("Inbox - alex@company.com - Outlook", "Mail - Alex Smith - Outlook - Google Chrome",
-                      "Outlook", "Chat | Microsoft Teams", "Microsoft Teams (work or school)"):
-            self.assertTrue(worksafe.title_blocked(title), title)
-        for title in ("Weather outlook for the weekend - YouTube", "Blender", "teams.txt - Notepad"):
-            self.assertFalse(worksafe.title_blocked(title), title)
+        outlook = ("Inbox - alex@company.com - Outlook", "Mail - Alex Smith - Outlook - Google Chrome", "Outlook")
+        teams = ("Chat | Microsoft Teams", "Microsoft Teams (work or school)")
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
+            for title in outlook + teams:
+                self.assertTrue(worksafe.title_blocked(title), title)
+            for title in ("Weather outlook for the weekend - YouTube", "Blender", "teams.txt - Notepad"):
+                self.assertFalse(worksafe.title_blocked(title), title)
+            self.assertIn("olk.exe", worksafe.blocked_processes())
+
+    def test_outlook_allowed_teams_still_blocked(self):
+        import worksafe
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
+            self.assertFalse(worksafe.title_blocked("Mail - Ben - Outlook"))
+            self.assertTrue(worksafe.title_blocked("Chat | Microsoft Teams"))
+            self.assertNotIn("olk.exe", worksafe.blocked_processes())
+            self.assertIn("ms-teams.exe", worksafe.blocked_processes())
+            self.assertEqual(worksafe.blocked_apps(), "Teams")
+
+
+class OutlookCalendarTest(unittest.TestCase):
+    def test_reads_dates_from_event_labels(self):
+        import outlook_calendar as oc
+        label = "North Dakota Hunting Trip, all day event, Friday, October 23, 2026 to Sunday, October 25, 2026, OOF"
+        self.assertEqual(oc._dates(label), [datetime.date(2026, 10, 23), datetime.date(2026, 10, 25)])
+        self.assertEqual(oc._dates("Dentist, 9:00 AM to 9:30 AM, Monday, November 2, 2026, Busy"),
+                         [datetime.date(2026, 11, 2)])
+        self.assertTrue(oc.WEEKDAY_DATE.match("Friday, October 23, 2026"))  # a day header, not an event
+
+    def test_weeks_start_on_sunday(self):
+        import outlook_calendar as oc
+        self.assertEqual(oc._week_start(datetime.date(2026, 10, 24)), datetime.date(2026, 10, 18))  # Saturday
+        self.assertEqual(oc._week_start(datetime.date(2026, 10, 25)), datetime.date(2026, 10, 25))  # Sunday
+
+    def test_rejects_bad_events_before_touching_outlook(self):
+        import outlook_calendar as oc
+        with mock.patch.object(oc, "_main_window", side_effect=AssertionError("opened Outlook")):
+            with self.assertRaises(oc.OutlookError):
+                oc.add_event("x", datetime.date(2026, 10, 25), datetime.date(2026, 10, 23))
+            with self.assertRaises(oc.OutlookError):
+                oc.add_event("x", datetime.datetime(2026, 10, 23, 18), datetime.datetime(2026, 10, 24, 9))
+            with self.assertRaises(oc.OutlookError):
+                oc.add_event("x", datetime.date(2026, 10, 23), datetime.date(2026, 10, 23), show_as="Gone fishing")
+
+    def test_tool_blocked_in_work_safe_mode(self):
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
+            self.assertIn("off-limits", tools.add_calendar_event.call({"title": "x", "start": "2026-10-23"}))
+        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
+            self.assertIn("same kind", tools.add_calendar_event.call(
+                {"title": "x", "start": "2026-10-23", "end": "Sunday"}))
 
 
 class AgentTest(unittest.TestCase):

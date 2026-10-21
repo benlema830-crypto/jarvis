@@ -20,6 +20,8 @@ import datetime
 import json
 import os
 import queue
+import re
+import shutil
 import subprocess
 import threading
 import time
@@ -28,16 +30,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import psutil
 
 import context
+import preferences
+import voice_health
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "hud", "index.html")
-PORT = int(os.getenv("JARVIS_HUD_PORT", "7777"))
+from instance_config import HUD_PORT
+PORT = HUD_PORT
 URL = f"http://127.0.0.1:{PORT}"
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 INTEL_TTL = 600
 TRANSCRIPTS = os.path.join(HERE, "data", "transcripts")
 TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
-LIVE_ONLY = {"level", "usage"}  # not replayed to pages that connect later
+LIVE_ONLY = {"level", "usage", "settings", "ui"}  # not replayed to pages that connect later
 
 # Read by jarvis.py: typed commands (str) and background events (dict)
 commands: queue.Queue = queue.Queue()
@@ -124,10 +129,10 @@ _intel_cache = (0.0, None)
 _intel_lock = threading.Lock()
 
 
-def intel() -> dict:
+def intel(refresh=False) -> dict:
     global _intel_cache
     with _intel_lock:
-        if _intel_cache[1] is None or time.time() - _intel_cache[0] > INTEL_TTL:
+        if refresh or _intel_cache[1] is None or time.time() - _intel_cache[0] > INTEL_TTL:
             result = {}
             for key, fn in (("weather", context.weather), ("schedule", lambda: context.upcoming_events(1))):
                 try:
@@ -136,6 +141,64 @@ def intel() -> dict:
                     result[key] = f"Unavailable ({type(e).__name__})."
             _intel_cache = (time.time(), result)
         return _intel_cache[1]
+
+
+def settings():
+    return {"listening_mode": preferences.listening_mode(),
+            "microphone_enabled": info.get("ears") != "keyboard",
+            "calendar_connected": bool(context.calendar_urls())}
+
+
+def update_settings(payload):
+    if set(payload) != {"listening_mode"}:
+        raise ValueError("Supply a listening mode.")
+    preferences.set_listening_mode(payload["listening_mode"])
+    result = settings()
+    emit("settings", **result)
+    return result
+
+
+_APP = re.compile(r"[\w .()-]{1,84}", re.ASCII)
+
+
+def notification(payload):
+    """Fixed prompts for local system events. The Brain supplies numbers and app names, never prose."""
+    event, count = payload.get("event"), payload.get("count")
+    if event == "eyes_check":
+        return {"label": "Eyes check", "quiet": True, "prompt":
+                "[EYES CHECK] Coach mode: use look_through_camera once. Only if the owner is clearly slouching, "
+                "on their phone, or looks exhausted, say one short, kind, witty sentence about it. "
+                "Otherwise reply with exactly (quiet) and nothing else."}
+    app, target = str(payload.get("app", "")), str(payload.get("target", ""))
+    if type(count) is not int or not 0 <= count <= 999 or not _APP.fullmatch(target) or (app and not _APP.fullmatch(app)):
+        raise ValueError("Invalid notification.")
+    if event == "focus_drift":
+        left = payload.get("minutes_left")
+        left = left if type(left) is int and 0 <= left <= 120 else 0
+        return {"label": f"Focus drift {count}", "prompt":
+                f"[FOCUS DRIFT] During the owner's focus session on {target}, they switched to {app} "
+                f"(drift {count}, about {left} minutes left). Call it out in one short, dry, witty sentence "
+                "and nudge them back. No tools."}
+    if event == "focus_done":
+        return {"label": "Focus complete", "chime": True, "prompt":
+                f"[FOCUS COMPLETE] The owner's focus session on {target} has finished with {count} drift(s). "
+                "Tell them in one sentence, with a little wit."}
+    raise ValueError("Unknown notification.")
+
+
+def update_calendar(payload):
+    global _intel_cache
+    if payload.get("action") == "disconnect":
+        preferences.update(calendar_urls=[])
+    elif payload.get("action") == "connect" and isinstance(payload.get("url"), str):
+        context.connect_calendar(payload["url"])
+    else:
+        raise ValueError("Choose connect or disconnect.")
+    with _intel_lock:
+        _intel_cache = (0.0, None)
+    result = settings()
+    emit("settings", **result)
+    return result
 
 
 # ---------- Web server ----------
@@ -176,8 +239,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._stream_events()
         elif self.path == "/status":
             self._json(status())
-        elif self.path == "/intel":
-            self._json(intel())
+        elif self.path == "/voice-health":
+            self._json(voice_health.snapshot(_state, preferences.listening_mode()))
+        elif self.path in ("/intel", "/intel?refresh=1"):
+            self._json(intel(refresh=self.path.endswith("refresh=1")))
+        elif self.path == "/settings":
+            self._json(settings())
+        elif self.path == "/models":
+            from model_provider import SELECTION
+            self._json(SELECTION.snapshot())
+        elif self.path == "/sessions":
+            from agent_sessions import MANAGER
+            self._json(MANAGER.snapshot())
         else:
             self.send_error(404)
 
@@ -188,9 +261,51 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             self.send_error(400)
             return
+        if self.path == '/models':
+            from model_provider import SELECTION
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 2000:
+                    raise ValueError('Invalid model request size.')
+                result = SELECTION.request(json.loads(self.rfile.read(length)))
+                self._json(result)
+            except (ValueError, TypeError):
+                self._json({'error': 'Model request rejected. Choose a listed model when no change is pending.'}, 400)
+            return
+        if self.path in ("/settings", "/calendar"):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 16000:
+                    raise ValueError("Request is too large or empty.")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected an object.")
+                result = (update_settings if self.path == "/settings" else update_calendar)(payload)
+            except (ValueError, TypeError):
+                self._json({"error": "Could not save. Check the listening mode or use a valid, reachable ICS calendar link."}, 400)
+                return
+            except OSError:
+                self._json({"error": "Could not save settings on this computer. Please try again."}, 500)
+                return
+            self._json(result)
+            return
         if self.path == "/stop":
             if on_stop:
                 on_stop()
+            self._json({"ok": True})
+            return
+        if self.path == "/notify":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 2000:
+                    raise ValueError("Request is too large or empty.")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict) or self.headers.get("Origin"):
+                    raise ValueError("Notifications come from local JARVIS services only.")
+                commands.put(notification(payload))
+            except (ValueError, TypeError):
+                self._json({"error": "Notification rejected."}, 400)
+                return
             self._json({"ok": True})
             return
         if self.path != "/command":
@@ -262,9 +377,17 @@ def start() -> bool:
 
 
 def open_window():
-    """Open the HUD as a borderless Edge app window (falls back to the default browser)."""
+    """Open a fullscreen Edge app using Jarvis's own browser profile."""
     try:
-        subprocess.Popen(f'start "" msedge --app={URL} --window-size=1440,900', shell=True,
+        edge = shutil.which("msedge") or next((path for path in (
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ) if os.path.isfile(path)), None)
+        if not edge:
+            raise FileNotFoundError("Microsoft Edge not found")
+        subprocess.Popen([edge, f"--app={URL}", "--start-fullscreen", "--no-first-run",
+                          "--no-default-browser-check",
+                          f"--user-data-dir={os.path.join(HERE, 'data', 'hud-browser')}"],
                          creationflags=subprocess.CREATE_NO_WINDOW)
     except OSError:
         import webbrowser

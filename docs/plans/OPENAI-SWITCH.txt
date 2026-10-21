@@ -1,0 +1,43 @@
+OWNER REQUEST, Oct 21: JARVIS should run on OpenAI, selectable models in the UI.
+Current live assistant is Claude Haiku; coding agents are separate Codex sessions.
+Do not mislabel Claude as ChatGPT. This is implementation authorization, including
+using the owner's supplied OpenAI key for a minimal inference verification when
+the executing environment allows network access. Do not bypass network denials.
+
+Build a real provider boundary in jarvis.py and a compact UI provider/model picker.
+Use OpenAI Responses API, preserve streaming sentence speech, cancellation, bounded
+tool rounds, existing approval guards, source citations and tool results. Keep
+Claude selectable. Do not change the separate coding-worker or screen-agent model.
+Apply changes at a turn boundary, never mid-tool-call. Persist settings atomically;
+show pending versus active model accurately. Handle cross-provider conversation
+history explicitly; no raw Anthropic tool blocks sent to OpenAI. Preserve saved
+memory and recent history. Do not silently fall back to a different paid provider.
+
+Read keys via model_credentials.load_openai_key(); setup helper uses Windows DPAPI.
+No browser key storage, plaintext logs, key reads in tool output or model context.
+Use discovered account model IDs from data/reports/openai-setup.json where present;
+availability in /models alone does not prove compatibility. Select a documented
+Responses/function-calling-capable model and verify access before claiming active.
+If no key, show setup required. If provider switch fails, retain the last valid
+configuration and report the failure, never falsely update the active badge.
+
+Official docs checked by parent:
+https://developers.openai.com/api/docs/guides/function-calling
+https://developers.openai.com/api/reference/responses/overview
+Responses tools are top-level function definitions (type/function name/parameters).
+Returned function_call items carry call_id; tool results use function_call_output
+with the matching call_id. Retain response output items needed for continued turns.
+Use current SDK support if installed, otherwise scoped requests code. Do not reuse
+Claude-only context compaction/output parameters on OpenAI requests. Do not invent
+model IDs from video branding. Document any unverified compatibility choice.
+
+Tests: mocked OpenAI text and tool round trips, interrupted streams, authentication
+failure, unavailable model, switching during a busy turn, safe persistence and
+missing credential state; UI picker tests. Never execute real external tools in
+tests. Optional authorized live check is one short text response without tools or
+private notes. Report it as unverified if network is unavailable in the worker.
+
+The running assistant supervises tonight's queue: DO NOT restart it mid-build.
+If loading the backend requires restart, save the requested OpenAI preference only
+when validated and report pending restart. Include exact morning activation steps.
+Do not claim JARVIS is already on OpenAI simply because source files were changed.

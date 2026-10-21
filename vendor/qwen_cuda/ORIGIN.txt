@@ -1,0 +1,4 @@
+Source: https://github.com/remominor/faster-qwen3-tts
+Commit: 9873e785f5114f56bd122a38674ad08ab4fc895b
+License: MIT (included)
+Runtime package vendored without changes. Uses existing offline Qwen weights and Python environment.

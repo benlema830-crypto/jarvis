@@ -6,10 +6,16 @@
 - The activity log records them only as "work app", with no window title.
 
 This covers the desktop apps and the web versions in a browser.
+
+JARVIS_ALLOW_OUTLOOK=1 in .env lifts this for Outlook (personal accounts only on this PC);
+Teams stays blocked either way.
 """
 
 import ctypes
+import os
 import re
+
+import desktop
 
 import psutil
 import win32gui
@@ -20,10 +26,25 @@ try:
 except OSError:
     pass
 
-BLOCKED_PROCESSES = {"outlook.exe", "olk.exe", "ms-teams.exe", "teams.exe", "msteams.exe"}
+OUTLOOK_PROCESSES = {"outlook.exe", "olk.exe"}
+TEAMS_PROCESSES = {"ms-teams.exe", "teams.exe", "msteams.exe"}
 # Outlook / Teams in a browser tab or as an installed web app, e.g. "Mail - Ben - Outlook - Google Chrome"
-BLOCKED_TITLE = re.compile(r"(?:^|[-|–]\s)(?:Microsoft\s+)?Outlook(?:\s|$)|Microsoft Teams", re.I)
+OUTLOOK_TITLE = re.compile(r"(?:^|[-|–]\s)(?:Microsoft\s+)?Outlook(?:\s|$)", re.I)
+TEAMS_TITLE = re.compile(r"Microsoft Teams", re.I)
 GA_ROOT = 2
+
+
+def outlook_allowed() -> bool:
+    return os.getenv("JARVIS_ALLOW_OUTLOOK", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def blocked_processes() -> set[str]:
+    return TEAMS_PROCESSES if outlook_allowed() else TEAMS_PROCESSES | OUTLOOK_PROCESSES
+
+
+def blocked_apps() -> str:
+    """How to name the blocked apps in messages and prompts."""
+    return "Teams" if outlook_allowed() else "Outlook or Teams"
 
 
 def _process_name(hwnd) -> str:
@@ -35,13 +56,14 @@ def _process_name(hwnd) -> str:
 
 
 def title_blocked(title: str) -> bool:
-    return bool(BLOCKED_TITLE.search(title.strip()))
+    title = title.strip()
+    return bool(TEAMS_TITLE.search(title) or (not outlook_allowed() and OUTLOOK_TITLE.search(title)))
 
 
 def is_blocked(hwnd) -> bool:
     if not hwnd:
         return False
-    return _process_name(hwnd) in BLOCKED_PROCESSES or title_blocked(win32gui.GetWindowText(hwnd))
+    return _process_name(hwnd) in blocked_processes() or title_blocked(win32gui.GetWindowText(hwnd))
 
 
 def foreground_blocked() -> bool:
@@ -66,14 +88,17 @@ def blocked_rects() -> list[tuple[int, int, int, int]]:
 
 
 def grab(bbox: tuple[int, int, int, int] | None = None):
-    """Screenshot of the primary screen (or `bbox`) with work-app windows blacked out."""
+    """Capture all monitors (or a physical-pixel region), masking work-app windows."""
     from PIL import ImageDraw, ImageGrab
 
-    img = ImageGrab.grab(bbox=bbox).convert("RGB")
-    ox, oy = (bbox[0], bbox[1]) if bbox else (0, 0)
+    bounds = bbox if bbox is not None else desktop.current_layout().bounds
+    img = ImageGrab.grab(bbox=bounds, all_screens=True).convert("RGB")
+    ox, oy = bounds[:2]
     draw = ImageDraw.Draw(img)
     for left, top, right, bottom in blocked_rects():
-        box = [left - ox, top - oy, right - ox, bottom - oy]
+        box = [max(0, left - ox), max(0, top - oy), min(img.width - 1, right - ox), min(img.height - 1, bottom - oy)]
+        if box[2] < box[0] or box[3] < box[1]:
+            continue
         draw.rectangle(box, fill=(0, 0, 0))
         draw.text((box[0] + 20, box[1] + 20), "Work app hidden by Jarvis work-safe mode", fill=(200, 200, 200))
     return img

@@ -1,0 +1,66 @@
+JARVIS BUILDER - FIRST BEDTIME BUILD PASS
+
+Work in C:\Users\Lemab\jarvis. Read README.md and applicable AGENTS.md first.
+This is implementation authorization for the local changes described below.
+Preserve existing uncommitted work. Do not edit the Orange or LocalVoice copies.
+
+TIMEBOX
+Spend at most 25 minutes on this pass, including tests and the handoff. The Jarvis
+agent manager has a 30-minute task limit. Finish one coherent milestone; do not
+claim the whole roadmap is complete. If blocked, document the blocker and stop.
+
+CURRENT FOUNDATION
+Obsidian is now the knowledge library. knowledge.py indexes the dedicated vault
+at C:\Users\Lemab\Documents\JARVIS Knowledge; brain.py shows its actual note links.
+search_knowledge, read_knowledge_note and create_knowledge_note are registered tools.
+Do not rebuild this integration or index unrelated folders. See tests/test_knowledge.py.
+
+WORKSPACE LAYOUT
+The UI is split into hud/brain.html, brain.css, brain.js, theme.css,
+workspace-ui.js and mcp-ui.js. Keep this organization. Plans are in docs/plans;
+reports go in data/reports. The file hub is C:\Users\Lemab\Documents\Jarvis Agent.
+Read docs/PROJECT-MAP.md before editing. Do not reorganize personal files.
+
+TONIGHT'S PRIORITY: VOICE RELIABILITY AND HONEST HEALTH STATUS
+1. Inspect startup and the microphone/speech lifecycle. The companion UI runs on
+   7781; the real Blue assistant runs on 7778. Open Jarvis Brain now starts both
+   when needed. Keep the single-instance safeguards and avoid duplicate listeners.
+2. Add a useful health panel to the Brain UI: assistant connection, startup/ready
+   state, actual microphone and output device, input level, listening mode,
+   voice-lock enabled status, and recent recognition/rejection reason. Expose
+   only bounded diagnostic data, not secrets, raw audio or full private logs.
+3. Investigate the earlier long-lived 'speaking' state and voice rejection.
+   Review Voice.wait, playback completion, errors, and listener startup. Fix a
+   demonstrated bug with a regression test if found. Do not guess at a timeout
+   that could cut off legitimate speech. Do not lower voice-match thresholds or
+   bypass voice identity checks. Re-enrollment requires the owner to be awake.
+4. Make the UI distinguish offline, booting, mic unavailable, voice not matched,
+   thinking, speaking, and ready as evidence permits. Provide actionable guidance.
+   Browser connections alone must not imply a working microphone or AI service.
+5. Add meaningful mocked tests and run the existing Brain browser check. Never
+   execute real desktop or external tools as part of automated tests.
+
+HANDOFF
+Write data/reports/NIGHT-BUILD-RESULT.txt in this project: files changed, tests run and results,
+what is working, what still needs a live voice check, any restart needed, and the
+next recommended milestone. Give Jarvis a brief final report. Leave the running
+assistant untouched during this task; do not restart your own supervising process.
+
+BOUNDARIES
+Local source edits/tests only. No deployment, purchases, external messages, live
+MCP tool calls, account connections, system settings, destructive deletion or Git
+reset, credential changes, or autonomous camera/screen monitoring. Do not start
+the next milestone automatically. Do not change API models or add paid services.
+If an action needs the sleeping user's approval, record it and stop that action.
+
+NEXT BIG STEPS (AFTER TONIGHT; NOT AUTHORIZED BY THIS TASK)
+2. Improve the existing Obsidian integration: aliases, citation presentation,
+   incremental refresh, and explicit edit previews with conflict detection.
+   Choose any additional source folders before indexing them; PDFs are not yet supported.
+3. Agent task board: readable task cards, elapsed time, progress, cancellation,
+   restart-aware reports, and morning summaries. Replace raw session JSON.
+4. MCP maturity: provider-specific OAuth, modern protocol negotiation and legacy
+   adapters as needed, tool-level permissions, and connection health/reconnect.
+   Start with one user-chosen real MCP server and verify a harmless read action.
+5. On-demand screen/camera features, followed by opt-in Focus mode and Telegram.
+   Each feature needs a visible on/off indicator and separate account setup.

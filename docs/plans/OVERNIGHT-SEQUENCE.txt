@@ -1,0 +1,76 @@
+JARVIS REFERENCE-PARITY OVERNIGHT SEQUENCE
+
+The owner authorized attempting the broader reference build overnight on Oct 21.
+JARVIS-TARGET.txt is the source of truth. It supersedes exploratory design choices.
+The existing voice-reliability job finishes first; do not interrupt its writes.
+Four subsequent stages run sequentially, each at most 25 minutes (manager hard
+limit 30 minutes). This is a finite attempt, not a promise of complete parity.
+
+OWNER UPDATE: OPENAI AND MODEL SWITCHING
+The owner now explicitly requests OpenAI for JARVIS and a real UI model selector.
+This supersedes the restriction on implementing model changes below. Credentials
+are entered only by the owner through scripts/setup_openai_key.py, stored encrypted
+in data/openai-key.dpapi, read through model_credentials.load_openai_key(). Never
+print/decrypt credentials into logs or reports. data/reports/openai-setup.json has
+nonsecret account model discovery results when setup succeeds. Do not confuse
+model-list access with successful inference or billing availability.
+
+COMMON RULES FOR ALL STAGES
+Read README.md, docs/PROJECT-MAP.md, JARVIS-TARGET.txt and prior stage reports.
+Preserve all existing uncommitted work. Work only in the Blue repository. Keep the
+running supervisor alive; do not restart Jarvis or change agent_sessions.py during
+this run. No Linux, package installation, credentials, model changes, purchases,
+publishing, outbound messages, or automatic camera/screen capture. Implement local
+features/tests with capture off by default. Do not activate them while owner sleeps.
+Do not seek unavailable account access; implement useful local pieces and record
+specific setup requirements. Respect existing approval guards. If blocked, move
+to another independent item within this stage; never bypass a denial. Use mocks
+for external effects. No collateral file organization or broad personal indexing.
+Do not spawn extra agents. Finish with a report even when incomplete. Reports go
+in data/reports/OVERNIGHT-N.txt for stage N, with honest checklist status updates.
+
+STAGE 1: REFERENCE APPEARANCE (target IDs 1, 7)
+Inspect reference images if available. Reproduce the 1:30 frame composition:
+graph dominant, compact left inspector and right JARVIS, compact bottom controls.
+Remove the oversized hero design. Keep current functional integrations and the
+JARVIS/Obsidian distinction. Preserve health diagnostics in a compact surface.
+Refine real graph layout/navigation, visible selection/neighbors, 2D/3D, and reactor
+presentation. No fake notes/statuses or disconnected buttons. Run browser checks,
+capture a screenshot, and document reference comparison and remaining differences.
+
+STAGE 2: OPENAI SWITCHING FIRST, THEN KNOWLEDGE (target IDs 10, 2, 4, 5)
+First implement docs/plans/OPENAI-SWITCH.txt. The owner prioritizes real OpenAI
+conversation and a UI model selector. Then continue knowledge work below as time
+allows. Stage 4 should finish any remaining knowledge work before optional adapters.
+Make the assistant's knowledge retrieval visible in the graph: real matching source
+nodes, selection, neighbor emphasis, source excerpts and Obsidian links. Audit the
+existing server/event/tool plumbing before adding anything. Add bounded events and
+safe text rendering. Keep the user's vault authoritative; do not make tool docs the
+default second brain. Test representative retrieval, missing sources, and reset.
+Verify research citations/results presentation where existing provider tools allow.
+
+STAGE 3: LOCAL VISUAL MODES (target ID 6)
+Audit existing capture facilities. Implement as much useful Eyes/Watch/Focus parity
+as fits: explicit user toggles, clear actual state, stop/cleanup, permission/device
+errors, bounded cadence, focus duration and evidenced drift count. Keep everything
+off until deliberately enabled. Reuse work-app privacy masking. Screen capture
+permission alone must not imply browser-tab identity; explain window-level limits.
+Prefer one coherent working mode over three cosmetic switches. Test with mocks;
+do not capture the sleeping user's camera or screen. Mark live checks pending.
+
+STAGE 4: INTEGRATIONS AND FINAL AUDIT (target IDs 8, 9, 10)
+Audit armory transports, account setup, Telegram/cloud-document adapters and model
+selection. Build feasible missing local code and tests, prioritize useful truthful
+setup/status surfaces. No external accounts/messages/calls, no new paid providers,
+no invented model IDs. Leave unavailable integrations explicitly unconnected.
+Run appropriate regression checks, inspect accumulated diffs without resetting,
+and write data/reports/OVERNIGHT-FINAL.txt: per-ID achieved/partial/blocked status,
+tests, exact manual restart steps if needed, account inputs, and a short morning
+walkthrough. All remaining gaps must be visible. Do not schedule more work.
+
+CONTROL
+scripts/overnight_queue.py waits for each task and dispatches the next via the
+local JARVIS command endpoint. data/reports/overnight-queue.json records its state.
+Creating data/STOP-OVERNIGHT stops future dispatches; active work is left intact.
+Queue stops on task failure/interruption, an unacknowledged command, or 3 hours.
+Reports do not imply changes are loaded into the running Python processes.
