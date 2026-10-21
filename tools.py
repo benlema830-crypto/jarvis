@@ -976,6 +976,45 @@ def named_routine(action: str = 'list', name: str = '') -> str:
     return json.dumps(_brain('/routines', {'action': 'run', 'token': review['token']}, timeout=60))
 
 
+@beta_tool(eager_input_streaming=True)
+def create_artifact(format: str, specification: str) -> str:
+    """Create a local Excel workbook, PDF report or PowerPoint deck. Does not open or send it.
+    Numbers must come from the user or cited sources; label invented examples as samples.
+
+    Args:
+        format: xlsx, pdf or pptx.
+        specification: JSON object. All formats require title. xlsx: columns (strings), rows (arrays),
+            optional totals true and chart bar/line (category in first column, numeric value in second).
+            pdf: content (plain text with optional # headings), optional columns/rows/chart.
+            pptx: slides array of objects with title and body, optionally columns/rows/chart per slide.
+            Cell strings are literal; totals generate SUM formulas. Never supply executable code.
+    """
+    import artifacts, json
+    return json.dumps(artifacts.create(format,json.loads(specification)))
+
+
+@beta_tool(eager_input_streaming=True)
+def manage_digests(action: str = 'list', specification: str = '{}') -> str:
+    """Manage silent local scheduled research/progress reports. No email or phone delivery.
+    Create/enable a schedule only when the user explicitly asks for that schedule and time.
+    Research uses Codex subscription, up to four searches/180 seconds; progress uses no AI.
+    PC and Brain must be running. Quiet hours and daily run caps apply to scheduled execution.
+
+    Args:
+        action: list, save, configure, delete, run, or report.
+        specification: JSON object. save: name, kind (research/progress), topic, at (HH:MM), enabled
+            (default false), optional existing id. configure: timezone (IANA), quiet_start,
+            quiet_end (HH:MM), daily_limit (1–4). delete/run/report: id from list.
+            Run now only on explicit user request; manual runs count toward the daily cap.
+    """
+    import json
+    if action=='list': return json.dumps(_brain('/digests'))
+    if action not in ('save','configure','delete','run','report'): raise ValueError('Unknown digest action.')
+    data=json.loads(specification)
+    if not isinstance(data,dict): raise ValueError('Expected a JSON object.')
+    return json.dumps(_brain('/digests',dict(data,action=action),timeout=200))
+
+
 TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, forget, set_reminder, list_reminders, cancel_reminder,
@@ -985,7 +1024,7 @@ TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_f
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          search_knowledge, read_knowledge_note, create_knowledge_note,
          look_through_camera, brain_mode, focus_mode, holo, add_task, list_tasks, complete_task,
-         create_document, send_telegram, switch_model, project_handoff, named_routine]
+         create_document, send_telegram, switch_model, project_handoff, named_routine, create_artifact, manage_digests]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
 

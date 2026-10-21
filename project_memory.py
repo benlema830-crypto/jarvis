@@ -84,6 +84,8 @@ def handoff(name, summary='', unresolved='', next_action='', files=''):
         entry = dict(project=evidence['project'], created_at=now(), author='Jarvis / user-supplied summary',
                      claims=fields, evidence=evidence, previous=previous.get('id') if previous else None)
         entry['id'] = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%f') + '-' + uuid.uuid4().hex[:8]
+        import privacy
+        entry = privacy.payload(entry)
         folder = STORE / entry['project']
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / (entry['id'] + '.json')).open('x', encoding='utf-8') as f:

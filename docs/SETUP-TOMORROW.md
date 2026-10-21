@@ -192,6 +192,77 @@ messages or automatic agent work. Nothing runs on a schedule or at startup.
 Embedding API references: [Ollama embeddings](https://github.com/ollama/ollama/blob/main/docs/capabilities/embeddings.mdx)
 and [EmbeddingGemma](https://ollama.com/library/embeddinggemma).
 
+## 9. Scheduled research and progress digests
+
+Use **More > Scheduled digests**. Create a named daily schedule, choose its time and timezone,
+and explicitly enable it. No schedules are enabled by this build. Default settings are
+America/Chicago, quiet hours 22:00–08:00, and at most two runs per local day (configurable 1–4).
+
+- **Progress** reads saved Jarvis agent reports plus current Git evidence; it uses no AI call.
+  Reports retain dates when available and distinguish agent claims from repository evidence.
+- **Research** uses the selected, signed-in Codex subscription with live web search. It has no
+  dynamic action tools, shell, edits or subagents. Each attempt is limited to one model turn,
+  four search operations and 180 seconds. There is no paid-provider fallback. Subscription
+  limits still apply. Reports include source links corroborated by search events; generated
+  prose and additional inline links still need normal source review. Blocked sites or missing
+  dates can limit freshness; the report must say so rather than present older results as new.
+
+Brain and the PC must be running. A 30-second poll checks schedules. Quiet hours defer automatic
+work; missed previous days are skipped, and today's due job may run on startup. A run is reserved
+on disk before work starts, so failures/crashes count toward the cap and do not automatically retry
+that day. Restarted in-flight attempts become interrupted. Run now is explicit, bypasses quiet hours,
+and still counts toward the daily cap. Only one digest runs at a time. Reports are silent: no speech,
+email, Telegram messages or external publication. Schedules and the last 200 attempt records live
+in `data/digests.json`; report files remain in `data/digests/` after a schedule is deleted.
+
+Voice: "List my digest schedules", "Schedule a Jarvis progress digest at 6 PM daily", or
+"Run my Roblox development digest now". Choose your own timing before enabling research.
+
+## 10. Memory viewer and text redaction
+
+Use **More > Memory & privacy** to inspect/correct/delete facts, inspect or clear recent dialogue,
+and select private phrases, email addresses or phone numbers for filtering. Recognizable API keys,
+bearer/JWT/service tokens, credential assignments, private keys and SSNs are filtered by default.
+Exact private phrases are stored locally in `data/privacy.json` so they can be matched.
+
+Redaction covers Jarvis-owned conversational text requests for Codex, OpenAI, Claude and Ollama,
+tool-result text sent through those adapters, local embedding inputs, and new facts/dialogue/handoffs.
+Initial prompts passed to coding workers are filtered too. Authentication headers and binary images
+are not rewritten. A memory correction/deletion or privacy change resets model context on the next
+turn and excludes pre-change dialogue from future prompts; older excerpts remain inspectable until
+cleared. Existing provider-side history is not erased. Memory edits have stale-version checks and a
+cross-process file lock. Saving privacy filters scrubs stored facts and recent dialogue.
+
+This is best-effort text filtering, not a complete data-loss-prevention system. It does not inspect
+screenshots, speech/audio, arbitrary files read directly by external coding workers, all existing logs,
+past handoffs, exports, backups or provider-retained data. Existing work-app screen masking remains
+in place. Clear unwanted excerpts separately and review source material before requesting access.
+
+## 11. Spreadsheet, PDF and presentation tools
+
+Use **More > File tools**, or ask Jarvis to create a budget/tracker (`.xlsx`), report (`.pdf`), or
+slide deck (`.pptx`) from your data. Outputs go to `Documents/JARVIS Documents` and do not open or
+send automatically. The panel's starter budget is explicitly fictional sample data. Generated files
+get unique names and existing files are not overwritten. The Open control opens only generated files.
+
+- Spreadsheets: up to 20 columns and 2,000 rows, styled headers, filters, frozen header, numeric totals,
+  and editable bar/line charts. Input strings stay literal; only generated SUM totals become formulas.
+  Excel/LibreOffice calculates those formulas when opened; returned totals are also computed locally.
+- PDF: flowing text/headings, wrapping tables (up to 8 columns/500 rows), page numbers and vector charts.
+  Arial is embedded on Windows for normal Unicode text. Full emoji/CJK font coverage is not guaranteed.
+- PowerPoint: editable text and charts, up to 40 supplied slides; long body text is split into continuation
+  slides. Charts use the first column as categories and the second as numeric values, up to 40 categories.
+  These are creation tools, not full Office editing/round-trip or PDF-import tools. Existing Word creation remains.
+
+Installed local libraries: openpyxl, python-pptx and ReportLab; pypdf verifies PDF text in tests. No Office
+account is required. Reopening verifies file structure, values/formulas, charts and extracted PDF text;
+visual PDF inspection is separate from owner acceptance in Excel/PowerPoint. Sample outputs are in the
+generated-file list; verification paths are recorded in `data/reports/artifact-smoke.json`.
+
+Library references: [openpyxl charts](https://openpyxl.readthedocs.io/en/stable/charts/bar.html),
+[python-pptx](https://python-pptx.readthedocs.io/en/latest/user/quickstart.html),
+[ReportLab Platypus](https://docs.reportlab.com/reportlab/userguide/ch5_platypus/).
+
 ## Restarting
 
 - Python changes: say **"Jarvis, power down"**, then open the **JARVIS Brain** shortcut.

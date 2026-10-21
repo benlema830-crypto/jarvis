@@ -70,6 +70,7 @@ class IntegrationTests(unittest.TestCase):
             holder['handler'] = handler
             return Mock()
         with patch('http.server.ThreadingHTTPServer', side_effect=construct), \
+             patch('digests.start', return_value=Mock()), \
              patch('visual_modes.controller'):
             brain.serve()
         server = ThreadingHTTPServer(('127.0.0.1', 0), holder['handler'])
@@ -101,6 +102,17 @@ class IntegrationTests(unittest.TestCase):
                 oauth.assert_not_called()
                 self.assertEqual(call('POST', '/mcp/oauth', payload={'action': 'status', 'id': 'test'})[0], 200)
                 oauth.assert_called_once_with({'action': 'status', 'id': 'test'})
+            with patch('memory.snapshot',return_value={'facts':[]}) as memory_read, \
+                 patch('memory.edit',return_value={'facts':[]}) as memory_edit, \
+                 patch('digests.upsert',return_value={'id':'test'}) as schedule, \
+                 patch('artifacts.create',return_value={'name':'test.xlsx'}) as artifact:
+                self.assertEqual(call('GET','/memory')[0],200)
+                self.assertEqual(call('POST','/memory',{'Origin':'https://other.example'},{'action':'delete'})[0],403)
+                memory_edit.assert_not_called()
+                self.assertEqual(call('POST','/digests',payload={'action':'save','name':'test'})[0],200)
+                schedule.assert_called_once_with({'name':'test'})
+                self.assertEqual(call('POST','/artifacts',payload={'format':'xlsx','spec':{'title':'test'}})[0],200)
+                artifact.assert_called_once_with('xlsx',{'title':'test'})
         finally:
             server.shutdown()
             server.server_close()

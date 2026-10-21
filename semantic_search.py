@@ -42,6 +42,8 @@ def identity():
 
 
 def embed(texts):
+    import privacy
+    texts = privacy.payload(texts)
     rows = _request('/api/embed', {'model': MODEL, 'input': texts, 'truncate': False,
                                  'keep_alive': 0})['embeddings']
     if len(rows) != len(texts):

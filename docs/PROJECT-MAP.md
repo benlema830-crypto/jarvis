@@ -35,6 +35,7 @@ models, credentials and the registered Obsidian vault retain their real paths.
 | Voice and hearing | voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
 | Project continuity and routines | project_memory.py, routines.py, hud/productivity.js |
+| Digests, privacy and file tools | digests.py, privacy.py, artifacts.py, hud/automation.js |
 | Brain page | hud/brain.html, hud/brain.css, hud/brain.js (graph, inspector, reactor, chat), hud/panels.js (dialogs), hud/modes.js (Eyes/Watch/Holo/Focus) |
 | Brain server | brain.py, eyes.py, visual_modes.py, integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
@@ -59,3 +60,8 @@ Project handoffs are dated JSON entries in `data/handoffs/`. Named routine defin
 in `data/routines.json`; approval tokens stay in memory and expire. The local semantic index is
 `data/vault-vectors.sqlite3`, rebuilt incrementally from the selected vault with the installed
 `embeddinggemma:300m` model. These files contain personal context and are not committed.
+
+`data/digests.json` stores schedules and attempts; `data/digests/` stores silent reports.
+`data/privacy.json` stores selected text filters; `memory.json.epoch` invalidates pre-edit model context.
+The Brain process owns the digest scheduler. XLSX/PDF/PPTX outputs live alongside Word documents in
+`Documents/JARVIS Documents`; no Office process or account is required to create them.

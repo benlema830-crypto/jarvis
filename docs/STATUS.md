@@ -53,7 +53,7 @@ calendar heads-ups, speech never reads links.
 - Optional Telegram pairing and one harmless approved MCP call, plus a declined call.
 
 Automated checks: `python -m unittest discover -s tests` and `python tests/check_brain_browser.py`.
-Latest unit result: 243 tests passed. Brain UI and HOLO probe pass in the repeatable verification report at `data/reports/project-verification.json`.
+Latest expanded unit suite: 262 tests. See the repeatable verification report at `data/reports/project-verification.json` for pass/fail evidence, Brain UI and HOLO probe results.
 These checks use inert fixtures and do not establish live camera, headset or external-account behavior.
 
 ## Project continuity additions (2026-10-21)
@@ -74,3 +74,29 @@ These checks use inert fixtures and do not establish live camera, headset or ext
 - Quiet activation passed: live project recall, routine list/preview (cancelled without running),
   semantic search and new UI asset all responded. Assistant returned ready/listening with its listener
   alive, mic active, no speech pending/output error, and Codex `gpt-6.1-sol` still selected.
+
+## Digests, privacy and file tools (2026-10-21)
+
+- Scheduled daily research/progress digests implemented with timezone, quiet hours, daily attempt caps,
+  persisted reservations, restart recovery and visible failures. Nothing is scheduled/enabled by default.
+  Research smoke test: real Codex run, 35.69 seconds, four searches, two cited URLs corroborated by source
+  events. The report explicitly said current publication dates could not be verified and labeled older
+  findings. Saved at `data/reports/scheduled-research-smoke.json`; this proves sourced execution, not that
+  blocked Roblox pages can always be read or that every generated claim is correct.
+- Memory viewer supports version-checked fact edits/deletions, recent-dialogue inspection/clearing, and
+  optional exact-phrase/email/phone filters. Recognizable credentials/SSNs filtered by default at owned
+  model-text boundaries and memory saves. Active and restarted conversations exclude pre-edit context.
+  Detection is imperfect; images, independent coding-tool file reads, old exports/logs/backups and
+  provider-side retention are not covered. Full boundaries documented in SETUP-TOMORROW.md.
+- Local XLSX/PDF/PPTX generation implemented with budget totals, trackers, tables and editable/vector
+  charts. Real sample outputs created and reopened. PDF rendered and inspected; fixed chart baseline so
+  the smallest category remains visible. Office application acceptance is not claimed.
+- Expanded browser fixture exercises the three panels and verifies opening them never runs a digest or
+  enables a schedule. Regression checks cover redaction boundaries, stale memory edits, restart/daily caps,
+  failures, source filtering, formula injection, chart persistence, PDF text and slide continuation bounds.
+- Activated quietly after checking the assistant and project workers were idle. Live memory/file panels
+  responded; a manual progress-digest test completed with two local sources and zero AI calls, and its
+  temporary disabled schedule was removed. Zero schedules remain enabled. Assistant health returned
+  ready/listening, listener alive, mic active, no output error/speech pending; Codex remains selected.
+  Evidence: `data/reports/workday-456-activation.json`. Default filters were applied to saved facts and
+  recent dialogue without logging their contents.

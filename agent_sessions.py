@@ -64,6 +64,12 @@ class Connection:
             self.events.put(None)
 
     def send(self, payload):
+        if payload.get('method') in ('turn/start', 'thread/start', 'thread/resume'):
+            import privacy
+            payload = dict(payload, params=dict(payload.get('params', {})))
+            for key in ('input', 'developerInstructions', 'baseInstructions'):
+                if key in payload['params']:
+                    payload['params'][key] = privacy.payload(payload['params'][key])
         with self.lock:
             self.proc.stdin.write(json.dumps(payload) + "\n")
             self.proc.stdin.flush()

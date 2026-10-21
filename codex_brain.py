@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from types import SimpleNamespace
+import privacy
 
 from agent_sessions import Connection, HERE
 
@@ -12,8 +13,8 @@ _catalog_at = 0
 _catalog_lock = threading.Lock()
 
 
-def connect(callback):
-    conn = Connection(HERE, callback)
+def connect(callback, cancel=None):
+    conn = Connection(HERE, callback, cancel)
     try:
         conn.call('initialize', {'clientInfo': {'name': 'jarvis_voice', 'title': 'JARVIS', 'version': '1.0'},
                                 'capabilities': {'experimentalApi': True}})
@@ -110,7 +111,7 @@ class CodexBrain:
                     output = self.run_tool(SimpleNamespace(name=params['tool'], id=params['callId'], input=arguments))
                     import model_provider
                     text, images = model_provider.tool_output(output.get('content', ''))
-                    result = {'contentItems': [{'type': 'inputText', 'text': text}] +
+                    result = {'contentItems': [{'type': 'inputText', 'text': privacy.redact(text)}] +
                               [{'type': 'inputImage', 'imageUrl': i['image_url']} for i in images],
                               'success': not output.get('is_error', False)}
             elif method.endswith('requestApproval'):
@@ -135,6 +136,7 @@ class CodexBrain:
             hud.emit('sources', sources=self.sources[-12:])
 
     def ask(self, model, system, messages, definitions, run_tool, delta, cancel):
+        system = privacy.redact(system)
         self.cancel, self.delta, self.run_tool = cancel, delta, run_tool
         self.complete, self.answer, self.turn_id, self.tool_count = None, [], None, 0
         self.sources = []
@@ -142,7 +144,7 @@ class CodexBrain:
         try:
             if fresh:
                 self.close()
-                self.conn = connect(self._event)
+                self.conn = connect(self._event, cancel)
                 self.model = model
                 spec = [{'type': 'function', 'name': t['name'], 'description': t.get('description', ''),
                          'inputSchema': t['input_schema']} for t in definitions]

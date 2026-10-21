@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import psutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -169,9 +170,30 @@ addEventListener('load', async () => {
     await wait(() => $('projectToolResult').textContent.includes('Persistence.md'), 'semantic sources');
     assert($('projectToolResult').querySelector('a[href^="obsidian:"]'), 'semantic source link');
     $('projectToolsDialog').close();
+    stage('memory tools'); $('memoryToolsBtn').click();
+    await wait(() => $('memoryDialog').textContent.includes('Save correction'), 'memory loaded');
+    const memInput=$('memoryDialog').querySelector('[aria-label="Remembered fact"]');memInput.value='Likes coffee';
+    [...$('memoryDialog').querySelectorAll('button')].find(b=>b.textContent==='Save correction').click();
+    await wait(()=>window.posts.some(p=>p.path==='/memory' && p.body.fact==='Likes coffee'),'memory correction');
+    $('memoryDialog').close();
+    stage('digest tools'); $('digestToolsBtn').click();
+    await wait(()=>$('digestsDialog').textContent.includes('Nothing runs automatically.'),'empty schedules');
+    assert(!window.posts.some(p=>p.path==='/digests' && p.body.action==='run'),'opening ran digest');
+    [...$('digestsDialog').querySelectorAll('button')].find(b=>b.textContent==='Save schedule').click();
+    await wait(()=>window.posts.some(p=>p.path==='/digests' && p.body.action==='save'),'schedule save');
+    assert(window.posts.find(p=>p.path==='/digests' && p.body.action==='save').body.enabled===false,'schedule enabled by default');
+    $('digestsDialog').close();
+    stage('file tools');$('fileToolsBtn').click();
+    await wait(()=>$('filesDialog').open,'file dialog');
+    [...$('filesDialog').querySelectorAll('button')].find(b=>b.textContent==='Create file').click();
+    await wait(()=>$('filesDialog').textContent.includes('Created Sample.xlsx'),'artifact result');
+    assert(window.posts.find(p=>p.path==='/artifacts').body.spec.rows[0][1]===40,'numeric table parsing');
+    $('filesDialog').close();
     stage('dimension'); $('dimension').click(); assert($('dimension').textContent === '2D', '2D');
     document.documentElement.dataset.check = 'passed';
   } catch (e) { document.documentElement.dataset.check = e.message; }
+  await fetch('/probe-complete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    result:document.documentElement.dataset.check,stage:document.documentElement.dataset.stage})});
 });
 window.posts = [];
 const realFetch = window.fetch;
@@ -205,7 +227,7 @@ def serve():
             path = self.path.split("?")[0]
             if path == "/":
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + CHECK, 1), "text/html")
-            if path in ("/brain.js", "/panels.js", "/modes.js", "/productivity.js", "/brain.css"):
+            if path in ("/brain.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": NODES, "links": LINKS, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},
@@ -218,6 +240,10 @@ def serve():
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
                 "/workspace": {"folders": []}, "/build-plan": {"text": ""}, "/eyes": {"on": False, "age": None},
                 "/routines": {"routines": {"Wrap up": {"project":"Jarvis", "steps":[{"action":"tasks"}]}}},
+                '/memory': {'revision':'v1','facts':[{'id':'f1','fact':'Likes tea'}],'recent':[],
+                    'privacy':{'terms':[],'email':False,'phone':False}},
+                '/digests': {'timezone':'America/Chicago','quiet_start':'22:00','quiet_end':'08:00','daily_limit':2,'jobs':[],'runs':[]},
+                '/artifacts': {'files':[]},
             }
             if path == "/integration-status":
                 from unittest.mock import patch
@@ -231,6 +257,16 @@ def serve():
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            if self.path=='/probe-complete':
+                self.server.check=body
+                self.send({'ok':True})
+                self.server.done.set()
+                return
+            if self.path=='/memory':
+                return self.send({'revision':'v2','facts':[{'id':'f2','fact':body.get('fact','Likes tea')}],
+                    'recent':[],'privacy':{'terms':[],'email':False,'phone':False}})
+            if self.path=='/digests':return self.send({'saved':True})
+            if self.path=='/artifacts':return self.send({'name':'Sample.xlsx'})
             if self.path == '/routines':
                 return self.send({'name':'Wrap up', 'project':'Jarvis', 'descriptions':['Review only'],
                     'notice':'Review only', 'token':'fixture', 'status':'completed'} if body.get('action') == 'preview'
@@ -255,6 +291,8 @@ def serve():
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
+    server.done=threading.Event()
+    server.check={}
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -268,14 +306,31 @@ def main():
     with tempfile.TemporaryDirectory() as profile:
         args = [str(CHROME), "--headless=new", "--disable-gpu", "--no-first-run", f"--user-data-dir={profile}",
                 "--window-size=1660,896", "--virtual-time-budget=20000", "--run-all-compositor-stages-before-draw"]
-        dom = subprocess.run(args + ["--dump-dom", url], capture_output=True, text=True, timeout=120, encoding="utf-8").stdout
+        # Check completion comes from the actual browser assertions. Do not wait for Chrome's
+        # virtual clock to drain while Focus's worker and polling intervals remain alive.
+        with tempfile.TemporaryFile() as log:
+            proc=subprocess.Popen(args+[url],stdout=log,stderr=log)
+            try:
+                completed=server.done.wait(90)
+            finally:
+                try:
+                    parent=psutil.Process(proc.pid); children=parent.children(recursive=True)
+                    for child in children:
+                        try: child.terminate()
+                        except psutil.NoSuchProcess: pass
+                    parent.terminate()
+                    _,alive=psutil.wait_procs(children+[parent],timeout=5)
+                    for child in alive: child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+                proc.wait(timeout=10)
         if "--screenshot" in sys.argv:
             out = Path(sys.argv[sys.argv.index("--screenshot") + 1]).resolve()
             subprocess.run(args + [f"--screenshot={out}", url], capture_output=True, timeout=120)
-    match = re.search(r'data-check="([^"]*)"', dom)
-    stage = re.search(r'data-stage="([^"]*)"', dom)
-    result = match.group(1) if match else f"no result (stage {stage.group(1) if stage else 'none'})"
-    print("PASS" if result == "passed" else f"FAIL at {stage.group(1) if stage else '?'}: {result}")
+    result=server.check.get('result','browser did not report completion')
+    stage=server.check.get('stage','unknown')
+    server.shutdown();server.server_close()
+    print("PASS" if result == "passed" else f"FAIL at {stage}: {result}")
     return 0 if result == "passed" else 1
 
 

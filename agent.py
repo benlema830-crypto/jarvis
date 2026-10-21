@@ -198,8 +198,9 @@ class Agent:
                     report = f"Stopped after {self.steps} steps without finishing - the task was taking too long."
                     break
                 self.steps += 1
+                import privacy
                 response = self.client.beta.messages.create(
-                    model=MODEL, max_tokens=16000, system=system, tools=TOOLS, messages=messages,
+                    model=MODEL, max_tokens=16000, system=privacy.redact(system), tools=TOOLS, messages=privacy.payload(messages),
                     betas=BETAS, context_management=CONTEXT_MANAGEMENT, fallbacks="default",
                     output_config={"effort": EFFORT}, cache_control={"type": "ephemeral"},
                 )

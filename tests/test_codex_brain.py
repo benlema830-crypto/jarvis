@@ -6,6 +6,13 @@ import codex_brain as cb
 
 
 class CodexTests(unittest.TestCase):
+    def test_connection_initialization_receives_cancellation(self):
+        cancel=threading.Event();conn=Mock()
+        conn.call.side_effect=[{}, {'account':{'type':'chatgpt'}}]
+        with patch.object(cb,'Connection',return_value=conn) as construct:
+            cb.connect(lambda e:None,cancel)
+        self.assertIs(construct.call_args.args[2],cancel)
+
     def test_subscription_only_rejects_api_selection(self):
         import model_provider
         with patch.object(model_provider.preferences, 'read', return_value={'subscription_only': True}):

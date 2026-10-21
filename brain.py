@@ -80,6 +80,7 @@ def snapshot():
 
 ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "text/javascript"),
           "/productivity.js": ("productivity.js", "text/javascript"),
+          "/automation.js": ("automation.js", "text/javascript"),
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
@@ -136,6 +137,32 @@ def serve():
             get, post = self.command == "GET", self.command == "POST"
             if route == "/brain-data" and get:
                 return snapshot(), 200
+            if route == '/memory' and (get or post):
+                import memory
+                if get: return memory.snapshot(), 200
+                p=self.payload(16000)
+                return memory.edit(p.get('action'),p.get('revision'),p.get('id',''),p.get('fact','')),200
+            if route == '/privacy' and post:
+                import privacy, memory
+                p=self.payload(30000)
+                privacy.configure(p.get('terms',[]),p.get('email',False),p.get('phone',False))
+                return memory.edit('scrub',memory.revision()),200
+            if route == '/digests' and (get or post):
+                import digests
+                if get: return digests.load(),200
+                p=self.payload(16000); action=p.pop('action',None)
+                if action=='configure': return digests.configure(p),200
+                if action=='save': return digests.upsert(p),200
+                if action=='delete': return digests.remove(p.get('id')),200
+                if action=='run': return digests.run(p.get('id')),200
+                if action=='report': return digests.report(p.get('id')),200
+                raise ValueError('Unknown digest action.')
+            if route == '/artifacts' and (get or post):
+                import artifacts
+                if get: return {'files':artifacts.catalog()},200
+                p=self.payload(310000)
+                if p.get('action')=='open': return artifacts.open_file(p.get('name')),200
+                return artifacts.create(p.get('format'),p.get('spec')),200
             if route == "/project-memory" and post:
                 import project_memory
                 payload = self.payload(26000)
@@ -226,12 +253,12 @@ def serve():
 
         def dispatch(self):
             if self.headers.get("Host") not in {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}:
-                return self.send_error(403)
+                return self.reject(403)
             if self.command == "POST" and self.headers.get("Content-Type", "").split(";")[0] != "application/json":
-                return self.send_error(400)
+                return self.reject(400)
             origin = self.headers.get("Origin")
             if origin and origin not in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}:
-                return self.send_error(403)
+                return self.reject(403)
             route = self.path.split("?")[0]
             if self.command == "GET" and route in ASSETS:
                 name, content_type = ASSETS[route]
@@ -251,6 +278,20 @@ def serve():
             if self.path not in PROXY.get(self.command, set()):
                 return self.send_error(404)
             self.proxy()
+
+        def reject(self, code):
+            # Windows may reset a connection closed with unread request bytes.
+            previous = self.connection.gettimeout()
+            try:
+                size = int(self.headers.get('Content-Length',0))
+                if self.command == 'POST' and 0 < size <= 310000:
+                    self.connection.settimeout(.25)
+                    self.rfile.read(size)
+            except (OSError, ValueError):
+                pass
+            finally:
+                self.connection.settimeout(previous)
+            self.send_error(code)
 
         def proxy(self):
             try:
@@ -288,9 +329,12 @@ def serve():
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True
+    import digests
+    digest_stop = digests.start()
     try:
         server.serve_forever()
     finally:
+        digest_stop.set()
         visuals.stop()
         eyes.request({"action": "stop"})
         server.server_close()

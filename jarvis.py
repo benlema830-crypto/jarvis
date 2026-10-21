@@ -39,6 +39,7 @@ import apps  # noqa: E402
 import context  # noqa: E402
 import hud  # noqa: E402
 import memory  # noqa: E402
+import privacy  # noqa: E402
 import reminders  # noqa: E402
 import tools  # noqa: E402
 import worksafe  # noqa: E402
@@ -189,6 +190,7 @@ class Brain:
         self.system = SYSTEM_PROMPT.format(  # fixed for the session, so it caches
             memory=memory.prompt_section(), off_limits=worksafe.blocked_apps())
         self.system += memory.recent_prompt()
+        self._memory_revision = memory.revision()
         self.tools = TOOL_DEFS + [web_search_def()]
         self.messages = []
         self._openai_turns = []
@@ -231,6 +233,15 @@ class Brain:
 
     def ask(self, text: str, speak):
         """Stream sentences using a provider fixed for the entire tool turn."""
+        revision = memory.revision()
+        if getattr(self, '_memory_revision', None) != revision:
+            self.system = SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.blocked_apps()) + memory.recent_prompt()
+            self.messages = []
+            self._openai_turns = []
+            self._openai_message_count = 0
+            if self._codex_brain is not None:
+                self._codex_brain.close()
+            self._memory_revision = revision
         config = self.selection.begin()
         if config != self.config:
             if self._codex_brain is not None:
@@ -284,9 +295,9 @@ class Brain:
             with self.client.beta.messages.stream(
                 model=self.config['model'],
                 max_tokens=4096,
-                system=self.system,
+                system=privacy.redact(self.system),
                 tools=self.tools,
-                messages=self.messages,
+                messages=privacy.payload(self.messages),
                 betas=BETAS,
                 context_management={"edits": [{"type": "compact_20260112",
                                                "trigger": {"type": "input_tokens", "value": COMPACT_AT}}]},

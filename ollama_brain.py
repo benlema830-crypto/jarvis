@@ -111,6 +111,8 @@ def models():
 
 
 def events(payload, cancel):
+    import privacy
+    payload = dict(payload, messages=privacy.payload(payload.get('messages',[])))
     if cancel.is_set():
         raise InterruptedError()
     session, response = _request('/api/chat', dict(payload, stream=True), stream=True)

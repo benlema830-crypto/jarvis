@@ -188,6 +188,8 @@ class TerminalWorker:
                               "minutes": round((time.time() - started) / 60, 1)})
 
     def _claude(self, prompt: str, session: str | None) -> dict:
+        import privacy
+        prompt = privacy.redact(prompt)
         """Run Claude Code once; streams its steps to the HUD and returns the final result."""
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)  # use the user's Claude login, not Jarvis's API key

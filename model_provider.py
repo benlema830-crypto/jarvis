@@ -7,6 +7,7 @@ import threading
 
 import requests
 import preferences
+import privacy
 from model_credentials import load_openai_key
 
 ROOT = Path(__file__).resolve().parent
@@ -46,6 +47,7 @@ def catalog():
 
 class Responses:
     def _post(self, payload, stream=False):
+        payload = {k:privacy.payload(v) if k in ('input','instructions') else v for k,v in payload.items()}
         try:
             key = load_openai_key()
         except Exception:
@@ -123,7 +125,7 @@ def text_history(messages):
                                 for b in content if (b.get('type') if isinstance(b, dict)
                                                      else getattr(b, 'type', '')) == 'text')
         if content:
-            out.append({'role': message['role'], 'content': content})
+            out.append({'role': message['role'], 'content': privacy.redact(content)})
     return out[-40:]
 
 
