@@ -36,6 +36,7 @@ models, credentials and the registered Obsidian vault retain their real paths.
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
 | Project continuity and routines | project_memory.py, routines.py, hud/productivity.js |
 | Digests, privacy and file tools | digests.py, privacy.py, artifacts.py, hud/automation.js |
+| Response preferences | response_settings.py, jarvis.py next-turn refresh, tools.py response_style, hud/automation.js |
 | Brain page | hud/brain.html, hud/brain.css, hud/brain.js (graph, inspector, reactor, chat), hud/panels.js (dialogs), hud/modes.js (Eyes/Watch/Holo/Focus) |
 | Brain server | brain.py, eyes.py, visual_modes.py, integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
@@ -60,6 +61,10 @@ Project handoffs are dated JSON entries in `data/handoffs/`. Named routine defin
 in `data/routines.json`; approval tokens stay in memory and expire. The local semantic index is
 `data/vault-vectors.sqlite3`, rebuilt incrementally from the selected vault with the installed
 `embeddinggemma:300m` model. These files contain personal context and are not committed.
+
+Response preferences live in `data/response-settings.json`. The development continuation for a native
+Linux port and the 58-item improvement backlog is `docs/plans/CLAUDE-LINUX-HANDOFF.txt`.
+Git excludes personal data, voices and models; the handoff documents separate migration requirements.
 
 `data/digests.json` stores schedules and attempts; `data/digests/` stores silent reports.
 `data/privacy.json` stores selected text filters; `memory.json.epoch` invalidates pre-edit model context.

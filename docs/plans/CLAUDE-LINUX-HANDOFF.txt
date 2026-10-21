@@ -1,0 +1,497 @@
+JARVIS: CLAUDE HANDOFF AND NATIVE LINUX ROADMAP
+Prepared 2026-10-21. This file is a development handoff, not a claim that the
+Linux port or the proposed upgrades have been implemented.
+
+START HERE
+==========
+The owner is switching coding assistants because Codex usage is running low.
+Continue the existing project; do not rebuild it from scratch. The owner values
+Linux freedom, customization and local control, and intends to install Linux
+alongside Windows when home. Native Linux is the intended exploration, not a
+WSL-only substitute. No distribution, desktop, partition layout or GPU driver
+version has been selected. Do not treat a suggestion as an installed component.
+
+The owner is currently at work and cannot do meaningful hardware testing.
+Prepare code, documentation and inert tests independently. Installation and real
+microphone/camera/headset/desktop acceptance happen when the owner is available.
+Do not repartition, change boot configuration, disable encryption, reboot or
+start a Linux installation as part of reading this handoff.
+
+The owner approved keeping all 37 reviewed existing features and liked all 58
+roadmap ideas below. This is a backlog, not an instruction to enable every sensor,
+schedule, network connection or paid service. Preserve explicit opt-in behavior.
+The owner explicitly does not want the old HUD as a selectable menu option.
+That menu option has been removed. The older HTTP service still supports the
+assistant and event stream; deleting its backend would break the current app.
+
+FIRST ACTIONS FOR CLAUDE
+=======================
+1. Read this file, docs/PROJECT-MAP.md, docs/STATUS.md and
+   docs/SETUP-TOMORROW.md. Inspect current Git status and recent commits.
+2. Ask what has happened since this handoff only if the filesystem cannot answer.
+   Establish whether still on Windows, testing live Linux, or already installed.
+3. Reuse the current implementation. Start with portable paths, platform adapters
+   and an import-safe text-only Linux boot, not a replacement assistant.
+4. Retain current privacy boundaries, approvals, cancellation, subscription-only
+   default and user preferences. Keep hardware/account acceptance distinct from
+   unit/browser fixtures and historical reports.
+5. Use the phased plan below; deliver small verified checkpoints. Do not attempt
+   the entire backlog in one unreviewable rewrite.
+
+CURRENT SOURCE AND CHECKPOINT
+=============================
+Canonical Windows repository: C:\Users\Lemab\jarvis
+Navigation hub: C:\Users\Lemab\Documents\Jarvis Agent
+Other installations: Documents\Jarvis-CustomVoice and Documents\Jarvis-LocalVoice.
+They are not the canonical main app; audit references before migrating them.
+Separate optional gesture app: C:\Users\Lemab\holo.
+Vault: C:\Users\Lemab\Documents\JARVIS Knowledge
+Generated documents: C:\Users\Lemab\Documents\JARVIS Documents
+Some hub directories are links, not independent copies; verify actual targets.
+
+Latest implementation checkpoint at handoff creation:
+  dfbf487 Add persistent response style controls and remove classic HUD menu option
+Earlier useful checkpoints:
+  224da9c Add scheduled digests, editable private memory and local file tools
+  a03455f Project continuity, semantic search and routines
+  f1714bd OAuth/local-provider work
+  7628f2e Original local checkpoint
+Documentation commits may appear after dfbf487. Inspect Git rather than assuming
+the worktree or running process still exactly matches this snapshot.
+
+Latest inert verification: 266 unit tests passed; Brain browser fixture passed;
+HOLO synthetic browser probe passed 26/26. Report:
+data/reports/project-verification.json (ignored personal runtime directory).
+Windows command: .venv\Scripts\python.exe scripts/verify_project.py
+Do not describe this as Linux compatibility, live voice, real camera or connected
+account verification. Unit imports currently include Windows dependencies.
+
+At the most recent quiet Windows activation: startup ready; microphone active;
+listener alive; no output error or pending speech. Selected conversation provider
+remained Codex gpt-6.1-sol. A configured credential is not unlimited usage.
+No new live spoken conversation was performed for response settings.
+
+CURRENT IMPLEMENTATION: PRESERVE AND EXTEND
+=========================================
+Core: jarvis.py owns the conversation/tool loop. brain.py serves the main Brain
+UI on loopback 7781. The assistant service on 7778 supplies events/control.
+hud/ contains the graph, reactor, dialogs and mode controls. open_brain.py and
+Windows launchers start the current app. Existing cloned Qwen speech and local
+Whisper GPU recognition are installed. Voice lock and interruption exist already;
+the roadmap calls for improvement and measurement, not pretending they are absent.
+
+Providers: codex_brain.py, ollama_brain.py, model_provider.py and
+model_credentials.py. Codex is selected, subscription-only mode enabled. Paid
+providers must not become an automatic fallback. An isolated local Ollama service
+uses 127.0.0.1:11435 with qwen3:4b and embeddinggemma:300m. Embeddings are separate
+from the conversation model. Do not infer that the owner switching from Codex to
+Claude as a coding assistant authorizes changing Jarvis's runtime provider.
+
+Knowledge: knowledge.py and knowledge_events.py read the vault and highlight
+retrieved notes in the graph. semantic_search.py maintains incremental, scoped
+SQLite embeddings with model/root/content invalidation and explicit keyword
+fallback. An actual small vault was indexed; large-vault relevance is untested.
+Tasks persist in vault Tasks.md.
+
+Project continuity: project_memory.py supports Jarvis and Rocket Frontier,
+dated handoffs, Git evidence, attributed reports and next actions. A stored report
+is historical evidence, not a freshly rerun test. routines.py has editable
+Development mode / Wrap up templates, exact-step previews, one-use approvals,
+expiry/edit invalidation, stop-on-error and cancellation between steps.
+
+Memory/privacy: memory.py has persistent facts, up to 20 recent turns, versioned
+editing/deletion, file locks and a revision/epoch mechanism excluding old context
+after changes. privacy.py filters recognizable secrets/SSNs by default; optional
+exact phrases/email/phone filters. Boundaries cover Jarvis-owned model text and
+new memory/handoff writes, not every image, log, old backup or coding-agent file
+read. Do not advertise complete data-loss prevention or erase old data silently.
+
+Digests: digests.py implements daily research/progress schedules, America/Chicago
+timezone, quiet hours, persisted attempt reservations/caps, restart interruption,
+visible failures and one job at a time. Default cap 2/day, configurable 1-4.
+No enabled schedules at handoff. Research has bounded tools/time and corroborated
+source-event URLs; generated prose still requires review. Progress can use local
+Git/reports without an AI call. Brain owns the scheduler; avoid duplicate owners.
+
+Files: documents.py creates Word documents. artifacts.py creates XLSX/PDF/PPTX
+locally with unique filenames, numeric totals and editable/vector charts.
+Strings remain literal in XLSX, preventing input formula execution. Files do not
+auto-open or send. Samples were reopened; a PDF was rendered/visually inspected.
+PDF fonts currently have Windows assumptions to replace on Linux.
+
+Response settings: response_settings.py, GET/POST /response-settings in brain.py,
+response_style tool in tools.py, More > Response settings in hud/automation.js.
+Defaults: humor 25/100, directness 75/100, brief detail, classic tone, balanced
+pushback, occasional "sir". Settings persist in data/response-settings.json and
+refresh provider context next turn while retaining in-session text dialogue.
+Honesty/directness controls wording bluntness; truthfulness, uncertainty and
+accurate completion reports always remain required. Serious contexts override
+humor; style never changes permissions. Voice examples: "Set humor to 80 percent",
+"Be more direct", "Give detailed explanations", "Stop calling me sir".
+
+Other retained features: activity/window-title history (work-app masking), recent
+file context, startup/on-demand briefings, calendar heads-ups, reminders/timers,
+dictation, coding sessions, desktop automation, file management, window/audio/media
+control, Focus nudges, Eyes/Watch, separate HOLO, workspace shortcuts and diagnostics.
+Optional Eyes/Watch/Focus/HOLO are not to be enabled just by opening a panel.
+No Telegram pairing/token and no saved real MCP accounts at the prior audit.
+OAuth/MCP code includes PKCE, discovery, refresh, encrypted storage and revocation;
+actual service acceptance remains separate. Calendar feed is configured but private.
+
+MIGRATION: WHAT COMES OVER
+==========================
+This is a port of an existing application, not a restart from zero.
+
+Copy/reuse, with configuration/schema review:
+* Source and Git history, docs, Python business logic, browser HUD assets/tests.
+* Vault notes, Tasks.md, generated documents and project repositories.
+* Facts/recent memory, handoffs, routine definitions, response/privacy preferences,
+  reminders, digest definitions/reports and relevant agent history from data/.
+  Inspect actual filenames rather than inventing or dropping unknown stores.
+* Voice recordings, voice profile, voice identity/enrollment data and model weights.
+  Weights/recordings are generally reusable; runtime compatibility and microphone
+  changes may require adjustments or owner re-enrollment. Do not guarantee this.
+* Local model blobs/manifests if compatible with the installed Linux runtime;
+  otherwise re-download the same verified model revision. Rebuild search caches
+  when paths/model identities change rather than assuming Windows indices fit.
+
+Recreate or adapt:
+* .venv and all compiled packages: create a Linux virtual environment. Do not copy
+  Windows Python executables or DLLs and expect them to run. Split platform-specific
+  dependencies out of requirements.txt and choose supported Linux builds.
+* Ollama/other executables, GPU stack, launchers/startup registration, device IDs,
+  fonts, paths, shortcuts, shell syntax, terminal integration and permissions.
+* Windows-specific desktop, activity, audio, credentials and automation backends.
+* DPAPI-encrypted credentials: Linux cannot simply decrypt the Windows stores.
+  Prefer fresh sign-ins / newly entered keys into a Linux secret-service backend.
+  Never put decrypted credentials into a Git handoff or ordinary transfer manifest.
+* Provider sessions/auth state may require new sign-in. Existing provider integration
+  is not a promise that another provider accepts the same account/session format.
+
+IMPORTANT BACKUP GAP: .gitignore excludes data/, .env, models/, .venv/, voices/,
+*.wav and voice-profile.json. A Git clone alone does NOT include the owner's
+memory, models, voice or credentials. Back up these separately to owner-controlled
+storage. Do not upload them into a source repository or attach private contents
+to a model prompt. Source backup and personal-data backup are distinct jobs.
+
+Use a separate Linux working copy on a Linux filesystem. Avoid running both OS
+installs against one live data directory. Copy/snapshot data while writers are
+stopped; version schemas and migrate a copy, retaining the original. SQLite WAL
+databases need a consistent backup/checkpoint rather than copying only a busy
+.sqlite3 file. Do not migrate stale PID, socket, lock or approval-token state.
+Review schedules on first Linux startup; keep the scheduler paused until the
+owner confirms enabled jobs and timezone. Preserve their definitions.
+
+Windows paths such as C:\Users\Lemab become configured Linux paths. Audit stored
+routine/project/workspace references and UI open-file URLs as well as source.
+Case sensitivity matters: imports, filenames and asset URLs must match exactly.
+Dual boot runs one OS at a time; Linux Jarvis cannot control a Windows desktop
+that is not running. Windows remains available by rebooting. Cross-device control
+requires a separately running machine or an explicit VM/remote setup.
+
+DUAL-BOOT SESSION WHEN THE OWNER IS HOME
+======================================
+Do this with the owner present and using current distro/vendor documentation.
+No disk sizes, encryption status, free space or target disk have been verified.
+Do not give partition-specific commands based on guesses.
+1. Inventory CPU/GPU/RAM, physical disks and partitions, UEFI boot, encryption,
+   free space, headset, networking and other hardware. Choose distro/desktop then.
+2. Verify an independent backup of irreplaceable files and Jarvis personal data.
+   Ensure any BitLocker/device-encryption recovery key is available outside this PC;
+   never print the key into chat/logs. Follow current distro guidance on encryption.
+3. Prefer a separate physical disk if available and desired. Otherwise decide the
+   actual Windows shrink/free-space plan after examining the real disk layout.
+4. Boot a live USB and test display, network, headset microphone/output, suspend
+   and input devices. Validate GPU/driver support for the exact hardware.
+5. Review the installer disk-change summary with the owner before applying it.
+   Keep Windows and its data; never select an erase-entire-disk path for dual boot.
+6. Verify both operating systems boot. Check GPU compute and audio on Linux.
+   Account for Windows Fast Startup/hibernation before writing shared NTFS data;
+   use documented clean shutdown/mount behavior, not a forced unsafe mount.
+7. Only then restore a Linux working copy and begin staged Jarvis acceptance.
+
+PORT ARCHITECTURE AND DELIVERY PHASES
+===================================
+A. Baseline and backup (Windows, can prepare while owner is at work)
+   Inventory dependencies and Windows imports; record inert test results and
+   latency methodology; prepare an excluded-data backup manifest without secrets.
+   Exit: known source checkpoint, documented data stores, backup verified when done.
+
+B. Platform boundary (can implement without Linux hardware)
+   Introduce narrow adapters for paths, app launch, windows, audio, notifications,
+   hotkeys/dictation, activity, screenshots/input, secrets and startup services.
+   Preserve tool schemas and Python business logic. Defer platform imports and
+   report unsupported capabilities clearly; never claim an action succeeded.
+   Centralize paths (Linux XDG config/data/cache locations), validate user-selected
+   roots, and keep old Windows data readable. Add migration/schema versioning.
+   Split dependencies by platform and ensure text-only core imports without Win32.
+   Exit: Windows regressions pass and Linux CI can import/run portable unit tests.
+
+C. Minimal Linux running app (after installation)
+   Fresh venv, dependencies, configured directories, local secret backend, one
+   explicit provider, text conversation, vault read/search, memory and browser HUD.
+   No microphone, desktop actions or scheduler required for this milestone.
+   Exit: restart preserves settings/memory; truthful errors; no accidental paid calls.
+
+D. Voice and desktop parity
+   Validate GPU transcription and cloned speech separately, then conversation,
+   interruption and selected microphone/speaker. Implement the chosen desktop's
+   actual window/input/screenshot/hotkey integrations and work-app masking.
+   Port agent.py too: it imports Win32, so desktop.py alone is not sufficient.
+   Exit: owner can perform representative existing tasks; approvals/cancel work;
+   absence of a portal/permission produces a clear error instead of blind clicks.
+
+E. Reliable native services and installation
+   Separate voice/brain/model workers where justified, use user service units,
+   health checks and bounded restart policies. Keep exactly one mic listener and
+   scheduler. Implement lock-safe shutdown, dependency readiness and rollback.
+   Exit: reboot/crash recovery tested; no unexpected speech or duplicate jobs.
+
+F. Speed and quality improvements
+   Record cold/warm p50/p95 timings on a repeatable task set, CPU/GPU/RAM/VRAM,
+   model/driver versions and response quality. Optimize the measured bottleneck.
+   First priorities: interruption, time to first audible speech, verified tool
+   outcomes, project memory, then desktop integration. Retest under gaming/load.
+   Exit: measured improvements with acceptable accuracy/voice quality.
+
+G. Expand ownership, plugins and devices
+   Deliver the remaining backlog in scoped slices. Use capability declarations,
+   explicit opt-ins, documented APIs and reversible configuration migrations.
+
+Do not over-split into microservices before there is a measured reliability or
+resource reason. Linux is a foundation for changes, not an automatic speedup.
+
+DETAILED BACKLOG: ALL 58 IDEAS
+=============================
+Each entry describes proposed scope, implementation direction and acceptance.
+Dependencies: B=platform boundary, C=text core, D=voice/desktop, E=services,
+F=benchmarks, G=optional expansion. Many can be prepared on Windows too.
+
+DESKTOP AND INTERACTION
+01. Custom desktop interface [D/G]
+    Extend the existing Brain rather than restore Classic HUD. Add themes, density,
+    docking and configurable panels; optionally integrate with the chosen desktop.
+    Accept: settings persist, panels fit multiple screen sizes and keyboard works.
+02. Persistent desktop presence [D]
+    Provide a compact orb/sidebar with intentional layering, click-through behavior
+    where supported, multi-monitor placement and a clear microphone status.
+    Accept: no focus stealing; hide/show and monitor reconnect behave predictably.
+03. Voice-controlled workspaces [B/D]
+    Extend routines with app launch, placement, project paths and selected audio.
+    Use desktop-native APIs where supported. Accept: preview exact effects, partial
+    failure is visible, cancellation works and a repeated run avoids duplicates.
+04. App-specific behavior [B/D]
+    Use declared app/context profiles to select relevant tools and response styles.
+    Accept: switching apps updates context and protected apps stay excluded.
+05. Unified command palette [C/D]
+    Search apps, vault notes, files, routines and conversations with typed result
+    actions. Accept: keyboard navigation, correct ranking and no action on search.
+06. Contextual controls [D]
+    Add opt-in selected-file/app actions through desktop/editor integrations.
+    Accept: show actual selected target and reject stale targets after focus changes.
+07. Hardware controls [D/G]
+    Map macro keys/buttons to listen, stop and mute; optional status LEDs.
+    Accept: disconnect recovery, explicit device mapping and reliable stop/mute.
+08. Interaction modes [D]
+    Unify current wake/continuous/text behavior with push-to-talk and quiet modes.
+    Accept: clear visible state, persisted choice and no recording in hard mute.
+
+CONVERSATION AND VOICE
+09. Natural interruption [D/F]
+    Improve existing interruption with full-duplex capture and immediate playback/
+    generation cancellation. Test echo versus actual owner speech.
+    Accept: measured stop latency and no old audio resuming after interruption.
+10. Streaming conversation [D/F]
+    Pipeline recognition, model tokens and safe phrase-level TTS chunks. Do not
+    speak tentative tool-success claims before outcomes exist.
+    Accept: first-audio improvement, natural phrases and cancellation across stages.
+11. Better turn detection [D/F]
+    Tune voice activity/end-of-turn with pause-aware thresholds and optional local
+    detection model. Accept: benchmark unfinished sentences, pauses and noisy speech.
+12. Echo cancellation [D]
+    Evaluate PipeWire echo cancellation using playback reference and real headset/
+    speaker layouts. Accept: fewer self-triggers without cutting off owner speech.
+13. Noise-aware listening [D/F]
+    Compare denoising/gating configurations on recorded owner-approved samples.
+    Accept: improved recognition in fan/music noise without excessive CPU or clipping.
+14. Custom pronunciation [D]
+    Add an editable TTS pronunciation dictionary for names/projects/terms; keep
+    visible text unchanged. Accept: correct names and sane punctuation/token handling.
+15. Expressive speech [D/F]
+    Use only supported synthesis controls for pace/pauses/emphasis; evaluate voice
+    identity and intelligibility. Accept: owner comparison, no imaginary engine knobs.
+16. Personality profiles [C]
+    Extend response_settings.py with named work/casual/night profiles and explicit
+    activation. Accept: truthful baseline and permissions unchanged; restart persists.
+17. Context-sensitive brevity [C]
+    Combine current detail setting with explicit task context; simple actions stay
+    short, learning questions can expand. Accept: sample dialogues and user override.
+18. Better corrections [C/D]
+    Track current intent, targets and task IDs so "the other folder" can amend a
+    pending action. Accept: ambiguity asks for clarification before changing files.
+
+REASONING, KNOWLEDGE AND MEMORY
+19. Task-based model selection [C/F]
+    Explicit routing policy for deterministic commands, local models and remote
+    reasoning. Accept: visible route, quality/latency comparison, no silent paid use.
+20. Explicit offline mode [B/C]
+    Disable external-capability tools/providers and use available local weights.
+    Accept: blocked egress test; missing local capabilities honestly reported.
+21. Evidence-backed memory [C]
+    Extend facts with source, timestamp, confidence/status and owner correction.
+    Accept: migrations preserve existing facts; source text remains untrusted data.
+22. Memory conflicts [C]
+    Detect incompatible facts, keep provenance and offer a resolution without
+    silent overwrite. Accept: user corrections win and stale edits cannot resurrect.
+23. Project knowledge maps [C]
+    Extend existing project handoffs/graph with decisions, tasks, files and reports.
+    Accept: current versus historical evidence visible and no invented graph edges.
+24. Document understanding [C/G]
+    Add bounded PDF/text extraction and optional local OCR with page references.
+    Accept: scanned/rotated samples, extraction errors, no unintended document upload.
+25. Session restoration [B/C/D]
+    Persist task/workspace metadata and offer a preview of files/apps to reopen.
+    Accept: missing paths handled; no replay of destructive actions or stale approvals.
+26. Verified outcomes [B/C/D]
+    Strengthen tools' structured results and postconditions: file exists, window
+    moved, service ready. Accept: induced failures never become success reports.
+27. Learned workflows [C/D]
+    Convert an explicitly demonstrated action trace into an editable routine draft.
+    Accept: owner reviews parameters/steps; exclude secrets and one-off approvals.
+28. Personal vocabulary [D]
+    Store aliases and supported recognition hints for names/technical terms.
+    Accept: improvement on a fixed speech set without corrupting ordinary phrases.
+
+PRACTICAL CAPABILITIES
+29. Development environment management [B/C/E]
+    Project-declared start/test/log commands with cwd/env boundaries and job IDs.
+    Accept: real exit codes, bounded output, cancel/timeout and no hidden package installs.
+30. Isolated coding workspaces [B/E/G]
+    Separate checkout/worktree or container per job, with explicit mounts/network/
+    credentials. A container is not an absolute security boundary.
+    Accept: diffs reviewable, no secret leakage and clean cancellation/cleanup.
+31. Service monitoring [E]
+    Health/readiness probes, bounded restart/backoff and visible degraded states.
+    Accept: crash one worker without losing unrelated services or restart loops.
+32. Local server management [E/G]
+    Explicit host profiles, authenticated transport and allowlisted maintenance
+    operations. Accept: target shown, least privilege, real verification and audit.
+33. Home automation [G]
+    Start with an explicitly connected supported hub and read-only device inventory.
+    Accept: owner-approved harmless action/decline tests, no automatic discovery control.
+34. Phone companion [G]
+    Extend existing Telegram or create an authenticated companion with status/tasks.
+    Accept: pairing/revocation, narrow access and no exposure of loopback APIs to LAN.
+35. Room voice devices [D/E/G]
+    Satellites send authorized audio to a central service; define room routing and
+    physical mute. Accept: no wrong-room speech and predictable offline behavior.
+36. Cross-device handoff [C/G]
+    Transfer task IDs and scoped context through an authenticated service; account
+    for conflicts and unreachable devices. Accept: resume once, no duplicate actions.
+37. Research workflows [C/G]
+    Extend bounded digests with claim/source mapping, dates and contradictory
+    evidence. Accept: distinguish observed sources from model-generated links.
+38. Scheduled work [C/E]
+    Extend existing scheduler deliberately, preserving caps/quiet hours/reservations.
+    Accept: missed-run policy, restart/idempotency and previews; no default enablement.
+
+PERFORMANCE
+39. Warm selected models [E/F]
+    Choose keep-alive per model and VRAM budget. Accept: cold/warm comparisons and
+    safe eviction when gaming or voice needs memory; avoid keeping everything loaded.
+40. Cache repeated context [C/F]
+    Cache source-derived summaries and retrieval work by content/model/privacy
+    revision. Accept: updates/deletions invalidate; private stale context cannot return.
+41. Direct command execution [B/C/F]
+    Use a small explicit intent parser for unambiguous commands through the SAME
+    dispatcher/approval checks. Accept: ambiguity falls back; no permission bypass.
+42. Parallel independent work [C/F]
+    Concurrent read-only calendar/task/status retrieval with timeouts and ordered
+    results. Accept: shared state remains safe; dependent mutations stay sequential.
+43. Incremental indexing [C/F]
+    Improve existing hash-based embedding index with watched changes, debounce and
+    periodic reconciliation. Accept: renames/deletes/model changes and large-vault load.
+44. Optimize compatible models [D/F]
+    Benchmark supported quantization/backends on the actual GPU; include accuracy,
+    voice quality, VRAM and startup cost. Accept: measured gains, reversible selection.
+45. Coordinate GPU memory [D/E/F]
+    Track model residency and reserve headroom for speech/vision; schedule expensive
+    loads. Accept: concurrent stress test, no OOM loops and honest degraded behavior.
+46. Prioritize conversations [E/F]
+    Background job budgets/yielding plus service resource controls where supported.
+    Accept: lower interactive tail latency while jobs make bounded progress.
+47. Replace unnecessary polling [B/E/F]
+    Use supported file/desktop/service events; retain bounded reconciliation.
+    Accept: missed-event recovery and measured idle CPU improvement.
+48. Measure every stage [C/D/F]
+    Add correlated monotonic timestamps for capture/end-of-turn/transcription/model/
+    tool/TTS/first playback. Accept: p50/p95 cold/warm reports, no transcript secrets.
+
+OWNERSHIP AND CUSTOMIZATION
+49. Editable configuration [B/C]
+    Versioned documented schema with layered defaults, GUI edits, validation and
+    separate secrets. Accept: atomic updates and clear errors for unsupported values.
+50. Plugin system [B/G]
+    Manifest, capability declarations, stable tool contracts, version compatibility
+    and disable/uninstall. Accept: plugin failure cannot corrupt the main registry.
+51. Per-plugin permissions [G]
+    Enforce declared file/network/device access through brokered operations or
+    OS isolation. In-process arbitrary Python cannot honestly provide strong isolation.
+    Accept: denied operations tested at enforcement boundary, not prompt-only rules.
+52. Network controls [E/G]
+    Per-component egress policy with visible destinations and offline enforcement.
+    Accept: actual blocked connections; no claim prompt instructions are a firewall.
+53. Portable personal data [B/C]
+    Versioned export/import with manifest, integrity checks and separately handled
+    secrets. Accept: round-trip on a clean profile without changing the original.
+54. Reproducible installation [B/E]
+    Supported distro/dependency versions, model checksums, install script and
+    diagnostics. Accept: clean-machine repeatability; interactive sign-ins remain explicit.
+55. Configuration rollback [B/E]
+    Snapshot config/schema before upgrades; version data migrations and offer a
+    documented restore. Accept: rollback rehearsal without losing newer personal data.
+56. Independent components [B/E]
+    Define stable local APIs and health/version negotiation before splitting workers.
+    Accept: replace/restart TTS without corrupting conversation or duplicate listeners.
+57. Visible activity history [C/E]
+    Extend existing activity with bounded action audit: requested target, permission,
+    execution and verified outcome. Accept: private fields redacted and retention editable.
+58. Desktop choice [B/D]
+    Choose one supported desktop first; implement a capability matrix for others.
+    Accept: unsupported window/input features are clearly disabled. Do not promise
+    identical behavior across every Wayland compositor/window manager.
+
+SUGGESTED FIRST IMPLEMENTATION SLICE FOR CLAUDE
+=============================================
+Before owner hardware testing: platform/import audit, path configuration, split
+requirements, adapter interfaces and an inert Linux text-mode test target.
+After Linux installation: text chat + vault/memory + existing HUD, then voice.
+Only after parity: latency work and richer desktop integration. Do not discard
+working features in pursuit of a dramatic visual rewrite.
+
+CONTINUATION LOG REQUIREMENTS
+=============================
+At each checkpoint, record source commit, changed files, tests actually run,
+OS/hardware context, unresolved issues and next concrete task. Keep credentials,
+private transcripts and raw personal documents out of committed handoffs.
+Update this handoff or append a dated successor; mark backlog items implemented
+only with evidence. Preserve owner choices and distinguish tentative design.
+
+OFFICIAL REFERENCES (verify current details during implementation)
+================================================================
+Dual boot / Ubuntu installation example; distro not yet chosen:
+https://ubuntu.com/tutorials/install-ubuntu-desktop
+Linux setup/encryption documentation:
+https://ubuntu.com/desktop/docs/en/latest/
+Python environments must be recreated:
+https://docs.python.org/3.14/library/venv.html
+Windows DPAPI user/machine binding:
+https://learn.microsoft.com/en-us/windows/win32/seccrypto/example-c-program-using-cryptprotectdata
+PipeWire audio graph and latency:
+https://docs.pipewire.org/index.html
+Wayland-compatible desktop portal remote input/screen integration:
+https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html
+systemd resource controls:
+https://www.freedesktop.org/software/systemd/man/258/systemd.resource-control.html
+Inference benchmarking example, only if compatible with chosen models/hardware:
+https://docs.nvidia.com/deeplearning/tensorrt/11.4.0/performance/benchmarking.html

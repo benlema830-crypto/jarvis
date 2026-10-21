@@ -53,8 +53,19 @@ calendar heads-ups, speech never reads links.
 - Optional Telegram pairing and one harmless approved MCP call, plus a declined call.
 
 Automated checks: `python -m unittest discover -s tests` and `python tests/check_brain_browser.py`.
-Latest expanded unit suite: 262 tests. See the repeatable verification report at `data/reports/project-verification.json` for pass/fail evidence, Brain UI and HOLO probe results.
+Latest expanded unit suite: 266 tests. See the repeatable verification report at `data/reports/project-verification.json` for pass/fail evidence, Brain UI and HOLO probe results.
 These checks use inert fixtures and do not establish live camera, headset or external-account behavior.
+
+## Response settings and Linux continuation (2026-10-21)
+
+- Response preferences implemented: humor, directness, explanation length, tone, pushback and use of
+  "sir". More > Response settings and voice tools persist changes across restarts; next-turn refresh
+  retains text dialogue. Truthfulness and action approvals are independent of style.
+- All reviewed existing features retained. Classic HUD removed from the selectable menu; the assistant
+  HTTP/event backend remains required. Latest feature checkpoint: `dfbf487`.
+- Native Linux dual boot is planned by the owner; no Linux installation, disk changes or Linux hardware
+  acceptance has occurred. Detailed current-state handoff, migration boundaries, phased implementation
+  and all 58 proposed improvements: [Claude/Linux handoff](plans/CLAUDE-LINUX-HANDOFF.txt).
 
 ## Project continuity additions (2026-10-21)
 
