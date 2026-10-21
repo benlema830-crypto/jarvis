@@ -170,6 +170,13 @@ addEventListener('load', async () => {
     await wait(() => $('projectToolResult').textContent.includes('Persistence.md'), 'semantic sources');
     assert($('projectToolResult').querySelector('a[href^="obsidian:"]'), 'semantic source link');
     $('projectToolsDialog').close();
+    stage('response settings');$('responseSettingsBtn').click();
+    await wait(()=>$('responseSettingsDialog').querySelector('[aria-label="Humor"]').value==='25','style loaded');
+    const humor=$('responseSettingsDialog').querySelector('[aria-label="Humor"]');humor.value='80';humor.dispatchEvent(new Event('input'));
+    [...$('responseSettingsDialog').querySelectorAll('button')].find(b=>b.textContent==='Save response settings').click();
+    await wait(()=>window.posts.some(p=>p.path==='/response-settings' && p.body.humor===80),'style saved');
+    $('responseSettingsDialog').close();
+    assert(!$('moreMenu').textContent.includes('Classic HUD'),'old HUD option returned');
     stage('memory tools'); $('memoryToolsBtn').click();
     await wait(() => $('memoryDialog').textContent.includes('Save correction'), 'memory loaded');
     const memInput=$('memoryDialog').querySelector('[aria-label="Remembered fact"]');memInput.value='Likes coffee';
@@ -244,6 +251,7 @@ def serve():
                     'privacy':{'terms':[],'email':False,'phone':False}},
                 '/digests': {'timezone':'America/Chicago','quiet_start':'22:00','quiet_end':'08:00','daily_limit':2,'jobs':[],'runs':[]},
                 '/artifacts': {'files':[]},
+                '/response-settings': {'humor':25,'directness':75,'detail':'brief','tone':'classic','pushback':'balanced','address':'occasionally'},
             }
             if path == "/integration-status":
                 from unittest.mock import patch
@@ -265,6 +273,7 @@ def serve():
             if self.path=='/memory':
                 return self.send({'revision':'v2','facts':[{'id':'f2','fact':body.get('fact','Likes tea')}],
                     'recent':[],'privacy':{'terms':[],'email':False,'phone':False}})
+            if self.path=='/response-settings':return self.send(body)
             if self.path=='/digests':return self.send({'saved':True})
             if self.path=='/artifacts':return self.send({'name':'Sample.xlsx'})
             if self.path == '/routines':

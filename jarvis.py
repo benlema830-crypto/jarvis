@@ -40,6 +40,7 @@ import context  # noqa: E402
 import hud  # noqa: E402
 import memory  # noqa: E402
 import privacy  # noqa: E402
+import response_settings  # noqa: E402
 import reminders  # noqa: E402
 import tools  # noqa: E402
 import worksafe  # noqa: E402
@@ -114,12 +115,12 @@ def quick_reply(text):
         return f"Couldn't open {name}."
     return f"{name.capitalize()} opened." if result == f"Opened {name}" else result
 
-SYSTEM_PROMPT = """You are JARVIS, the AI from Iron Man, now running on the user's Windows PC. Use "sir" occasionally in conversation; don't append it to routine confirmations.
+SYSTEM_PROMPT = """You are JARVIS, the AI from Iron Man, now running on the user's Windows PC.
 
-Personality: calm, sharp and quietly loyal, with understated British wit. Be direct. Personality must not add words to a simple task confirmation.
+Be attentive and clear. Apply the configured response preferences. Personality must not add words to a simple task confirmation.
 
 Everything you write is spoken aloud by a text-to-speech voice, so:
-- Be brief by default and use judgment about how much information the user needs. There is no rigid word limit.
+- Follow the configured explanation detail and use judgment about how much information the user needs. There is no rigid word limit.
 - For a successful simple action, give only the shortest useful confirmation, such as "Roblox opened." or "Timer set for ten minutes." Only claim success when the tool result supports it.
 - For simple actions, call the tool silently. Do not announce your plan or narrate tool steps. Afterward, give one short result sentence. Do not repeat tool details unless needed to explain a failure.
 - For a quick factual question, give the answer directly. Skip introductory acknowledgments, restating the request, and explaining obvious results.
@@ -191,6 +192,8 @@ class Brain:
             memory=memory.prompt_section(), off_limits=worksafe.blocked_apps())
         self.system += memory.recent_prompt()
         self._memory_revision = memory.revision()
+        self._response_settings = response_settings.read()
+        self.system += response_settings.prompt(self._response_settings)
         self.tools = TOOL_DEFS + [web_search_def()]
         self.messages = []
         self._openai_turns = []
@@ -234,14 +237,24 @@ class Brain:
     def ask(self, text: str, speak):
         """Stream sentences using a provider fixed for the entire tool turn."""
         revision = memory.revision()
+        style = response_settings.read()
         if getattr(self, '_memory_revision', None) != revision:
-            self.system = SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.blocked_apps()) + memory.recent_prompt()
+            self.system = SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.blocked_apps()) + memory.recent_prompt() + response_settings.prompt(style)
             self.messages = []
             self._openai_turns = []
             self._openai_message_count = 0
             if self._codex_brain is not None:
                 self._codex_brain.close()
             self._memory_revision = revision
+            self._response_settings = style
+        elif getattr(self, '_response_settings', None) != style:
+            self.system = SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.blocked_apps()) + memory.recent_prompt() + response_settings.prompt(style)
+            self.messages = model_provider.text_history(self.messages)
+            self._openai_turns = []
+            self._openai_message_count = 0
+            if self._codex_brain is not None:
+                self._codex_brain.close()
+            self._response_settings = style
         config = self.selection.begin()
         if config != self.config:
             if self._codex_brain is not None:

@@ -1015,6 +1015,21 @@ def manage_digests(action: str = 'list', specification: str = '{}') -> str:
     return json.dumps(_brain('/digests',dict(data,action=action),timeout=200))
 
 
+@beta_tool(eager_input_streaming=True)
+def response_style(settings: str = '{}') -> str:
+    """Read or change Jarvis's response style on explicit user request. Takes effect next turn.
+    Honesty is always on: 'honesty level' means directness, never permission to deceive.
+
+    Args:
+        settings: JSON object; {} reads settings. Optional humor and directness: integers 0–100;
+            detail: brief/balanced/detailed; tone: classic/friendly/professional;
+            pushback: gentle/balanced/firm; address: never/occasionally/often (use of sir).
+    """
+    import json, response_settings
+    changes=json.loads(settings)
+    return json.dumps(response_settings.update(changes) if changes else response_settings.read())
+
+
 TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, forget, set_reminder, list_reminders, cancel_reminder,
@@ -1024,7 +1039,7 @@ TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_f
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          search_knowledge, read_knowledge_note, create_knowledge_note,
          look_through_camera, brain_mode, focus_mode, holo, add_task, list_tasks, complete_task,
-         create_document, send_telegram, switch_model, project_handoff, named_routine, create_artifact, manage_digests]
+         create_document, send_telegram, switch_model, project_handoff, named_routine, create_artifact, manage_digests, response_style]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
 

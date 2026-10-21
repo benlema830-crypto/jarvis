@@ -137,6 +137,9 @@ def serve():
             get, post = self.command == "GET", self.command == "POST"
             if route == "/brain-data" and get:
                 return snapshot(), 200
+            if route == '/response-settings' and (get or post):
+                import response_settings
+                return response_settings.read() if get else response_settings.update(self.payload(2000)),200
             if route == '/memory' and (get or post):
                 import memory
                 if get: return memory.snapshot(), 200

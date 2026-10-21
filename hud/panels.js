@@ -332,7 +332,6 @@
   const items = [
     ['Voice health', () => { health.showModal(); renderHealth(); }], ['Change model…', () => J.emit('open-model')],
     ['Workspace folders', showWorkspace], ['Next steps', showPlan], null,
-    ['Classic HUD ↗', () => window.open('/classic', '_blank', 'noopener')],
     ['Keyboard: / search · F fit · Esc clear', null],
   ];
   for (const item of items) {

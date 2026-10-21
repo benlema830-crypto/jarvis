@@ -263,6 +263,20 @@ Library references: [openpyxl charts](https://openpyxl.readthedocs.io/en/stable/
 [python-pptx](https://python-pptx.readthedocs.io/en/latest/user/quickstart.html),
 [ReportLab Platypus](https://docs.reportlab.com/reportlab/userguide/ch5_platypus/).
 
+## 12. Response settings
+
+**More > Response settings** saves humor (0–100), honesty/directness (tactful to blunt),
+explanation detail, classic/friendly/professional tone, disagreement firmness and frequency of "sir".
+Honesty itself cannot be reduced: uncertainty, evidence and truthful action reports remain required.
+Serious situations override humor, and simple action confirmations stay short. These are model
+instructions, not guarantees of an exact joke frequency. Settings apply on the next turn and survive
+restarts; changing style refreshes provider context while retaining recent in-session dialogue.
+
+Voice examples: "Set humor to 80 percent", "Be more direct", "Give detailed explanations",
+or "Stop calling me sir". Defaults are humor 25, directness 75, brief, classic, balanced pushback,
+and occasional sir. Preferences live in `data/response-settings.json`, separate from personal memory.
+All previously reviewed features are retained. The Classic HUD menu option has been removed.
+
 ## Restarting
 
 - Python changes: say **"Jarvis, power down"**, then open the **JARVIS Brain** shortcut.
