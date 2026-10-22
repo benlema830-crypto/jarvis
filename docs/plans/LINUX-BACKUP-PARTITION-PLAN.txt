@@ -1,0 +1,183 @@
+WINDOWS / FEDORA BACKUP AND PARTITION PLAN
+Prepared 2026-10-21. This is a proposed plan, not an executed backup or resize.
+
+CURRENT STATUS
+No files have been copied to independent backup storage. No partitions resized.
+Only independent storage currently connected is the Fedora installer USB.
+The owner confirmed no other backup location is available yet. A laptop with
+sufficient free storage could be another destination if explicitly selected.
+Do not reuse or format the installer USB as a backup destination.
+
+Hardware observed:
+- Disk 0: MSI M461 2TB NVMe, GPT, currently Windows boot/system disk.
+- Disk 1: Memorex USB Flash Drive, 62,026,416,128 bytes, Fedora installer.
+- Windows C: 1,999,751,868,416 bytes, approximately 1,862.4 GiB.
+- C: free at inspection: approximately 1,398.4 GiB; changes as apps run.
+- Existing partitions: 100 MiB EFI, 16 MiB Microsoft Reserved, C:, 500 MiB Recovery.
+- Secure Boot enabled. C: fully decrypted, BitLocker protection off at inspection.
+- USB metadata: Fedora Workstation Live 44, x86_64 boot files present.
+- Full USB checksum NOT verified: helper calculation error; elevated retry was
+  rejected by automatic approval review as blocked by policy. Use the USB's
+  built-in media test before continuing, and stop on failure.
+
+WHAT EACH STEP DOES
+A file backup copies personal files to another physical disk or verified cloud
+storage. It does not automatically preserve an immediately bootable Windows
+installation, installed applications, or every Windows-protected credential.
+A full system image is a separate, larger backup option for restoring Windows
+and its partitions; it needs a suitable image tool and working recovery media.
+Partitioning reduces the space assigned to Windows and creates unallocated
+space for Linux. It changes the disk layout and needs a verified backup first.
+A live USB test starts Fedora without installing; no resize is needed to try it.
+Keep the Windows disk unmodified during the live test.
+
+BACKUP INVENTORY
+Measured folders total approximately 122 GiB at inspection. This is a partial
+inventory, not a full account of all personal data on C:. It includes some
+reinstallable environments, downloaded models and caches. Allow headroom for
+other application saves/settings and changes since inspection.
+For a broad file backup, aim for at least 200 GB free on separate storage.
+A full system image will need substantially more, based on the tool and used
+disk space; C: currently has about 464 GiB allocated to used files/system data.
+
+Preserve these complete project trees, including hidden files and .git history:
+C:\Users\Lemab\jarvis
+C:\Users\Lemab\holo
+C:\Users\Lemab\Documents
+C:\Users\Lemab\AI
+C:\Users\Lemab\calendar-tool
+C:\Users\Lemab\momentum-agent
+C:\Users\Lemab\momentum-review
+C:\Users\Lemab\paper-trader
+C:\Users\Lemab\paper-trader-lab
+C:\Users\Lemab\trading-agent
+
+Documents includes Rocket Frontier, JARVIS Knowledge, JARVIS Documents,
+Jarvis Agent, Jarvis-CustomVoice, Jarvis-LocalVoice and KokoroVoice.
+AI includes training inputs/outputs and ComfyUI assets; do not treat all of it
+as disposable downloaded software.
+
+Preserve personal folders in BOTH their local and redirected locations:
+C:\Users\Lemab\Desktop
+C:\Users\Lemab\Downloads
+C:\Users\Lemab\Pictures
+C:\Users\Lemab\Videos
+C:\Users\Lemab\Music
+C:\Users\Lemab\Saved Games
+C:\Users\Lemab\OneDrive
+
+Registry confirms the active Desktop/Documents/Pictures folders are under
+OneDrive. Metadata scan found cloud/recall attributes on 14 files. Verify cloud
+copies from OneDrive's web interface or explicitly download those files before
+an offline backup. Enumeration is not proof that all file contents are local.
+OneDrive running is not proof a backup is complete or current.
+
+Preserve relevant tool configuration and history locally, without exposing
+credential contents in logs, source control or model prompts:
+C:\Users\Lemab\.codex
+C:\Users\Lemab\.claude
+C:\Users\Lemab\.config
+C:\Users\Lemab\.ollama
+Other relevant dotfiles/folders: .ssh if present, .gitconfig, .claude.json,
+.vscode configuration, and custom skills. Check hidden user-root files too.
+Credential copies may be usable only by the existing Windows installation;
+expect fresh sign-ins on Linux. Keep sensitive backups private.
+
+Application data needing inclusion/review:
+- AppData\Roaming\.minecraft: saves, world_backups, mods/configs.
+- AppData\Local\Roblox\RobloxStudio: local Studio data and autosaves.
+- AppData\Roaming\obs-studio, obsidian, Blender Foundation: user settings.
+- Browser bookmarks, profiles and password-manager recovery/sync status.
+- Steam userdata and other game saves in AppData, Documents or game folders.
+- Other profiles/custom application data if present; the initial scan is not
+  an exhaustive application-by-application save inventory.
+
+JARVIS-SPECIFIC REQUIREMENTS
+Git excludes data/, .env, voices/, models/, *.wav, voice-profile.json and
+virtual environments. A Git clone alone misses personal memory and voice data.
+Preserve the whole Jarvis tree in the Windows backup, including ignored files.
+Preserve sibling voice projects and original voice/training recordings.
+For a consistent snapshot, pause Jarvis's writers and relevant other apps
+before copying. Do not stop unrelated background trading/research services
+without coordinating with the owner. Use an application-consistent database
+backup or a coordinated snapshot; do not copy only a busy SQLite .db while
+omitting its WAL. Record any files that cannot be backed up.
+Recreate Windows Python environments on Linux; copying them is for recovery.
+Do not replay old pending actions, enabled schedules or approval tokens after
+migration. See CLAUDE-LINUX-HANDOFF.txt for the migration boundaries.
+
+BACKUP EXECUTION AND VERIFICATION (PENDING DESTINATION)
+1. Identify destination physical disk/account and confirm available capacity.
+   A folder or second partition on the same Windows SSD is not independent.
+   Do not format a destination that already holds files.
+2. Choose file backup versus an additional full Windows system image. Make the
+   exact coverage clear before calling the PC backed up.
+3. Create a dated, new destination folder. Copy rather than move; no mirror
+   deletion or purge options. Handle junctions without recursive loops and
+   download or independently verify cloud-only files.
+4. Coordinate active writers, consistent database snapshots and locked files.
+5. Record source/destination counts, lengths, errors and omitted files. Verify
+   SHA-256 for irreplaceable project/data/voice files and restore a selection
+   into a temporary folder to confirm they open. Treat any mismatch as pending.
+6. Keep the backup disconnected during installation where practical. Confirm
+   Windows recovery options and account access before disk changes.
+
+PROPOSED SINGLE-SSD PARTITION PLAN
+Proposed Linux allocation: 400 GiB (429,496,729,600 bytes).
+Windows Disk Management shrink input for that allocation: 409600 MB.
+Do not enter or apply this until backup verification and shrink-limit check.
+
+Windows C: after this proposal: approximately 1,462.4 GiB (1.43 TiB), leaving
+approximately 998.4 GiB free at today's usage. Existing EFI, Microsoft Reserved
+and Recovery partitions must be preserved.
+
+Expected physical layout after a successful Windows shrink:
+[existing EFI 100 MiB] [MSR 16 MiB] [smaller Windows C:]
+[400 GiB unallocated for Fedora] [existing Recovery 500 MiB]
+
+Windows did not grant the current process access to Get-PartitionSupportedSize;
+maximum shrink size is unknown. Use Windows Disk Management's Shrink dialog
+to inspect the offered maximum, then cancel for review. Free space alone does
+not guarantee Windows can shrink by 400 GiB: unmovable files may constrain it.
+Do not disable page files, hibernation or restore points merely to force a
+particular size. Reassess the allocation if the supported limit is smaller.
+
+After a verified backup, shrink C: using Windows' own disk tools, leave the new
+space UNALLOCATED (do not create an NTFS volume for Fedora), and confirm Windows
+still boots normally. The owner should review the exact resize before applying.
+
+FEDORA INSTALLATION REVIEW (AFTER LIVE TEST)
+Use only the prepared unallocated space on the internal MSI SSD. The USB is
+installation media, not the destination. Keep Windows partitions intact.
+Let Fedora propose its Linux boot/filesystem layout, then inspect the exact
+change summary before committing. Btrfs root/home can share free capacity;
+there is no need to guess separate fixed home/root sizes now.
+
+The existing EFI partition is only 100 MiB. Verify available EFI space and the
+actual installer's requirements before reusing it. If Fedora requires a larger
+EFI partition, plan a separate Fedora EFI partition inside the new free space
+and review firmware boot entries. Do not enlarge/move/format the Windows EFI
+partition as an improvised workaround. A shared EFI, if accepted, must retain
+Windows files and must not be formatted. Boot files/entries may be added.
+
+Stop and review if the installer proposes erasing the disk, deleting Windows
+or Recovery, formatting the existing EFI, or reclaiming unexpected partitions.
+Do not change storage-controller mode or disable Secure Boot as a guessed fix.
+Review Windows Fast Startup/hibernation before enabling shared NTFS writes.
+After installing, boot both Windows and Fedora and verify files and devices.
+
+NEXT ACTION
+Obtain a separate backup destination. Inventory and planning are complete enough
+to choose capacity; backup, supported shrink size, live hardware compatibility
+and installer partition preview remain unverified. No resize is needed for the
+initial live USB test, even if a backup destination is not available tonight.
+
+SOURCES
+https://support.microsoft.com/en-us/windows/experience/backup-recovery/backup-restore-and-recovery-in-windows
+https://learn.microsoft.com/en-us/windows-server/storage/disk-management/shrink-a-basic-volume
+https://fedoraproject.org/wiki/QA:Testcase_dualboot_with_windows
+https://fedoraproject.org/wiki/Unified_Extensible_Firmware_Interface
+
+Local inventory metadata (no file contents):
+data/reports/linux-backup-inventory.json
+data/reports/linux-backup-inventory-additional.json

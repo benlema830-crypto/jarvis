@@ -8,12 +8,16 @@ The owner is switching coding assistants because Codex usage is running low.
 Continue the existing project; do not rebuild it from scratch. The owner values
 Linux freedom, customization and local control, and intends to install Linux
 alongside Windows when home. Native Linux is the intended exploration, not a
-WSL-only substitute. No distribution, desktop, partition layout or GPU driver
-version has been selected. Do not treat a suggestion as an installed component.
+WSL-only substitute. The existing USB was subsequently identified as Fedora
+Workstation Live 44, x86_64. No Linux installation or partition resize has been
+performed. See LINUX-BACKUP-PARTITION-PLAN.txt for the measured disk/file
+inventory and proposed 400 GiB allocation. No independent backup destination
+is available yet, and the Windows shrink limit remains unverified. Do not
+treat a proposed layout or driver choice as an installed component.
 
-The owner is currently at work and cannot do meaningful hardware testing.
-Prepare code, documentation and inert tests independently. Installation and real
-microphone/camera/headset/desktop acceptance happen when the owner is available.
+The owner is now home and has connected the installer USB. Hardware tests can
+be coordinated with the owner. Earlier development checks were inert and do
+not establish live microphone/camera/headset/desktop or Linux acceptance.
 Do not repartition, change boot configuration, disable encryption, reboot or
 start a Linux installation as part of reading this handoff.
 
