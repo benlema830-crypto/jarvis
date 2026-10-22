@@ -1,9 +1,10 @@
 # Foundation hardening — 2026-10-22
 
-Implementation of `docs/plans/JARVIS_CODEX_TERMINAL_HANDOFF_2026-10-22.md` (phases A–D).
-Branch `foundation-hardening`, ten commits on top of `b873a2b`. No live data was migrated,
-rewritten or read beyond file timestamps; the real Obsidian vault was never opened. All
-measurements use the synthetic fixture in `tests/retrieval_fixture.py`.
+Implementation of `docs/plans/JARVIS_CODEX_TERMINAL_HANDOFF_2026-10-22.md` (phases A–D), built on branch
+`foundation-hardening` on top of `b873a2b`, **fast-forwarded into `main` and live Jarvis restarted on 2026-10-22**
+(both approved by the owner). After the restart: startup ready, mic receiving, voice lock on, Codex active,
+and the live HUD rejects foreign origins (403). No live data was migrated or rewritten; the real Obsidian
+vault was never opened. Measurements use the synthetic fixture in `tests/retrieval_fixture.py`.
 
 ## What changed
 
@@ -172,7 +173,7 @@ times out in headless Edge before and after (environmental).
 | Claude / OpenAI providers | Unit-tested only | Subscription-only mode; no paid API calls were made |
 | Your real vault and memory | Not touched | File timestamps unchanged; all tests and runs use temporary copies |
 
-The running Jarvis still uses the old code until restarted (`.venv\Scripts\python.exe jarvis.py --no-window --quiet-start`).
+Jarvis was restarted on the new code with `jarvis.py --no-window --quiet-start` (no spoken briefing).
 
 ## Using it
 - Semantic search needs the local embedding server, which Jarvis does not start: run
@@ -183,7 +184,8 @@ The running Jarvis still uses the old code until restarted (`.venv\Scripts\pytho
 
 ## Rollback
 Nothing migrated data, so every rollback is code-only and keeps your memory, history and vault:
-- Everything: `git switch main` (your uncommitted HUD/README work stays in the working tree).
+- Everything: `git reset --hard b873a2b` on `main` would also discard uncommitted edits, so instead use
+  `git revert --no-edit b873a2b..HEAD` (or check out `b873a2b` into a new branch); your HUD/README edits stay.
 - One change: `git revert <commit>` from the table above (they are independent apart from B2 building on B1).
 - Embedding keep-alive only: set `JARVIS_EMBED_KEEP_ALIVE=0` in `.env`.
 - Vector cache: deleting `data\vault-vectors.sqlite3` is safe (derived data; rebuilt on the next search).
