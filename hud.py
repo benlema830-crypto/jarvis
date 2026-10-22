@@ -227,6 +227,11 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("Host") not in ALLOWED_HOSTS:
             self._reject(403)
             return False
+        # Defence in depth beside the JSON-only rule: a browser page from any other origin is refused.
+        origin = self.headers.get("Origin")
+        if origin and origin not in {"http://" + host for host in ALLOWED_HOSTS}:
+            self._reject(403)
+            return False
         return True
 
     def _json(self, data, code=200):
