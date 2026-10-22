@@ -29,6 +29,19 @@ def percentile(values, q):
     return round(ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))] * 1000, 1)
 
 
+def unload_model():
+    """Force the embedding model out of memory so 'model cold' timings are real cold starts."""
+    import requests
+    import semantic_search
+    with requests.Session() as session:
+        session.trust_env = False
+        session.post(semantic_search.BASE + '/api/embed', json={'model': semantic_search.MODEL, 'input': ['unload'],
+                                                                'keep_alive': 0}, timeout=120).raise_for_status()
+        loaded = session.get(semantic_search.BASE + '/api/ps', timeout=10).json().get('models', [])
+    if any(m.get('name') == semantic_search.MODEL for m in loaded):
+        raise RuntimeError('Embedding model did not unload; cold timings would be wrong.')
+
+
 def run_mode(mode, fixture):
     import knowledge, memory, privacy, semantic_search, tools
     with tempfile.TemporaryDirectory() as temp:
@@ -51,9 +64,11 @@ def run_mode(mode, fixture):
                     return {'mode': mode, 'skipped': 'Local embedding server unavailable: ' + type(error).__name__}
             search = tools.TOOLS_BY_NAME['search_knowledge']
             fixture.build_vault(vault)
+            if mode == 'ollama':
+                unload_model()
             began = time.perf_counter()
             search.call({'query': 'warm up index'})
-            cold_index = time.perf_counter() - began
+            cold_index = time.perf_counter() - began  # empty index, and (with Ollama) unloaded model
             fixture.delete_and_edit(vault)
             rows, first, second, modes = [], [], [], set()
             for kind, query, expected in fixture.QUESTIONS:
@@ -72,6 +87,13 @@ def run_mode(mode, fixture):
                              'deleted_hit': any(p in fixture.DELETED for p in paths),
                              'stale_excerpt': any('S-band' in r.get('excerpt', '') for r in results),
                              'secret_leak': any(s in output for s in fixture.FAKE_SECRETS)})
+            model_cold = []
+            if mode == 'ollama':
+                for kind, query, _ in fixture.QUESTIONS[:3]:  # index warm, model forced cold each time
+                    unload_model()
+                    began = time.perf_counter()
+                    search.call({'query': query})
+                    model_cold.append(time.perf_counter() - began)
             answerable = [r for r in rows if r['expected']]
             report = {
                 'mode': mode, 'result_modes': sorted(modes), 'questions': len(rows),
@@ -82,9 +104,10 @@ def run_mode(mode, fixture):
                 'stale_excerpts': sum(r['stale_excerpt'] for r in rows),
                 'secret_leaks': sum(r['secret_leak'] for r in rows),
                 'unanswerable_with_results': sum(1 for r in rows if not r['expected'] and r['returned']),
-                'latency_ms': {'cold_first_search_incl_index': round(cold_index * 1000, 1),
-                               'first_pass_p50': percentile(first, .5), 'first_pass_p95': percentile(first, .95),
-                               'repeat_p50': percentile(second, .5), 'repeat_p95': percentile(second, .95)},
+                'latency_ms': {'index_cold_model_cold_first_search': round(cold_index * 1000, 1),
+                               'index_warm_model_cold_median': percentile(model_cold, .5),
+                               'warm_first_pass_p50': percentile(first, .5), 'warm_first_pass_p95': percentile(first, .95),
+                               'warm_repeat_p50': percentile(second, .5), 'warm_repeat_p95': percentile(second, .95)},
                 'rows': rows}
             for kind in sorted({r['kind'] for r in answerable}):
                 group = [r for r in answerable if r['kind'] == kind]

@@ -42,7 +42,19 @@ Vault search, 27 questions (24 answerable):
 | Original, semantic (Ollama on) | 0.958 | 0.979 | 5 | 0 | 1,741 / 5,323 ms |
 | Now, hybrid (Ollama on) | **1.000** | **1.000** | **0** | 0 | **22.8 / 39.5 ms** |
 
-Cold first search incl. indexing, Ollama on: 37.8 s originally → 2.1 s with a model load, 0.37 s with the model warm.
+Cold/warm matrix with Ollama on (model forced out of memory and verified unloaded before each "model cold"
+measurement; `scripts/memory_benchmark.py`, same fixture, same harness run against `b873a2b` and this branch):
+
+| | Original | Now |
+|---|---|---|
+| Index cold + model cold (first search) | 3,736 ms | 2,024 ms |
+| Index warm + model cold (median of 3) | 1,598 ms | 1,508 ms |
+| Index warm + model warm, p50 / p95 | 1,699 / 1,748 ms | 22 / 38 ms |
+| Repeat query, p50 / p95 | 1,707 / 1,744 ms | 21 / 23 ms |
+
+The original never reaches "model warm": `keep_alive: 0` reloads the model on every query. A model cold
+start (~1.5 s) remains unavoidable; it now happens only after two idle minutes. An earlier 37.8 s first
+search was the first model load after boot with an empty disk cache, so it is not comparable.
 
 Overhead at 1,000 synthetic notes (fake embedder, isolates Jarvis's own cost): p50 1,231 ms → 41 ms
 (scan 730 → 28 ms, similarity 338 → 3 ms, keyword 117 → 5 ms). `knowledge.index()` for the Brain graph: 729 → 44 ms.
@@ -73,11 +85,13 @@ Approval channels (documented, unchanged): owner voice, the local console (`--te
 HUD/Brain text box. Model output, tool/MCP results, Telegram, HOLO, reminders and agent reports
 arrive as dict items and never reach `approvals.answer()`.
 
-Proposed, **not implemented — needs your decision**:
-- **MCP inheritance.** Jarvis-launched Codex agent sessions inherit `~/.codex/config.toml`, including
-  `Roblox_Studio` with `execute_luau` set to `approval_mode = "approve"`. A Jarvis "research" session
-  can therefore run Luau in Studio without asking (the read-only sandbox does not cover MCP tools).
-  Option: disable MCP servers for research-mode sessions, or require Jarvis approval for MCP calls.
+Proposed, **not merged: needs your decision**:
+- **Native Codex MCP/app tools.** Verified live: every Codex process Jarvis starts (the conversational
+  brain and both session modes) sees `Roblox_Studio` (28 tools, `execute_luau` auto-approved) and the built-in
+  `codex_apps` (104 tools incl. site deploy/delete, app uninstall, parental controls), outside Jarvis's
+  approvals. Separate change on branch `proposal/codex-mcp-least-privilege` (commit `a66d3ec`, write-up in
+  `docs/PROPOSAL-CODEX-MCP-LEAST-PRIVILEGE.md` on that branch): conversation and research get no native MCP
+  tools (verified live: 0 visible), work sessions keep your setup. 357 tests pass on that branch.
 - **Keyword guard limits.** `cc_guard` cannot see intent (e.g. `Set-Content` emptying a file, uploads
   via `Invoke-WebRequest -Method Post`). For Codex sessions the real boundary is the platform sandbox
   (workspace-write to the project folder, no network). Whether Codex's Windows sandbox is actually
@@ -86,11 +100,22 @@ Proposed, **not implemented — needs your decision**:
   accepted local-trust model; a per-launch token would close it but touches every HUD client.
 - `agent_sessions` one-job-at-a-time guard is untouched, as required.
 
-## Not verified here
-Live voice/Qwen/Whisper, Codex or Claude conversations, MCP OAuth, Telegram and the real vault were not
-exercised. `tests/check_hud_browser.py` times out in headless Edge both before and after these changes
-(environmental); `tests/check_brain_browser.py` passes. The running Jarvis still uses the old code until
-restarted (`.venv\Scripts\python.exe jarvis.py --no-window --quiet-start`).
+## Exercised vs not verified
+
+| Path | Status | Evidence |
+|---|---|---|
+| Codex conversation (`jarvis.Brain` → your ChatGPT sign-in) | **Exercised live** | 5 turns, temp memory/vault: all 62 tool definitions accepted; follow-up after a harmless `remember` kept context; `search_knowledge` called through Codex and answered from the note; `forget` cleared context; the model used `recall_memory` on its own |
+| Local embeddings (Ollama 11435) | **Exercised live** | benchmark and cold/warm matrix above; server started for the measurement and stopped afterwards |
+| Codex app-server startup and MCP inventory | **Exercised live** | `scripts/check_codex_mcp_isolation.py` (proposal branch), no model turns |
+| Brain UI | Headless check | `tests/check_brain_browser.py` passes |
+| Classic HUD page | Not verified | `tests/check_hud_browser.py` times out in headless Edge before and after these changes (environmental) |
+| Voice: Qwen, Whisper, wake word, ears | Not exercised | No voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
+| Jarvis MCP integrations (`call_mcp_tool`), MCP OAuth, Telegram, HOLO | Not exercised live | Code unchanged; unit tests (`test_mcp_dispatch`, `test_mcp_oauth`, ...) pass |
+| Agent sessions (Codex/Claude project work) | Unit-tested only | Only the spoken label for a new guard category changed on this branch; `test_agent_sessions` passes |
+| Claude / OpenAI providers | Unit-tested only | Subscription-only mode; no paid API calls were made |
+| Your real vault and memory | Not touched | File timestamps unchanged; all tests and runs use temporary copies |
+
+The running Jarvis still uses the old code until restarted (`.venv\Scripts\python.exe jarvis.py --no-window --quiet-start`).
 
 ## Using it
 - Semantic search needs the local embedding server, which Jarvis does not start: run
