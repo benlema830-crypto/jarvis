@@ -113,6 +113,46 @@ Proposed as a separate change, then **approved by you and merged** (`a8b8777`):
   accepted local-trust model; a per-launch token would close it but touches every HUD client.
 - `agent_sessions` one-job-at-a-time guard is untouched, as required.
 
+## Tests per milestone
+Command: `.venv\Scripts\python.exe -m unittest discover -s tests` (no failures or skips at any milestone; one
+junction test skips only where neither a symlink nor a junction can be created).
+
+| Milestone | Commit | Tests run | Result |
+|---|---|---|---|
+| Baseline (before any change) | `b873a2b` | 266 | all passed |
+| A1–A3 memory continuity, capacity, prompt budget | `30d7b65` | 289 | all passed |
+| B1 hybrid search + benchmark | `50efd63` | 301 | all passed |
+| B2 incremental index | `bffd60a` | 311 | all passed |
+| B3 keep-alive | `7be4e02` | 314 | all passed |
+| C1 corrections | `280b8cd` | 323 | all passed |
+| C2 note edits | `2ba681a` | 337 | all passed |
+| C3 benchmark floors | `a749857` | 340 | all passed |
+| D approvals after the turn | `40cf195` | 346 | all passed |
+| D HUD origin | `5658929` | 349 | all passed |
+| D guard: encoded commands | `29ac40f` | 352 | all passed |
+| D guard: self-approval + allowed roots | `8bd111c` | 360 | all passed |
+| D Codex tool isolation (merged) | `a8b8777` | 365 | all passed |
+
+Each new test file was run against the code before its fix and failed there (except control cases that
+assert unchanged behaviour). Headless browser checks: `check_brain_browser.py` passes; `check_hud_browser.py`
+times out in headless Edge before and after (environmental).
+
+## Privacy and data persistence
+- No migration was run. `data/memory.json`, `recent_conversation.json`, preferences and the vault were not
+  modified (timestamps checked at the end); every test and live check used temporary copies.
+- `memory.json` records may gain two optional fields, `core` and `updated`; legacy `{fact, t}` records load
+  unchanged and older code ignores the new fields.
+- A turn in which a forget/correction happened is stored in `recent_conversation.json` as a fixed placeholder
+  sentence instead of its words.
+- Corrections replace the fact in place; no superseded copy, archive or change log holding old wording exists.
+- `vault-vectors.sqlite3`: same keys as before; new vectors are stored rounded to 7 digits; vectors of deleted or
+  edited notes are purged when the vault changes; a corrupt file is renamed to `*.corrupt-<time>` (kept, not
+  deleted) and rebuilt. Vectors also live in process memory while Jarvis runs.
+- `search_knowledge` output (to the model and the HUD source cards) is now credential-redacted.
+- New files: benchmark reports in `data/reports/memory-benchmark-*.json` (synthetic paths and timings only);
+  `update_knowledge_note` writes a short-lived hidden `.jarvis-edit-*.tmp` beside the note during a write.
+- No new network destinations. Codex processes for conversation/research now see fewer tools, not more.
+
 ## Exercised vs not verified
 
 | Path | Status | Evidence |
@@ -123,11 +163,12 @@ Proposed as a separate change, then **approved by you and merged** (`a8b8777`):
 | Brain UI | Headless check | `tests/check_brain_browser.py` passes |
 | Classic HUD page | Not verified | `tests/check_hud_browser.py` times out in headless Edge before and after these changes (environmental) |
 | Voice: Qwen synthesis → Whisper recognition | **Exercised live** | Jarvis's `qwen_voice` + `ears.Transcriber` (GPU), rendered to memory, never played: 4.5 s of audio; Whisper heard "The Orion Launch Tower bracket is torqued to 25Nm" |
-| Wake word, microphone capture, playback, barge-in | Not exercised | No voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
+| Wake word → Whisper → command routing | **Exercised live** (synthetic audio) | Qwen-rendered "Hey Jarvis, what time is it?" through the real `hey_jarvis_v0.1` model: score 1.00, routed as "what time is it"; "What time is it?" without the name: score 0.00, ignored in wake mode |
+| Microphone capture, speaker playback, barge-in, voice lock | Not exercised | Needs a person at the headset; no voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
 | Jarvis MCP (`list_mcp_tools`, `call_mcp_tool`) | **Exercised live** up to approval | Real catalog through `run_tool`: Zapier MCP 17 tools, GitHub 46; a call queued, asked for approval, and after "no" never contacted the server |
 | MCP OAuth, Telegram, HOLO | Not exercised | Code unchanged; unit tests pass. Telegram sending is an outward action and was not attempted |
 | Codex agent session (research mode) | **Exercised live** | Temp session store; connected, ran, routed one approval request (declined in the test) and reported honestly in 9 s. Original and new guard give the same verdict for that command |
-| Claude Code terminal path | Unit-tested only | Not used in subscription-only mode |
+| Claude Code terminal path + guard hook | **Exercised live** | `TerminalWorker` in a temp folder with your Claude Code login: in-folder write allowed; write to `data/cc_approvals.json` blocked by the hook (file unchanged); write to `C:\Windows\Temp` paused for spoken approval, declined, nothing written; guard state files restored byte-for-byte |
 | Claude / OpenAI providers | Unit-tested only | Subscription-only mode; no paid API calls were made |
 | Your real vault and memory | Not touched | File timestamps unchanged; all tests and runs use temporary copies |
 
