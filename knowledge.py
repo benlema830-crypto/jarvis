@@ -52,25 +52,56 @@ def read(relative):
             "uri": uri(relative), "modified": path.stat().st_mtime}
 
 
+_scan_cache = {}  # (vault, relative path) -> ((mtime_ns, size), note); only files seen in the latest scan
+
+
 def notes():
-    """Validated vault notes and the number skipped, without link analysis (used by search)."""
-    found, skipped = [], 0
+    """Validated vault notes and the number skipped, without link analysis (used by search).
+
+    Files whose modification time and size are unchanged since the last scan are not re-read;
+    deleted files drop out because the cache is rebuilt from each scan."""
+    global _scan_cache
+    found, skipped, seen = [], 0, {}
     if not VAULT.is_dir():
+        _scan_cache = {}
         return found, skipped
-    for directory, folders, files in os.walk(VAULT, followlinks=False):
-        folders[:] = sorted(f for f in folders if not f.startswith('.') and
-                            not (Path(directory) / f).is_symlink() and
-                            not (Path(directory) / f).is_junction())
-        for name in sorted(files):
-            if name.startswith('.') or not name.lower().endswith('.md'):
+    vault = str(VAULT)
+    pending = [VAULT]
+    while pending:  # same order as os.walk: a folder's files, then its sorted subfolders
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as listing:
+                entries = sorted(listing, key=lambda e: e.name)
+        except OSError:
+            continue
+        folders = []
+        for entry in entries:
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_symlink() or entry.is_junction():
+                if entry.name.lower().endswith('.md'):
+                    skipped += 1  # linked notes are excluded, as read() would refuse them
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                folders.append(Path(entry.path))
+                continue
+            if not entry.name.lower().endswith('.md'):
                 continue
             if len(found) >= MAX_NOTES:
                 skipped += 1
                 continue
+            relative = Path(entry.path).relative_to(VAULT).as_posix()
             try:
-                found.append(read((Path(directory) / name).relative_to(VAULT).as_posix()))
+                stat = entry.stat(follow_symlinks=False)
+                fingerprint = (stat.st_mtime_ns, stat.st_size)
+                cached = _scan_cache.get((vault, relative))
+                note = cached[1] if cached and cached[0] == fingerprint else read(relative)
+                seen[(vault, relative)] = (fingerprint, note)
+                found.append(dict(note))
             except (OSError, ValueError, UnicodeError):
                 skipped += 1
+        pending.extend(reversed(folders))
+    _scan_cache = seen
     return found, skipped
 
 
@@ -155,6 +186,9 @@ def exact(code, text):
     return re.search(r'(?<![\w-])' + re.escape(code) + r'(?![\w-])', text, re.I) is not None
 
 
+_token_cache = {}  # (path, mtime, length, content hash) -> (body word counts, title words)
+
+
 def search(query, limit=8, pool=None):
     """Word-level BM25-style ranking with title and exact-identifier boosts."""
     import math
@@ -162,10 +196,14 @@ def search(query, limit=8, pool=None):
     pool = notes()[0] if pool is None else pool
     terms = {_stem(t) for t in re.findall(r'\w+', query.casefold()) if t not in STOP_WORDS}
     wanted = codes(query)
-    docs = []
+    global _token_cache
+    docs, tokens = [], {}
     for note in pool:
-        title = set(_words(note['title'] + ' ' + note['path']))
-        docs.append((note, Counter(_words(note['content'])), title))
+        key = (note['path'], note.get('modified'), len(note['content']), hash(note['content']))
+        words = _token_cache.get(key) or (Counter(_words(note['content'])), set(_words(note['title'] + ' ' + note['path'])))
+        tokens[key] = words
+        docs.append((note, *words))
+    _token_cache = tokens
     total = len(docs)
     frequency = {t: sum(1 for _, body, title in docs if t in body or t in title) for t in terms}
     matches = []

@@ -18,12 +18,14 @@ import time
 from pathlib import Path
 
 import knowledge
+import numpy as np
 import requests
 
 MODEL = 'embeddinggemma:300m'
 BASE = 'http://127.0.0.1:11435'
 STORE = Path(__file__).resolve().parent / 'data' / 'vault-vectors.sqlite3'
 LOCK = threading.RLock()
+EMBED_BUDGET = 4.0  # seconds of note embedding inside one interactive search; the rest is backfilled
 RRF_K = 60
 SEMANTIC_FLOOR = 0.30
 POOL = 20
@@ -79,61 +81,143 @@ def status(content):
     return found.group(1).casefold() if found else ''
 
 
-def _semantic(query, notes, timings):
+# Vectors are content-addressed (key = hash of vault, model, path and chunk text), so a cached
+# vector can never describe different text. Only keys of current notes are ever scored.
+_vectors = {}
+_cache_store = None
+_live_keys = frozenset()
+_backfill = None
+
+
+def reset_cache():
+    """Forget in-memory vectors (as a restart would); the SQLite store is untouched."""
+    global _vectors, _cache_store, _live_keys
+    wait_for_backfill(30)
+    with LOCK:
+        _vectors, _cache_store, _live_keys = {}, None, frozenset()
+
+
+def wait_for_backfill(timeout=None):
+    thread = _backfill
+    if thread is not None:
+        thread.join(timeout)
+
+
+def _open():
+    STORE.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(STORE, timeout=10)
+    try:
+        db.execute('CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)')
+    except sqlite3.DatabaseError:
+        db.close()
+        # A damaged cache is derived data: set it aside (not deleted) and rebuild from the notes.
+        STORE.replace(STORE.with_name(STORE.name + time.strftime('.corrupt-%Y%m%d-%H%M%S')))
+        db = sqlite3.connect(STORE, timeout=10)
+        db.execute('CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)')
+    return db
+
+
+def _store(db, pairs):
+    db.executemany('INSERT OR REPLACE INTO vectors VALUES (?, ?)',
+                   [(key, json.dumps([round(float(v), 7) for v in vector])) for key, vector in pairs])
+    for key, vector in pairs:
+        _vectors[key] = np.asarray(vector, dtype=np.float32)
+
+
+def _backfill_run(pending, store):
+    """Embed the rest of a large first index outside interactive turns, one batch at a time."""
+    try:
+        for start in range(0, len(pending), 32):
+            batch = [c for c in pending[start:start+32] if c['key'] not in _vectors]
+            if not batch:
+                continue
+            vectors = embed([c['text'] for c in batch])
+            with LOCK:
+                if store != STORE or _cache_store != STORE:
+                    return  # vault/store changed or cache was reset; a later search starts over
+                # Notes deleted or edited meanwhile are no longer live; never store their vectors.
+                fresh = [(c['key'], v) for c, v in zip(batch, vectors) if c['key'] in _live_keys]
+                with closing(_open()) as db, db:
+                    _store(db, fresh)
+    except Exception:
+        pass  # the next search retries whatever is still missing
+
+
+def _semantic(query, notes, timings, counts):
     """Ranked [(note, similarity, excerpt)] above the similarity floor, best chunk per note."""
+    global _cache_store, _live_keys, _backfill
     with LOCK:
         began = time.perf_counter()
         model = identity()
         scope = str(knowledge.VAULT.resolve()) + '\n' + model
-        STORE.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(STORE)) as db, db:
-            db.execute('CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT)')
-            chunks = []
-            for note in notes:
-                for offset in range(0, len(note['content']), 1000):
-                    excerpt = note['content'][offset:offset+1200]
-                    text = note['title'] + '\n' + excerpt
-                    key = hashlib.sha256((scope + '\n' + note['path'] + '\n' + text).encode()).hexdigest()
-                    chunks.append(dict(key=key, text=text, note=note, excerpt=excerpt))
-            if len(chunks) > 12000:
-                raise ValueError('Vault exceeds the local embedding index limit.')
-            # Only current validated notes participate; deleted/edited notes cannot leak stale results.
-            vectors = dict(db.execute('SELECT key, vector FROM vectors'))
-            missing = [c for c in chunks if c['key'] not in vectors]
+        if _cache_store != STORE:
+            _vectors.clear()
+            _cache_store, _live_keys = STORE, frozenset()
+        chunks = []
+        for note in notes:
+            for offset in range(0, len(note['content']), 1000):
+                excerpt = note['content'][offset:offset+1200]
+                text = note['title'] + '\n' + excerpt
+                key = hashlib.sha256((scope + '\n' + note['path'] + '\n' + text).encode()).hexdigest()
+                chunks.append(dict(key=key, text=text, note=note, excerpt=excerpt))
+        if len(chunks) > 12000:
+            raise ValueError('Vault exceeds the local embedding index limit.')
+        live = frozenset(c['key'] for c in chunks)
+        with closing(_open()) as db, db:
+            unknown = [k for k in live if k not in _vectors]
+            for start in range(0, len(unknown), 500):
+                group = unknown[start:start+500]
+                rows = db.execute('SELECT key, vector FROM vectors WHERE key IN (%s)' % ','.join('?' * len(group)), group)
+                for key, vector in rows:
+                    _vectors[key] = np.asarray(json.loads(vector), dtype=np.float32)
+            if live != _live_keys:
+                # Deleted or edited notes: purge their vectors so nothing stale can be scored or kept.
+                stale = [k for (k,) in db.execute('SELECT key FROM vectors') if k not in live]
+                db.executemany('DELETE FROM vectors WHERE key=?', [(k,) for k in stale])
+                for key in [k for k in _vectors if k not in live]:
+                    del _vectors[key]
+                _live_keys = live
+            missing = [c for c in chunks if c['key'] not in _vectors]
             timings['index_check'] = time.perf_counter() - began
             began = time.perf_counter()
+            embedded = 0
             for start in range(0, len(missing), 32):
+                if time.perf_counter() - began >= EMBED_BUDGET:
+                    break  # the rest is embedded in the background; keyword results still cover it
                 batch = missing[start:start+32]
-                for chunk, vector in zip(batch, embed([c['text'] for c in batch])):
-                    vectors[chunk['key']] = json.dumps(vector)
-                    db.execute('INSERT OR REPLACE INTO vectors VALUES (?, ?)', (chunk['key'], json.dumps(vector)))
-            live = {c['key'] for c in chunks}
-            db.executemany('DELETE FROM vectors WHERE key=?', [(k,) for k in vectors if k not in live])
-            timings['embed_notes'] = time.perf_counter() - began
-            timings['embedded_chunks'] = len(missing)
-            began = time.perf_counter()
-            needle = embed([query])[0]
-            timings['embed_query'] = time.perf_counter() - began
-            began = time.perf_counter()
-            best = {}
-            for chunk in chunks:
-                vector = json.loads(vectors[chunk['key']])
-                if len(vector) != len(needle):
-                    raise ValueError('Embedding dimensions changed; rebuild the local index.')
-                score = sum(a*b for a, b in zip(needle, vector))
+                _store(db, [(c['key'], v) for c, v in zip(batch, embed([c['text'] for c in batch]))])
+                embedded += len(batch)
+        pending = [c for c in missing if c['key'] not in _vectors]
+        if pending and (_backfill is None or not _backfill.is_alive()):
+            _backfill = threading.Thread(target=_backfill_run, args=(pending, STORE), daemon=True,
+                                         name='vault-embedding-backfill')
+            _backfill.start()
+        timings['embed_notes'] = time.perf_counter() - began
+        counts.update(embedded_chunks=embedded, pending_chunks=len(pending))
+        began = time.perf_counter()
+        needle = np.asarray(embed([query])[0], dtype=np.float32)
+        timings['embed_query'] = time.perf_counter() - began
+        began = time.perf_counter()
+        ready = [c for c in chunks if c['key'] in _vectors]
+        best = {}
+        if ready:
+            matrix = np.stack([_vectors[c['key']] for c in ready])
+            if matrix.shape[1] != needle.shape[0]:
+                raise ValueError('Embedding dimensions changed; rebuild the local index.')
+            for chunk, score in zip(ready, (matrix @ needle).tolist()):
                 path = chunk['note']['path']
                 if score >= SEMANTIC_FLOOR and (path not in best or score > best[path][1]):
                     best[path] = (chunk['note'], score, chunk['excerpt'])
-            timings['similarity'] = time.perf_counter() - began
-            timings['indexed_chunks'] = len(chunks)
-            return sorted(best.values(), key=lambda item: (-item[1], item[0]['path']))[:POOL]
+        timings['similarity'] = time.perf_counter() - began
+        counts['indexed_chunks'] = len(ready)
+        return sorted(best.values(), key=lambda item: (-item[1], item[0]['path']))[:POOL]
 
 
 def search(query, limit=8):
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         raise ValueError('Enter a search query of 1–2000 characters.')
     limit = max(1, min(20, int(limit)))
-    timings = {}
+    timings, counts = {}, {'embedded_chunks': 0, 'pending_chunks': 0, 'indexed_chunks': 0}
     started = time.perf_counter()
     notes, _ = knowledge.notes()
     timings['scan'] = time.perf_counter() - started
@@ -142,7 +226,7 @@ def search(query, limit=8):
     timings['keyword'] = time.perf_counter() - began
     mode, reason = 'hybrid', ''
     try:
-        semantic = _semantic(query, notes, timings) if notes else []
+        semantic = _semantic(query, notes, timings, counts) if notes else []
     except (requests.RequestException, OSError, ValueError, KeyError, sqlite3.Error) as error:
         semantic, mode = [], 'keyword'
         reason = 'Local semantic search unavailable: ' + type(error).__name__
@@ -186,12 +270,11 @@ def search(query, limit=8):
     ranked.sort(key=lambda pair: (-pair[0]['score'], -(pair[1]['similarity'] or 0), pair[0]['path']))
     timings['total'] = time.perf_counter() - started
     response = {'mode': mode, 'results': [result for result, _ in ranked[:limit]],
-                'diagnostics': {'timings_ms': {k: (round(v * 1000, 1) if isinstance(v, float) else v)
-                                               for k, v in timings.items()},
+                'diagnostics': {'timings_ms': {k: round(v * 1000, 1) for k, v in timings.items()},
                                 'keyword_candidates': len(keyword), 'semantic_candidates': len(semantic),
-                                'ranks': [rank for _, rank in ranked[:limit]]}}
+                                **counts, 'ranks': [rank for _, rank in ranked[:limit]]}}
     if mode == 'hybrid':
-        response.update(model=MODEL, indexed_chunks=timings.get('indexed_chunks', 0))
+        response.update(model=MODEL, indexed_chunks=counts['indexed_chunks'])
     else:
         response['reason'] = reason
     return response
