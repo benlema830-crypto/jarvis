@@ -36,59 +36,54 @@ class ParseTest(unittest.TestCase):
 
 class RunTest(unittest.TestCase):
     def setUp(self):
-        self.calls = []
-        self.responses = {}
+        self.calls, self.keys, self.opened, self.playing, self.devices = [], [], [], False, [{'id': 'pc1', 'type': 'Computer'}]
         def dispatch(name, args):
-            self.calls.append((name, args))
-            result = self.responses.get(name, {'accepted': True})
-            if isinstance(result, Exception):
-                raise result
-            return result(args) if callable(result) else result
+            self.calls.append(name)
+            if name == 'spotify_search':
+                return {'items': [{'name': 'Thunderstruck', 'uri': 'spotify:track:T', 'artists': ['AC/DC']},
+                                  {'name': 'Highway to Hell', 'uri': 'spotify:track:H', 'artists': ['AC/DC']}]}
+            if name == 'spotify_playback':
+                return {'is_playing': self.playing}
+            if name == 'spotify_devices':
+                return {'devices': list(self.devices)}
+            raise AssertionError('playback API commands are not used: ' + name)
         for patcher in (mock.patch.object(spotify_mcp, 'dispatch', side_effect=dispatch),
                         mock.patch.object(music, 'configured', return_value=True),
-                        mock.patch.object(music.apps, 'names', return_value=['roblox'])):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+                        mock.patch.object(music, '_press', side_effect=self.keys.append),
+                        mock.patch.object(music.os, 'startfile', side_effect=self.opened.append, create=True),
+                        mock.patch.object(music, 'launch_spotify', return_value=True),
+                        mock.patch.object(music.time, 'sleep'),
+                        mock.patch.object(music.apps, 'names', return_value=[])):
+            patcher.start(); self.addCleanup(patcher.stop)
 
-    def test_pause_next_previous_resume_are_silent(self):
-        for text, tool in (('pause the music', 'spotify_pause'), ('next song', 'spotify_next'),
-                           ('previous song', 'spotify_previous'), ('resume', 'spotify_play')):
-            self.calls.clear()
-            self.assertEqual(music.run(text), '', text)
-            self.assertEqual(self.calls, [(tool, {})])
+    def test_play_opens_the_best_matching_track_link(self):
+        self.assertEqual(music.run('play highway to hell'), '')
+        self.assertEqual(self.opened, ['spotify:track:H'])
 
-    def test_play_by_name_searches_then_plays_the_top_track(self):
-        uri = 'spotify:track:' + 'A' * 22
-        self.responses['spotify_search'] = {'items': [{'name': 'So What', 'uri': uri, 'artists': ['Miles Davis']}]}
-        self.assertEqual(music.run('play so what by miles davis'), '')
-        self.assertEqual(self.calls, [('spotify_search', {'query': 'so what by miles davis', 'type': 'track', 'limit': 1}),
-                                      ('spotify_play', {'uri': uri})])
+    def test_pause_and_resume_press_the_key_only_when_needed(self):
+        self.playing = True
+        music.run('pause'); music.run('resume')
+        self.assertEqual(self.keys, ['play_pause'])
+        self.playing = False
+        music.run('pause'); music.run('resume')
+        self.assertEqual(self.keys, ['play_pause', 'play_pause'])
 
-    def test_no_active_device_uses_an_available_one(self):
-        state = {'first': True}
-        def play(args):
-            if state.pop('first', False):
-                raise spotify_mcp.SpotifyError('No active Spotify device. Open Spotify and play a track first.')
-            return {'accepted': True}
-        self.responses['spotify_play'] = play
-        self.responses['spotify_devices'] = {'devices': [{'id': 'phone1', 'type': 'Smartphone', 'is_restricted': False},
-                                                         {'id': 'pc1', 'type': 'Computer', 'is_restricted': False}]}
-        self.assertEqual(music.run('resume'), '')
-        self.assertEqual(self.calls[-1], ('spotify_play', {'device_id': 'pc1'}))
-
-    def test_failures_are_spoken_briefly(self):
-        self.responses['spotify_search'] = {'items': []}
-        self.assertIn("couldn't find", music.run('play zzzz qqqq').lower())
-        self.responses['spotify_pause'] = spotify_mcp.SpotifyError('Spotify denied access. Check Premium, app user access and playback scopes.')
-        self.assertIn('Premium', music.run('pause'))
-        self.responses['spotify_devices'] = {'devices': []}
-        self.responses['spotify_next'] = spotify_mcp.SpotifyError('No active Spotify device. Open Spotify and play a track first.')
+    def test_next_previous_and_nothing_running(self):
+        self.playing = True
+        music.run('next song'); music.run('previous song')
+        self.assertEqual(self.keys, ['next', 'previous'])
+        self.playing, self.devices = False, []
         self.assertIn('Nothing is playing', music.run('skip'))
+
+    def test_errors_and_missing_results_are_spoken(self):
+        with mock.patch.object(spotify_mcp, 'dispatch', return_value={'items': []}):
+            self.assertIn("couldn't find", music.run('play zzzz').lower())
+        with mock.patch.object(spotify_mcp, 'dispatch', side_effect=spotify_mcp.SpotifyError('Spotify rate or account quota reached. Wait before trying again.')):
+            self.assertIn('quota', music.run('pause'))
 
     def test_not_set_up_falls_through_to_the_assistant(self):
         with mock.patch.object(music, 'configured', return_value=False):
             self.assertIsNone(music.run('pause the music'))
-        self.assertEqual(self.calls, [])
 
 
 class QuickReplyTest(unittest.TestCase):
@@ -152,57 +147,6 @@ class BridgeAutostartTest(unittest.TestCase):
             with mock.patch.object(music, 'configured', return_value=False):
                 self.assertFalse(music.start_bridge())
         popen.assert_not_called()
-
-
-class OpenSpotifyTest(unittest.TestCase):
-    """No device anywhere: play/resume open Spotify minimized and wait for it; pause is a no-op."""
-    def setUp(self):
-        self.calls, self.launched = [], []
-        self.devices = []
-        def dispatch(name, args):
-            self.calls.append((name, args))
-            if name == 'spotify_devices':
-                return {'devices': list(self.devices)}
-            if name == 'spotify_search':
-                return {'items': [{'uri': 'spotify:track:' + 'B' * 22}]}
-            if 'device_id' not in args:
-                raise spotify_mcp.SpotifyError('No active Spotify device. Open Spotify and play a track first.')
-            return {'accepted': True}
-        def launch():
-            self.launched.append(True)
-            self.devices.append({'id': 'pc1', 'type': 'Computer', 'is_restricted': False})
-            return True
-        for patcher in (mock.patch.object(spotify_mcp, 'dispatch', side_effect=dispatch),
-                        mock.patch.object(music, 'configured', return_value=True),
-                        mock.patch.object(music, 'launch_spotify', side_effect=launch),
-                        mock.patch.object(music.time, 'sleep'),
-                        mock.patch.object(music.apps, 'names', return_value=[])):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def test_play_opens_spotify_and_plays_on_it(self):
-        self.assertEqual(music.run('play highway to hell'), '')
-        self.assertEqual(self.launched, [True])
-        self.assertEqual(self.calls[-1], ('spotify_play', {'uri': 'spotify:track:' + 'B' * 22, 'device_id': 'pc1'}))
-
-    def test_resume_opens_spotify_too(self):
-        self.assertEqual(music.run('resume the music'), '')
-        self.assertEqual(self.calls[-1], ('spotify_play', {'device_id': 'pc1'}))
-
-    def test_pause_with_nothing_running_does_nothing_quietly(self):
-        self.assertEqual(music.run('pause'), '')
-        self.assertEqual(self.launched, [])
-
-    def test_skip_with_nothing_running_says_so_without_opening(self):
-        self.assertIn('Nothing is playing', music.run('next song'))
-        self.assertEqual(self.launched, [])
-
-    def test_spotify_that_never_comes_online_is_reported(self):
-        with mock.patch.object(music, 'launch_spotify', return_value=True):
-            self.assertIn("didn't come online", music.run('play highway to hell'))
-        with mock.patch.object(music, 'launch_spotify', return_value=False):
-            self.assertIn("couldn't open Spotify", music.run('play highway to hell'))
-
 
 
 class LaunchSpotifyTest(unittest.TestCase):

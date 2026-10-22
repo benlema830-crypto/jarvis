@@ -102,35 +102,36 @@ def _devices():
     return [d for d in spotify_mcp.dispatch("spotify_devices", {})["devices"] if not d.get("is_restricted")]
 
 
-def _with_device(name, args):
-    """Retry on an available device when none is active (prefer this PC). With no device at all,
-    play/resume open Spotify minimized and wait for it to come online; pause is already done."""
+MEDIA_KEYS = {"play_pause": 0xB3, "next": 0xB0, "previous": 0xB1}
+
+
+def _press(key):
+    import win32api
+    win32api.keybd_event(MEDIA_KEYS[key], 0, 0, 0)
+    win32api.keybd_event(MEDIA_KEYS[key], 0, 2, 0)
+
+
+def _norm(text):
+    return " ".join(re.findall(r"\w+", text.casefold()))
+
+
+def _best_track(query):
+    """Top search results ranked by title/artist match; Spotify's own top result can be another song."""
     import spotify_mcp
-    try:
-        return spotify_mcp.dispatch(name, args)
-    except spotify_mcp.SpotifyError as error:
-        if "No active Spotify device" not in str(error):
-            raise
-    devices = _devices()
-    if not devices:
-        if name == "spotify_pause":
-            return {}  # nothing is playing anywhere
-        if name != "spotify_play":
-            raise spotify_mcp.SpotifyError("Nothing is playing on Spotify.")
-        if not launch_spotify():
-            raise spotify_mcp.SpotifyError("I couldn't open Spotify on this PC.")
-        for _ in range(LAUNCH_WAIT):
-            time.sleep(1)
-            devices = _devices()
-            if devices:
-                break
-        else:
-            raise spotify_mcp.SpotifyError("Spotify opened but didn't come online. Try again in a moment.")
-    device = next((d for d in devices if d.get("type") == "Computer"), devices[0])
-    return spotify_mcp.dispatch(name, dict(args, device_id=device["id"]))
+    title, _, artist = query.partition(" by ")
+    items = spotify_mcp.dispatch("spotify_search", {"query": query[:300], "type": "track", "limit": 5})["items"]
+    def score(item):
+        name = _norm(item.get("name", ""))
+        artists = _norm(" ".join(item.get("artists", [])))
+        return 2 * (name == _norm(title)) + (bool(name) and name in _norm(query)) + (bool(artist) and _norm(artist) in artists)
+    return max(items, key=score) if items else None
 
 
 def run(text):
+    """Play by opening the track link in the Spotify app and control playback with media keys.
+
+    This account's Web API playback commands are accepted but ignored (verified live 2026-10-22,
+    likely no Premium); searching and reading playback state work, and the app obeys links/keys."""
     command = parse(text)
     if command is None or not configured():
         return None
@@ -138,12 +139,29 @@ def run(text):
     action, query = command
     try:
         if action == "play":
-            found = spotify_mcp.dispatch("spotify_search", {"query": query[:300], "type": "track", "limit": 1})["items"]
-            if not found:
+            track = _best_track(query)
+            if not track:
                 return f"I couldn't find {query} on Spotify."
-            _with_device("spotify_play", {"uri": found[0]["uri"]})
+            os.startfile(track["uri"])  # starts Spotify if needed and plays the track
+            return ""
+        playing = spotify_mcp.dispatch("spotify_playback", {}).get("is_playing", False)
+        if action == "pause":
+            if playing:
+                _press("play_pause")
+        elif action == "resume":
+            if not playing:
+                if not _devices():
+                    if not launch_spotify():
+                        return "I couldn't open Spotify on this PC."
+                    for _ in range(LAUNCH_WAIT):
+                        time.sleep(1)
+                        if _devices():
+                            break
+                _press("play_pause")
         else:
-            _with_device({"resume": "spotify_play"}.get(action, "spotify_" + action), {})
+            if not playing and not _devices():
+                return "Nothing is playing on Spotify."
+            _press(action)
     except spotify_mcp.SpotifyError as error:
         return str(error).split(". Run setup")[0].rstrip(".") + "."
     except Exception:
