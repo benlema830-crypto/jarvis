@@ -14,7 +14,8 @@ _catalog_lock = threading.Lock()
 
 
 def connect(callback, cancel=None):
-    conn = Connection(HERE, callback, cancel)
+    # The conversation uses Jarvis's own tools (MCP goes through call_mcp_tool and its approval).
+    conn = Connection(HERE, callback, cancel, isolate_mcp=True)
     try:
         conn.call('initialize', {'clientInfo': {'name': 'jarvis_voice', 'title': 'JARVIS', 'version': '1.0'},
                                 'capabilities': {'experimentalApi': True}})

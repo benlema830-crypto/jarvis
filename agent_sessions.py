@@ -32,8 +32,33 @@ def executable():
     return str(candidate) if candidate.is_file() else shutil.which("codex")
 
 
+CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
+
+
+def isolation_args():
+    """app-server flags that hide every native MCP server and the built-in ChatGPT apps.
+
+    Those tools would otherwise bypass Jarvis's approvals (Roblox Studio's execute_luau is
+    auto-approved in the user's config). Only server names are read from the config."""
+    import tomllib
+    args = ["--disable", "apps"]
+    try:
+        servers = tomllib.loads(CODEX_CONFIG.read_text(encoding="utf-8")).get("mcp_servers", {})
+    except (OSError, ValueError):
+        servers = {}
+    for name in servers if isinstance(servers, dict) else ():
+        key = name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else json.dumps(name)
+        args += ["-c", f"mcp_servers.{key}.enabled=false"]
+    return args
+
+
+def isolate_for_mode(mode):
+    """Research only inspects and reports, so it gets no MCP tools; work keeps the user's setup."""
+    return mode != "work"
+
+
 class Connection:
-    def __init__(self, cwd, callback, cancel=None):
+    def __init__(self, cwd, callback, cancel=None, isolate_mcp=False):
         exe = executable()
         if not exe:
             raise RuntimeError("Codex is not installed.")
@@ -41,7 +66,8 @@ class Connection:
         # Use the normal Codex login/configuration, never Jarvis's API keys.
         for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY"):
             env.pop(key, None)
-        self.proc = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
+        extra = isolation_args() if isolate_mcp else []
+        self.proc = subprocess.Popen([exe, "app-server", *extra, "--listen", "stdio://"], cwd=cwd,
             env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
         self.events = queue.Queue()
@@ -361,7 +387,8 @@ class SessionManager:
             if entry.get("provider") == "claude":
                 ok, report = self._run_claude(entry, task, mode)
                 return
-            conn = self.connection = Connection(entry["cwd"], self._event, self.cancelled)
+            conn = self.connection = Connection(entry["cwd"], self._event, self.cancelled,
+                                                isolate_mcp=isolate_for_mode(mode))
             conn.call("initialize", {"clientInfo": {"name": "jarvis", "title": "Jarvis", "version": "1.0"}})
             conn.send({"method": "initialized", "params": {}})
             config = {"cwd": entry["cwd"], "approvalPolicy": "untrusted", "sandbox": "workspace-write",
