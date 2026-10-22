@@ -4,6 +4,13 @@ Linux port or the proposed upgrades have been implemented.
 
 START HERE
 ==========
+LATEST BACKUP STATE: see ACTIVE-CLOUD-BACKUP.txt first. The owner purchased
+100 GB OneDrive storage and authorized an encrypted background backup. Its
+fresh 74.8 GB selection includes all Jarvis environments as well as personal
+data. Confirm actual completion from the job status files before partitioning;
+earlier notes about having no destination or omitting voice environments are
+historical. No Linux installation or disk resize has occurred.
+
 The owner is switching coding assistants because Codex usage is running low.
 Continue the existing project; do not rebuild it from scratch. The owner values
 Linux freedom, customization and local control, and intends to install Linux

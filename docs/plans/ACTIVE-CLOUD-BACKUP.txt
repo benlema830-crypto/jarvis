@@ -1,0 +1,82 @@
+ACTIVE ONEDRIVE BACKUP - STARTED 2026-10-21 EVENING, AMERICA/CHICAGO
+
+This is a background job in progress, NOT a claim that the backup is complete.
+Do not resize partitions, reboot or start installation until status is reviewed.
+
+The owner bought 100 GB and explicitly confirmed OneDrive as the destination.
+The native OneDrive Settings UI independently showed 100 GB capacity, with
+0.1 GB used before the newly queued backup uploads had finished.
+Opening its web storage page was blocked by automatic approval review; the
+quota check was completed safely through the native OneDrive application.
+
+UPDATED COVERAGE: the old compact plan measured 57.6 GB, but this actual run
+includes ALL regular files under the main Jarvis and sibling voice projects,
+including Windows Python environments, bytecode, local models and runtime.
+Fresh inventory: approximately 74.8 GB / 249,704 files before compression.
+The six listed ComfyUI base models remain excluded, along with reinstallable
+dependencies/caches outside the protected Jarvis roots. No originals deleted.
+Main Jarvis tracked files: none missing from the inventory. Memory, recent
+conversation, response settings, preferences, voiceprint, voice profile and
+.env all exist and are selected. Do not print their contents while inspecting.
+Workspace junctions point to separately included target folders; they are
+recorded as aliases rather than traversed recursively or duplicated.
+Known process lock/PID files are excluded. SQLite online backups integrate WAL
+and are checked with quick_check; restoring a raw busy WAL is not required.
+The inventory is a file snapshot selection, not a full Windows disk image.
+
+LOCAL CONTROLLER AND JOB
+C:\Users\Lemab\AppData\Local\JarvisBackups\current-job.json
+C:\Users\Lemab\AppData\Local\JarvisBackups\backup-20261021-202950
+Helpers in the parent directory: backup_helper.py, publish_onedrive.py,
+backup_progress.py. Tool packages are isolated in the tools subdirectory;
+Jarvis's installed environment and source code were not changed for packaging.
+
+UPLOAD DESTINATION
+C:\Users\Lemab\OneDrive\Jarvis Backups\backup-20261021-202950
+Only verified encrypted archives and nonsensitive restore/index instructions
+are copied there. Never copy the entire local job folder to OneDrive.
+
+ENCRYPTION AND KEY
+AES-256 ZIP archives, approximately 2 GB of source data per part (larger single
+files can exceed that). Each ZIP contains encrypted payload.tar and an
+encrypted file/hash manifest. Internal filenames are inside the encrypted tar.
+The owner confirmed saving the recovery key outside this PC in a local dialog.
+The key itself is not in Git, cloud uploads or chat. Do not display, read aloud,
+print or include recovery-key.txt in any logs, prompts or backup upload.
+
+STATUS FILES INSIDE THE LOCAL JOB DIRECTORY
+- status.json: inventory/archive progress, source errors, parts locally verified.
+- cloud-status.json: encrypted parts copied/uploaded, remote sample verification.
+- archive-index.json: local archive hashes, files, errors and complete flag.
+- published-parts.json: exactly which encrypted files were copied to OneDrive.
+- source-inventory.json: selected paths and exclusions; metadata only.
+- jarvis-coverage-audit.json: critical Jarvis selection and junction coverage.
+- quota-confirmation.json: native OneDrive capacity evidence.
+- key-saved-confirmation.json: owner confirmation, no key value.
+- remote-restore-check.json: cloud retrieval/hash evidence, once attempted.
+- coverage.json: final exclusions, links and source errors, once complete.
+
+DO NOT START A DUPLICATE BACKUP
+Check running Python processes by exact helper script and job argument first.
+The worker creates encrypted parts, decrypts each, rehashes every contained
+file and compares the manifest. The publisher verifies hashes again after
+copying each part to OneDrive, checks Windows Cloud Files in-sync state, and
+attempts one cloud restore sample: mark ONE NEW cloud copy online-only while
+retaining its verified local archive, wait for zero local data, read it back
+through OneDrive and compare SHA-256. No original source is dehydrated.
+
+The progress window keeps Windows awake while the job runs (without changing
+the user's power plan). Closing it hides it; workers continue. When terminal,
+the window shows verified or needs-review status. Files remain on this PC.
+
+COMPLETION CRITERIA
+cloud-status.json phase backup_verified means: worker source errors zero,
+all local archives passed decryption/hash checks, all archive parts and restore
+metadata report in-sync through OneDrive, and a remotely retrieved sample
+matched its hash. This does not mean every cloud byte was re-downloaded.
+Any failed, local_needs_review, synced_with_source_errors_to_review or
+synced_pending_remote_restore_check status requires follow-up before partitioning.
+Do not equate a file being in the OneDrive folder with a finished cloud backup.
+If errors appear, inspect their exact paths and fix/retry rather than silently
+excluding unique data or claiming completion. Never delete cloud/local parts
+to troubleshoot, and never stop unrelated trading or research services casually.
