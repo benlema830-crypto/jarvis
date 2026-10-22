@@ -1,6 +1,5 @@
 """Phase C2: version-checked, approval-gated edits to existing notes. create() stays create-only."""
 import hashlib
-import json
 from pathlib import Path
 import tempfile
 import threading
@@ -146,14 +145,18 @@ class KnowledgeEditTest(unittest.TestCase):
         call = tools.TOOLS_BY_NAME['update_knowledge_note'].call
         args = {'path': 'Projects/Orion.md', 'action': 'replace_section', 'target': 'Status',
                 'content': 'Paint finished.', 'expected_sha256': sha(self.path)}
-        with mock.patch('approvals.ask', return_value=(False, 'no')) as ask:
-            self.assertIn('not approved', call(args))
-        self.assertIn('Projects/Orion.md', ask.call_args.args[0])
-        self.assertEqual(self.path.read_bytes(), NOTE.encode('utf-8'))
-        with mock.patch('approvals.ask', return_value=(True, 'yes')):
-            result = json.loads(call(args))
-        self.assertEqual(result['updated'], 'Projects/Orion.md')
-        self.assertEqual(result['sha256'], sha(self.path))
+        import queue
+        commands = queue.Queue()
+        with mock.patch.object(tools.hud, 'commands', commands):
+            with mock.patch('approvals.ask', return_value=(False, 'no')) as ask:
+                self.assertIn('confirmation', call(args))
+                self.assertIn('not approved', commands.get(timeout=5)['say'])
+            self.assertIn('Projects/Orion.md', ask.call_args.args[0])
+            self.assertEqual(self.path.read_bytes(), NOTE.encode('utf-8'))
+            with mock.patch('approvals.ask', return_value=(True, 'yes')):
+                call(args)
+                report = commands.get(timeout=5)
+        self.assertIn(sha(self.path), report['note'])  # follow-up edits can use the new version
         self.assertIn('Paint finished.', self.path.read_text(encoding='utf-8'))
 
 

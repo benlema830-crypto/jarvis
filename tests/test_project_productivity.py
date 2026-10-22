@@ -122,11 +122,14 @@ class ProductivityTests(unittest.TestCase):
     def test_voice_decline_never_runs_routine(self):
         import tools
         import approvals
+        import queue
         review = {'project':'Jarvis', 'descriptions':['Open folder'], 'token':'token'}
+        commands = queue.Queue()
         with patch.object(tools, '_brain', return_value=review) as brain, \
-                patch.object(approvals, 'ask', return_value=(False, 'no')):
+                patch.object(approvals, 'ask', return_value=(False, 'no')), patch.object(tools.hud, 'commands', commands):
             result = tools.named_routine.call({'action':'run', 'name':'Development mode'})
-            self.assertIn('not approved', result)
+            self.assertIn('confirmation', result)  # approval is asked after the turn, never assumed
+            self.assertIn('not approved', commands.get(timeout=5)['say'])
             self.assertEqual(brain.call_count, 1)
 
 
