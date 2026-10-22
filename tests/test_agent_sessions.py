@@ -12,7 +12,8 @@ import terminal
 class FakeConnection:
     calls = []
     status = "completed"
-    def __init__(self, cwd, callback, cancel=None):
+    def __init__(self, cwd, callback, cancel=None, isolate_mcp=False):
+        FakeConnection.isolated = isolate_mcp
         self.callback = callback
         self.events = iter([
             {"method": "item/completed", "params": {"item": {"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "I recommend fixing the save flow next."}}},
@@ -81,9 +82,11 @@ class SessionTest(unittest.TestCase):
             self.manager.thread.join(3)
             self.assertFalse(self.manager.running)
             self.assertTrue(done.call_args.args[0]["ok"])
+            self.assertTrue(FakeConnection.isolated)  # research mode: no native MCP tools
             restored = sessions.SessionManager()
             restored.start("Implement it", mode="work")
             restored.thread.join(3)
+            self.assertFalse(FakeConnection.isolated)  # work mode keeps the user's Codex tools
         methods = [m for m, _ in FakeConnection.calls]
         self.assertIn("thread/start", methods)
         self.assertIn("thread/resume", methods)
