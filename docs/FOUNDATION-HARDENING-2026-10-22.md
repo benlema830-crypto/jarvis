@@ -167,6 +167,16 @@ That path is off in subscription-only mode; give it an OS sandbox before ever en
 budgets; per-job workspace isolation; worker limits; parallel Codex/Claude workers; a sandbox for Claude Code
 shell commands; role-specific tool allow-lists. The one-job-at-a-time guard in `agent_sessions` stays until those exist.
 
+## Open by owner decision (2026-10-22)
+The owner chose to defer these; they need a person, a device or an account only the owner controls:
+- Hearing the mic→speaker loop ("Jarvis, what time is it?"). Automated: restarted Jarvis reports mic receiving and
+  output active; synthetic wake-word and Qwen→Whisper round trips pass.
+- Starting HOLO (turns on the webcam). Code unchanged; unit tests pass.
+- Pairing a real Telegram bot. The bridge passes a full simulated exchange.
+- Paid Claude/OpenAI paths: not called, by the owner's subscription-only rule.
+- Claude Code shell sandbox: Claude Code's OS sandbox is not available on native Windows; the path stays off in
+  subscription-only mode and is guarded by the hook (live-tested) until a sandboxed runner exists.
+
 ## Tests per milestone
 Command: `.venv\Scripts\python.exe -m unittest discover -s tests` (no failures or skips at any milestone; one
 junction test skips only where neither a symlink nor a junction can be created).
