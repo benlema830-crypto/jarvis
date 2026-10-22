@@ -5,7 +5,9 @@ Stored in data/memory.json and placed in Jarvis's system prompt at startup.
 
 import difflib
 import json
+import math
 import os
+import re
 import threading
 import time
 import hashlib
@@ -17,6 +19,8 @@ import privacy
 HERE = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(HERE, "data", "memory.json")
 MAX_FACTS = 200
+PROMPT_BUDGET = 4000      # characters of saved facts placed in every system prompt (~1k tokens)
+PROMPT_FACT_CHARS = 400   # longer facts are shortened in the prompt; recall() returns them in full
 RECENT_PATH = os.path.join(HERE, "data", "recent_conversation.json")
 MAX_RECENT_TURNS = 20
 MAX_RECENT_CHARS = 12000
@@ -55,11 +59,20 @@ def _bounded(items):
     return list(reversed(result))
 
 
-def record_turn(user: str, assistant: str):
-    """Save recent dialogue without extra AI calls, tool payloads or startup briefs."""
+INVALIDATED_TURN = "[A saved memory was removed or corrected during this exchange; its wording is not kept.]"
+
+
+def record_turn(user: str, assistant: str, privacy_since=None):
+    """Save recent dialogue without extra AI calls, tool payloads or startup briefs.
+
+    `privacy_since` is the privacy_revision() from when the turn started. If a forget,
+    correction or privacy change happened during the turn, the exchange itself may
+    repeat the removed wording, so only a placeholder is kept."""
     if user.startswith(("[STARTUP]", "[REMINDER DUE]", "[BRIEFING]", "[FOCUS", "[EYES CHECK]", "[HOLO]")):
         return
     with transaction():
+        if privacy_since is not None and privacy_since != privacy_revision():
+            user, assistant = INVALIDATED_TURN, ""
         items = _recent()
         items.append({"time": time.strftime("%Y-%m-%d %H:%M:%S"),
                       "user": privacy.redact(user), "assistant": privacy.redact(assistant)})
@@ -109,11 +122,17 @@ def _save(facts: list[dict]):
     os.replace(tmp, PATH)
 
 
+def _same(a: str, b: str) -> bool:
+    """Exact duplicate apart from case, spacing and final punctuation; never fuzzy."""
+    norm = lambda text: " ".join(text.casefold().split()).rstrip(" .!?;:")
+    return norm(a) == norm(b)
+
+
 def facts() -> list[str]:
     return [f["fact"] for f in _load()]
 
 
-def remember(fact: str) -> str:
+def remember(fact: str, core: bool = False) -> str:
     fact = privacy.redact(fact.strip())
     if len(fact) > 2000:
         raise ValueError('Keep each remembered fact under 2000 characters.')
@@ -121,10 +140,18 @@ def remember(fact: str) -> str:
         return "Nothing to remember."
     with transaction():
         items = _load()
-        if any(f["fact"].lower() == fact.lower() for f in items):
+        existing = next((f for f in items if _same(f["fact"], fact)), None)
+        if existing is not None:
+            if core and not existing.get("core"):
+                existing["core"] = True
+                _save(items)
             return "Already remembered."
-        items.append({"fact": fact, "t": time.time()})
-        _save(items[-MAX_FACTS:])
+        if len(items) >= MAX_FACTS:
+            # Never evict silently: the oldest facts are often the most durable ones.
+            return (f"Memory is full ({MAX_FACTS} saved facts); nothing was removed and this fact was not saved. "
+                    "Ask the user which saved fact to forget or combine, then try again.")
+        items.append({"fact": fact, "t": time.time(), **({"core": True} if core else {})})
+        _save(items)
     return f"Remembered: {fact}"
 
 
@@ -145,21 +172,103 @@ def forget(fact: str) -> str:
     return f"Forgot: {match}"
 
 
+def _when(item) -> float:
+    value = item.get("updated", item.get("t", 0))
+    return value if isinstance(value, (int, float)) else 0
+
+
+def _line(item) -> str:
+    text = " ".join(item["fact"].split())
+    return "- " + (text if len(text) <= PROMPT_FACT_CHARS else text[:PROMPT_FACT_CHARS - 1].rstrip() + "…")
+
+
 def prompt_section() -> str:
-    items = facts()
+    """Deterministic, budgeted selection: core facts, then the most recently saved or corrected.
+
+    Facts left out are still stored and found with recall(); they are not forgotten."""
+    items = _load()
     if not items:
         return "Nothing yet."
-    return privacy.redact("\n".join(f"- {f}" for f in items))
+    order = sorted(range(len(items)), key=lambda i: (not items[i].get("core"), -_when(items[i]), i))
+    chosen, used = set(), 0
+    for i in order:
+        cost = len(_line(items[i])) + 1
+        if used + cost <= PROMPT_BUDGET:
+            chosen.add(i)
+            used += cost
+    lines = [_line(items[i]) for i in sorted(chosen)]
+    hidden = len(items) - len(chosen)
+    if hidden:
+        lines.append(f"({hidden} more saved facts are not listed here. Before saying you don't know something "
+                     "about the user, search them with recall_memory.)")
+    return privacy.redact("\n".join(lines))
 
 
-def revision():
+_STOP = {"the", "a", "an", "is", "are", "was", "of", "and", "or", "to", "in", "on", "for", "my", "me", "i",
+         "user", "users", "what", "who", "which", "do", "does", "did", "about", "with", "that", "this", "it"}
+
+
+def _terms(text):
+    return {t for t in re.findall(r"\w+", text.casefold()) if t not in _STOP}
+
+
+def _matches(term, words):
+    # Whole words, allowing short inflections (locker/lockers) but not unrelated prefixes (cello/cellophane).
+    return any(w == term or (min(len(w), len(term)) >= 4 and abs(len(w) - len(term)) <= 3
+                             and (w.startswith(term) or term.startswith(w))) for w in words)
+
+
+def recall(query: str, limit: int = 8) -> str:
+    """Read-only lexical lookup over every saved fact, including ones not in the prompt."""
+    limit = max(1, min(20, int(limit)))
+    items = _load()
+    terms = _terms(query or "")
+    if not items:
+        return "No facts are saved yet."
+    if not terms:
+        return "Give a few words to look for in saved facts."
+    words = [_terms(item["fact"]) for item in items]
+    weight = {t: math.log(1 + len(items) / (1 + sum(_matches(t, w) for w in words))) for t in terms}
+    scored = [(sum(weight[t] for t in terms if _matches(t, w)), i) for i, w in enumerate(words)]
+    best = max(score for score, _ in scored)
+    if best <= 0:
+        return f"No saved fact matches '{privacy.redact(query)}'. {len(items)} facts are saved in total."
+    ranked = sorted((pair for pair in scored if pair[0] >= best / 2), key=lambda p: (-p[0], -_when(items[p[1]]), p[1]))
+    lines = []
+    for _, i in ranked[:limit]:
+        saved = time.strftime("%Y-%m-%d", time.localtime(_when(items[i])))
+        lines.append(f"- {items[i]['fact']} (saved {saved})")
+    return privacy.redact(f"Saved facts matching '{query}' (user-provided memory, newest wording is current):\n"
+                          + "\n".join(lines))
+
+
+def _digest(*paths, tagged=True):
     digest = hashlib.sha256()
-    for path in (Path(PATH), privacy.STORE, Path(PATH + '.epoch')):
+    for path in paths:
+        if tagged:  # a missing file must not hash like an empty neighbour
+            digest.update(path.name.encode() + b'\0')
         try:
             digest.update(path.read_bytes())
         except FileNotFoundError:
             pass
     return digest.hexdigest()
+
+
+def revision():
+    """Optimistic-concurrency token for memory edits: changes with facts, privacy or epoch."""
+    return _digest(Path(PATH), privacy.STORE, Path(PATH + '.epoch'), tagged=False)
+
+
+def facts_revision():
+    """Changes when saved facts change (including harmless additions)."""
+    return _digest(Path(PATH))
+
+
+def privacy_revision():
+    """Changes only on forget, correction, deletion, scrub, clearing or privacy settings.
+
+    Conversation context that may contain removed wording must be discarded when this changes."""
+    return _digest(privacy.STORE, Path(PATH + '.epoch'))
 
 
 def _id(item):
@@ -186,7 +295,8 @@ def edit(action, expected, ident='', fact=''):
             else:
                 if not isinstance(fact, str) or not fact.strip() or len(fact) > 2000:
                     raise ValueError('Enter a fact of 1–2000 characters.')
-                items[match] = {'fact': fact.strip(), 't': time.time()}
+                # Keep creation time and flags; the old wording itself is not retained anywhere.
+                items[match] = dict(items[match], fact=fact.strip(), updated=time.time())
             _save(items)
         elif action == 'clear_recent':
             Path(RECENT_PATH).write_text('[]', encoding='utf-8')

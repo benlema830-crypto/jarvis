@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import ollama_brain as ob
 import model_provider as mp
@@ -174,7 +174,7 @@ class OllamaTests(unittest.TestCase):
         self.assertEqual(said, ['OK.'])
         self.assertEqual(brain.messages[-1]['content'], 'OK.')
         self.assertFalse(selection.busy)
-        record.assert_called_once_with('hello', 'OK.')
+        record.assert_called_once_with('hello', 'OK.', ANY)
 
 
 if __name__ == '__main__':
