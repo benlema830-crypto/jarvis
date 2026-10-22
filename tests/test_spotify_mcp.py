@@ -280,7 +280,7 @@ class SpotifyTest(unittest.TestCase):
         try:
             with patch.object(spotify, 'dispatch', return_value={'items': []}) as dispatch:
                 with mcp.Client(url, token) as client:
-                    self.assertEqual(len(client.tools()), 7)
+                    self.assertEqual(len(client.tools()), 8)
                     result = client.rpc('tools/call', {'name': 'spotify_search', 'arguments': {'query': 'jazz'}})
                     self.assertFalse(result['isError'])
                 dispatch.assert_called_once()

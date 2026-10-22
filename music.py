@@ -29,6 +29,7 @@ _ACTIONS = [
                             r"|go\s+back(?:\s+(?:a|one))?\s+(?:song|track)", re.I)),
 ]
 _PLAY = re.compile(r"play\s+(.+?)(?:\s+on\s+spotify)?", re.I)
+_QUEUE = re.compile(r"queue(?:\s+up)?\s+(.+?)(?:\s+on\s+spotify)?|add\s+(.+?)\s+to\s+(?:the|my)\s+(?:spotify\s+)?queue", re.I)
 _NOT_MUSIC = re.compile(r"\b(?:video|youtube|game|movie|film|episode|show|roblox)\b", re.I)
 
 
@@ -38,12 +39,13 @@ def parse(text):
     for action, pattern in _ACTIONS:
         if pattern.fullmatch(said):
             return action, None
-    match = _PLAY.fullmatch(said)
-    if match:
-        query = match[1].strip()
-        if _NOT_MUSIC.search(query) or query.lower() in apps.names():
-            return None
-        return "play", query
+    for action, pattern in (("queue", _QUEUE), ("play", _PLAY)):
+        match = pattern.fullmatch(said)
+        if match:
+            query = next(group for group in match.groups() if group).strip()
+            if _NOT_MUSIC.search(query) or query.lower() in apps.names():
+                return None
+            return action, query
     return None
 
 
@@ -138,13 +140,21 @@ def run(text):
     import spotify_mcp
     action, query = command
     try:
-        if action == "play":
+        playing = spotify_mcp.dispatch("spotify_playback", {}).get("is_playing", False)
+        if action in ("play", "queue"):
             track = _best_track(query)
             if not track:
                 return f"I couldn't find {query} on Spotify."
-            os.startfile(track["uri"])  # starts Spotify if needed and plays the track
+            if not playing:
+                # Nothing to queue behind: opening the link starts Spotify if needed and plays it.
+                os.startfile(track["uri"])
+            else:
+                # While playing, a link doesn't switch songs and the API's play command stops playback
+                # on this PC (verified live); queueing then skipping switches in under a second.
+                spotify_mcp.dispatch("spotify_queue", {"uri": track["uri"]})
+                if action == "play":
+                    _press("next")
             return ""
-        playing = spotify_mcp.dispatch("spotify_playback", {}).get("is_playing", False)
         if action == "pause":
             if playing:
                 _press("play_pause")

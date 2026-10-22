@@ -797,7 +797,7 @@ _mcp_busy = __import__("threading").Lock()
 
 # Playback-only tools of the local Spotify bridge (spotify_mcp.py); every other MCP call is confirmed.
 NO_APPROVAL_MCP = {("Spotify (local)", "127.0.0.1:8791"): {
-    "spotify_search", "spotify_devices", "spotify_playback", "spotify_play", "spotify_pause",
+    "spotify_search", "spotify_devices", "spotify_playback", "spotify_play", "spotify_queue", "spotify_pause",
     "spotify_next", "spotify_previous"}}
 
 

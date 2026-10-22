@@ -72,8 +72,8 @@ def api(method, path, *, params=None, body=None):
                     status = response.status_code
                     if status == 401 and attempt == 0:
                         continue
-                    if status == 204:
-                        return {}
+                    if status == 204 or (method != 'GET' and status in (200, 202)):
+                        return {}  # commands answer with an empty or non-JSON body (queue returns an ID)
                     errors = {401: 'Spotify sign-in expired. Run setup again.',
                               403: 'Spotify denied access. Check Premium, app user access and playback scopes.',
                               404: 'No active Spotify device. Open Spotify and play a track first.',
@@ -110,6 +110,8 @@ TOOLS = [
     tool('spotify_playback', 'Read current Spotify playback state.'),
     tool('spotify_play', 'Play a Spotify track URI or resume. Requires Premium and an active Spotify device.', {
         'uri': {'type': 'string', 'pattern': '^spotify:track:[A-Za-z0-9]{22}$'}, 'device_id': DEVICE}),
+    tool('spotify_queue', 'Add a Spotify track URI to the playback queue. Requires Premium and something playing.', {
+        'uri': {'type': 'string', 'pattern': '^spotify:track:[A-Za-z0-9]{22}$'}, 'device_id': DEVICE}, ['uri']),
     tool('spotify_pause', 'Pause Spotify playback. Requires Premium.', {'device_id': DEVICE}),
     tool('spotify_next', 'Skip to the next Spotify track. Requires Premium.', {'device_id': DEVICE}),
     tool('spotify_previous', 'Skip to the previous Spotify track. Requires Premium.', {'device_id': DEVICE}),
@@ -153,6 +155,9 @@ def dispatch(name, args):
                 'device': {k: data.get('device', {})[k] for k in ('id', 'name', 'is_active') if k in data.get('device', {})}}
     action = name.removeprefix('spotify_')
     params = {'device_id': args['device_id']} if 'device_id' in args else None
+    if action == 'queue':
+        api('POST', '/me/player/queue', params=dict(params or {}, uri=args['uri']))
+        return {'accepted': True, 'message': 'Spotify accepted the track for the queue.'}
     body = {'uris': [args['uri']]} if 'uri' in args else None
     api('POST' if action in ('next', 'previous') else 'PUT', '/me/player/' + action, params=params, body=body)
     return {'accepted': True, 'message': 'Spotify accepted the playback command; read playback state to confirm.'}

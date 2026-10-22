@@ -22,6 +22,10 @@ class ParseTest(unittest.TestCase):
             'play Kind of Blue by Miles Davis': ('play', 'Kind of Blue by Miles Davis'),
             'please play bohemian rhapsody on spotify': ('play', 'bohemian rhapsody'),
             'Play some Taylor Swift.': ('play', 'some Taylor Swift'),
+            'queue highway to hell': ('queue', 'highway to hell'),
+            'queue up thunderstruck on spotify': ('queue', 'thunderstruck'),
+            'add back in black to the queue': ('queue', 'back in black'),
+            'add back in black to my queue please': ('queue', 'back in black'),
         }
         with mock.patch.object(music.apps, 'names', return_value=['roblox', 'notepad']):
             for text, expected in cases.items():
@@ -30,7 +34,8 @@ class ParseTest(unittest.TestCase):
     def test_other_requests_are_left_to_the_assistant(self):
         with mock.patch.object(music.apps, 'names', return_value=['roblox', 'notepad']):
             for text in ('play roblox', 'play a video on youtube', 'what song is this', 'pause the timer',
-                         'open spotify', 'skip the intro of this video', 'play the game', 'next', 'previous'):
+                         'open spotify', 'skip the intro of this video', 'play the game', 'next', 'previous',
+                         'add a reminder for tomorrow', 'queue the video'):
                 self.assertIsNone(music.parse(text), text)
 
 
@@ -46,6 +51,8 @@ class RunTest(unittest.TestCase):
                 return {'is_playing': self.playing}
             if name == 'spotify_devices':
                 return {'devices': list(self.devices)}
+            if name == 'spotify_queue':
+                return {'accepted': True}
             raise AssertionError('playback API commands are not used: ' + name)
         for patcher in (mock.patch.object(spotify_mcp, 'dispatch', side_effect=dispatch),
                         mock.patch.object(music, 'configured', return_value=True),
@@ -59,6 +66,24 @@ class RunTest(unittest.TestCase):
     def test_play_opens_the_best_matching_track_link(self):
         self.assertEqual(music.run('play highway to hell'), '')
         self.assertEqual(self.opened, ['spotify:track:H'])
+
+    def test_play_while_playing_switches_immediately_via_queue_and_skip(self):
+        self.playing = True
+        self.assertEqual(music.run('play highway to hell'), '')
+        self.assertEqual(self.opened, [])
+        self.assertIn('spotify_queue', self.calls)
+        self.assertEqual(self.keys, ['next'])
+
+    def test_queue_while_playing_only_queues(self):
+        self.playing = True
+        self.assertEqual(music.run('queue highway to hell'), '')
+        self.assertEqual((self.keys, self.opened), ([], []))
+        self.assertIn('spotify_queue', self.calls)
+
+    def test_queue_with_nothing_playing_just_plays_it(self):
+        self.assertEqual(music.run('add highway to hell to the queue'), '')
+        self.assertEqual(self.opened, ['spotify:track:H'])
+        self.assertNotIn('spotify_queue', self.calls)
 
     def test_pause_and_resume_press_the_key_only_when_needed(self):
         self.playing = True
