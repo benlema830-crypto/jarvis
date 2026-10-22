@@ -114,6 +114,59 @@ Proposed as a separate change, then **approved by you and merged** (`a8b8777`):
   accepted local-trust model; a per-launch token would close it but touches every HUD client.
 - `agent_sessions` one-job-at-a-time guard is untouched, as required.
 
+## Handoff section 7 checklist
+
+- [x] **No silent loss of facts beyond 200.** `tests/test_memory_capacity.py`; benchmark: 200 stored, overflow
+  refused, oldest kept (the original code evicted it).
+- [x] **A harmless fact doesn't erase working context.** `tests/test_memory_continuity.py`; live Codex: "Kestrel"
+  recalled after a `remember`, 4 messages kept.
+- [x] **Forget/correct removes stale context from prompts, history and cache.** Continuity, correction and
+  privacy tests (including the forget turn itself and restart); live Codex: context cleared after `forget`.
+- [x] **Active prompt memory is bounded; other facts retrievable.** 24,406 → 4,120 chars at 200 facts;
+  `recall_memory` finds non-injected facts (tests and live).
+- [x] **Exact and semantic vault questions both work online, with offline fallback.** recall@1 1.0 hybrid,
+  0.917 keyword-only (was 0.958 / 0.792); live Codex search answered in both modes.
+- [x] **Edited/deleted notes never appear as stale results.** 0 deleted hits and 0 stale excerpts in every
+  run; vector purge tests.
+- [x] **Path security and create-only semantics intact; the edit API is version-checked.**
+  `tests/test_knowledge.py` unchanged and passing; `tests/test_knowledge_edit.py`, `tests/test_approval_flow.py`.
+- [x] **Synthetic benchmark runs with before/after results.** `scripts/memory_benchmark.py`, reports in
+  `data/reports/`, floors enforced by `tests/test_retrieval_benchmark.py`.
+- [x] **No voice/model/MCP/agent-session regressions in the tested paths.** 365 unit tests, plus live checks:
+  Codex conversation, Qwen→Whisper, wake word, MCP list/call and both MCP sign-ins (Zapier 17 tools, GitHub 46),
+  a Codex research session, the Claude Code terminal guard, and a restarted Jarvis reporting mic receiving and
+  output active. **Still pending with you:** saying "Jarvis, what time is it?" to hear the full mic→speaker loop.
+- [x] **An honest report lists changes, tests and remaining risks.** This document.
+
+## Allowed roots and tools per agent (review result)
+
+| Who | Files it can write | Network | Shell | Native Codex MCP/apps | Approval route |
+|---|---|---|---|---|---|
+| Conversational brain (Codex) | none (read-only sandbox) | Codex web search only | disabled | none (isolated) | Jarvis tools; MCP via `call_mcp_tool` asks every time |
+| Research session (Codex) | none (read-only sandbox) | none | read-only commands; anything else asks you | none (isolated) | `agent_sessions._approval` → spoken approval |
+| Work session (Codex) | project folder only (`writableRoots`) | none | sandboxed to the project; guard-flagged commands ask | your Codex config (Roblox Studio) | same, plus guard rules for file changes |
+| Terminal task (Claude Code; unused in subscription-only mode) | user folder, minus autostart/credential/agent config (ask); Jarvis approval/guard files blocked | unrestricted | keyword guard only | n/a | `cc_guard` hook → spoken approval, 15-minute grants |
+| Jarvis MCP (`call_mcp_tool`) | n/a | the connected server | n/a | n/a | spoken approval per call |
+
+Remaining gap: Claude Code shell commands have no platform sandbox, so the keyword guard is their only check.
+That path is off in subscription-only mode; give it an OS sandbox before ever enabling it for unattended work.
+
+## Remaining work
+
+**Next safe milestone (foundation):**
+1. Owner check: say "Jarvis, what time is it?" to confirm the mic→speaker loop after the restart.
+2. Start the local embedding server with Jarvis (today it needs `start-local-model.bat`, otherwise search runs keyword-only).
+3. Research-mode usability: Codex wraps read-only searches in compound PowerShell commands, so they come to you
+   for approval. Recognise safe read-only command shapes instead.
+4. Optional per-tool Roblox Studio policy for work sessions (`execute_luau` still runs without asking there).
+5. A larger, realistic benchmark (anonymised copies of real note shapes) to replace the small tuned fixture.
+6. Telegram pairing when you want it (`scripts/setup_telegram.py`); it is not configured, so it couldn't be tested.
+7. A per-launch token for `/command` if other local programs should not be able to answer approvals.
+
+**Later, optional AI-CEO features (deliberately not started):** durable task queue with IDs, cancellation and
+budgets; per-job workspace isolation; worker limits; parallel Codex/Claude workers; a sandbox for Claude Code
+shell commands; role-specific tool allow-lists. The one-job-at-a-time guard in `agent_sessions` stays until those exist.
+
 ## Tests per milestone
 Command: `.venv\Scripts\python.exe -m unittest discover -s tests` (no failures or skips at any milestone; one
 junction test skips only where neither a symlink nor a junction can be created).
@@ -167,7 +220,9 @@ times out in headless Edge before and after (environmental).
 | Wake word → Whisper → command routing | **Exercised live** (synthetic audio) | Qwen-rendered "Hey Jarvis, what time is it?" through the real `hey_jarvis_v0.1` model: score 1.00, routed as "what time is it"; "What time is it?" without the name: score 0.00, ignored in wake mode |
 | Microphone capture, speaker playback, barge-in, voice lock | Not exercised | Needs a person at the headset; no voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
 | Jarvis MCP (`list_mcp_tools`, `call_mcp_tool`) | **Exercised live** up to approval | Real catalog through `run_tool`: Zapier MCP 17 tools, GitHub 46; a call queued, asked for approval, and after "no" never contacted the server |
-| MCP OAuth, Telegram, HOLO | Not exercised | Code unchanged; unit tests pass. Telegram sending is an outward action and was not attempted |
+| MCP sign-in (OAuth/bearer) | **Exercised live** | read-only `tools/list` with your saved credentials: Zapier MCP 17 tools, GitHub 46 tools |
+| Telegram | Not configured | Jarvis reports `available` (no bot token, never paired), so there is no live bridge to test; code unchanged |
+| HOLO | Installed, not started | Starting it turns on the webcam; code unchanged, unit tests pass |
 | Codex agent session (research mode) | **Exercised live** | Temp session store; connected, ran, routed one approval request (declined in the test) and reported honestly in 9 s. Original and new guard give the same verdict for that command |
 | Claude Code terminal path + guard hook | **Exercised live** | `TerminalWorker` in a temp folder with your Claude Code login: in-folder write allowed; write to `data/cc_approvals.json` blocked by the hook (file unchanged); write to `C:\Windows\Temp` paused for spoken approval, declined, nothing written; guard state files restored byte-for-byte |
 | Claude / OpenAI providers | Unit-tested only | Subscription-only mode; no paid API calls were made |
