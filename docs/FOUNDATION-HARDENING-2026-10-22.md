@@ -98,13 +98,13 @@ Approval channels (documented, unchanged): owner voice, the local console (`--te
 HUD/Brain text box. Model output, tool/MCP results, Telegram, HOLO, reminders and agent reports
 arrive as dict items and never reach `approvals.answer()`.
 
-Proposed, **not merged: needs your decision**:
+Proposed as a separate change, then **approved by you and merged** (`a8b8777`):
 - **Native Codex MCP/app tools.** Verified live: every Codex process Jarvis starts (the conversational
   brain and both session modes) sees `Roblox_Studio` (28 tools, `execute_luau` auto-approved) and the built-in
   `codex_apps` (104 tools incl. site deploy/delete, app uninstall, parental controls), outside Jarvis's
-  approvals. Separate change on branch `proposal/codex-mcp-least-privilege` (commit `a66d3ec`, write-up in
-  `docs/PROPOSAL-CODEX-MCP-LEAST-PRIVILEGE.md` on that branch): conversation and research get no native MCP
-  tools (verified live: 0 visible), work sessions keep your setup. 357 tests pass on that branch.
+  approvals. Change `a66d3ec` (write-up: `docs/PROPOSAL-CODEX-MCP-LEAST-PRIVILEGE.md`): conversation and
+  research get no native MCP/app tools (verified live after merging: 0 visible), work sessions keep your setup.
+  The live 5-turn Codex conversation passes with isolation on. Roll back with `git revert -m 1 a8b8777`.
 - **Keyword guard limits.** `cc_guard` cannot see intent (e.g. `Set-Content` emptying a file, uploads
   via `Invoke-WebRequest -Method Post`). For Codex sessions the real boundary is the platform sandbox
   (workspace-write to the project folder, no network). Whether Codex's Windows sandbox is actually
