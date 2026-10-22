@@ -32,15 +32,26 @@ POOL = 20
 STALE = {'superseded', 'outdated', 'archived', 'deprecated'}
 
 
+_local = threading.local()
+
+
 def _request(route, payload=None):
-    with requests.Session() as session:
+    # One keep-alive loopback session per thread; proxies and environment credentials are ignored.
+    session = getattr(_local, 'session', None)
+    if session is None:
+        session = _local.session = requests.Session()
         session.trust_env = False
+    try:
         response = session.request('POST' if payload is not None else 'GET', BASE + route,
                                    json=payload, timeout=(3, 90), allow_redirects=False)
-        if response.is_redirect:
-            raise ValueError('Local embedding redirects are not allowed.')
-        response.raise_for_status()
-        return response.json()
+    except requests.RequestException:
+        session.close()
+        _local.session = None
+        raise
+    if response.is_redirect:
+        raise ValueError('Local embedding redirects are not allowed.')
+    response.raise_for_status()
+    return response.json()
 
 
 def identity():
@@ -56,11 +67,28 @@ def identity():
     return MODEL + ':' + match['digest']
 
 
+def keep_alive():
+    """How long Ollama keeps the embedding model loaded after a request.
+
+    Measured on this PC (RTX 5070 Ti, Qwen voice loaded): unloading after every request
+    (0) costs ~1.7 s per search; warm requests take ~6 ms; the loaded model holds ~654 MiB
+    of VRAM. Default 2m releases the GPU two minutes after the last search. Set
+    JARVIS_EMBED_KEEP_ALIVE=0 to restore unload-immediately; at most 30 minutes."""
+    value = os.getenv('JARVIS_EMBED_KEEP_ALIVE', '2m').strip()
+    match = re.fullmatch(r'(\d{1,4})([sm]?)', value)
+    if not match:
+        return 0
+    seconds = int(match[1]) * (60 if match[2] == 'm' else 1)
+    if seconds == 0 or seconds > 1800:
+        return 0
+    return value if match[2] else seconds
+
+
 def embed(texts):
     import privacy
     texts = privacy.payload(texts)
     rows = _request('/api/embed', {'model': MODEL, 'input': texts, 'truncate': False,
-                                 'keep_alive': 0})['embeddings']
+                                 'keep_alive': keep_alive()})['embeddings']
     if len(rows) != len(texts):
         raise ValueError('Incomplete embedding response.')
     output = []

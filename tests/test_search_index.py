@@ -141,5 +141,29 @@ class SearchIndexTest(unittest.TestCase):
         self.assertIn({'source': 'Projects/Orion launch tower.md', 'target': 'Parts/Mounting bracket.md'}, data['links'])
 
 
+class KeepAliveTest(unittest.TestCase):
+    def sent(self, value=None):
+        env = {} if value is None else {'JARVIS_EMBED_KEEP_ALIVE': value}
+        with mock.patch.dict('os.environ', env, clear=False), \
+                mock.patch.object(search, '_request', return_value={'embeddings': [[1.0, 0.0]]}) as request:
+            if value is None:
+                import os
+                os.environ.pop('JARVIS_EMBED_KEEP_ALIVE', None)
+            search.embed(['text'])
+        return request.call_args.args[1]['keep_alive']
+
+    def test_default_keeps_the_model_briefly_warm(self):
+        self.assertEqual(self.sent(), '2m')
+
+    def test_override_and_rollback_to_unload_immediately(self):
+        self.assertEqual(self.sent('0'), 0)
+        self.assertEqual(self.sent('30s'), '30s')
+        self.assertEqual(self.sent('10m'), '10m')
+
+    def test_unsafe_or_invalid_values_unload_immediately(self):
+        for value in ('-1', 'forever', '5h', '9999m', ''):
+            self.assertEqual(self.sent(value), 0, value)
+
+
 if __name__ == '__main__':
     unittest.main()
