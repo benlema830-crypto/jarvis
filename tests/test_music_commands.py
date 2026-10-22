@@ -141,11 +141,22 @@ class SpotifyApprovalTest(unittest.TestCase):
             self.commands.get(timeout=5)
             return out, call.called, True
 
-    def test_local_spotify_playback_needs_no_approval_and_answers_in_the_same_turn(self):
-        out, called, asked = self.run_call('Spotify (local)', '127.0.0.1:8791', 'spotify_pause')
+    def test_local_spotify_search_needs_no_approval_and_answers_in_the_same_turn(self):
+        out, called, asked = self.run_call('Spotify (local)', '127.0.0.1:8791', 'spotify_search')
         self.assertTrue(called)
         self.assertFalse(asked)
         self.assertIn('accepted', out)
+
+    def test_assistant_playback_uses_the_same_working_method_as_voice(self):
+        # Regression: the assistant used Spotify's play API, which stops music on this PC.
+        for tool, action in (('spotify_play', 'play'), ('spotify_queue', 'queue'), ('spotify_pause', 'pause'),
+                             ('spotify_next', 'next'), ('spotify_previous', 'previous')):
+            with mock.patch.object(music, 'perform', return_value='') as perform:
+                out, called, asked = self.run_call('Spotify (local)', '127.0.0.1:8791', tool)
+            self.assertFalse(called, tool)  # the Spotify API command was not sent
+            self.assertFalse(asked, tool)
+            self.assertEqual(perform.call_args.args[0], action)
+            self.assertIn('Done', out)
 
     def test_other_servers_and_lookalikes_still_ask(self):
         for name, host, tool in (('Zapier MCP', 'mcp.zapier.com', 'gmail_send'),

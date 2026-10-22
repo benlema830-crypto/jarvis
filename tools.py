@@ -829,7 +829,11 @@ def call_mcp_tool(connection_id: str, tool_name: str, arguments_json: str = "{}"
     if not catalogs or not any(t["name"] == tool_name for t in catalogs[0]["tools"]):
         return "That MCP tool is unavailable. Refresh the tool catalog."
     if _no_approval_needed(connection_id, tool_name):
-        # The owner chose music control without confirmations; it runs in this turn.
+        # The owner chose music control without confirmations; it runs in this turn. Playback goes
+        # through music.perform(), the method that works on this PC (Spotify's play API stops music here).
+        import music
+        if tool_name in music.CONTROL_ACTIONS:
+            return music.control(tool_name, arguments)
         return mcp_connections.call(connection_id, tool_name, arguments)
     if not _mcp_busy.acquire(blocking=False):
         return "Another MCP request is pending. Wait for its report."

@@ -129,36 +129,26 @@ def _best_track(query):
     return max(items, key=score) if items else None
 
 
-def run(text):
-    """Play by opening the track link in the Spotify app and control playback with media keys.
+def perform(action, uri=None):
+    """Do one playback action the way that works on this PC; "" on success, else a short sentence.
 
-    This account's Web API playback commands are accepted but ignored (verified live 2026-10-22,
-    likely no Premium); searching and reading playback state work, and the app obeys links/keys."""
-    command = parse(text)
-    if command is None or not configured():
-        return None
+    Verified live 2026-10-22: the Web API play command stops playback here, and a track link doesn't
+    switch songs mid-track. So: a link when idle, queue + media Next mid-song, media keys otherwise.
+    Both the instant voice commands and the assistant's Spotify tools go through this."""
     import spotify_mcp
-    action, query = command
     try:
         playing = spotify_mcp.dispatch("spotify_playback", {}).get("is_playing", False)
-        if action in ("play", "queue"):
-            track = _best_track(query)
-            if not track:
-                return f"I couldn't find {query} on Spotify."
+        if action in ("play", "queue") and uri:
             if not playing:
-                # Nothing to queue behind: opening the link starts Spotify if needed and plays it.
-                os.startfile(track["uri"])
+                os.startfile(uri)  # starts Spotify if needed and plays the track
             else:
-                # While playing, a link doesn't switch songs and the API's play command stops playback
-                # on this PC (verified live); queueing then skipping switches in under a second.
-                spotify_mcp.dispatch("spotify_queue", {"uri": track["uri"]})
+                spotify_mcp.dispatch("spotify_queue", {"uri": uri})
                 if action == "play":
                     _press("next")
-            return ""
-        if action == "pause":
+        elif action == "pause":
             if playing:
                 _press("play_pause")
-        elif action == "resume":
+        elif action in ("resume", "play"):
             if not playing:
                 if not _devices():
                     if not launch_spotify():
@@ -177,3 +167,34 @@ def run(text):
     except Exception:
         return "Spotify isn't responding."
     return ""
+
+
+def run(text):
+    """Instant spoken music command: None if not one (or Spotify isn't set up), "" if done, else a problem."""
+    command = parse(text)
+    if command is None or not configured():
+        return None
+    import spotify_mcp
+    action, query = command
+    if action in ("play", "queue"):
+        try:
+            track = _best_track(query)
+        except spotify_mcp.SpotifyError as error:
+            return str(error).split(". Run setup")[0].rstrip(".") + "."
+        except Exception:
+            return "Spotify isn't responding."
+        if not track:
+            return f"I couldn't find {query} on Spotify."
+        return perform(action, track["uri"])
+    return perform(action)
+
+
+CONTROL_ACTIONS = {"spotify_play": "play", "spotify_queue": "queue", "spotify_pause": "pause",
+                   "spotify_next": "next", "spotify_previous": "previous"}
+
+
+def control(name, args):
+    """The assistant's Spotify playback tool calls, routed through perform() (same behaviour as voice)."""
+    import json
+    problem = perform(CONTROL_ACTIONS[name], args.get("uri"))
+    return json.dumps({"ok": True, "message": "Done."} if not problem else {"isError": True, "message": problem})
