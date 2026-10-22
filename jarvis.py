@@ -82,10 +82,27 @@ def interruption_command(text, is_owner, mode, approval_pending=False):
     return None
 
 
+OPEN_SELF = re.compile(r"\s*(?:please\s+)?(?:open(?:\s+(?:up|yourself))?|show\s+yourself)(?:,?\s+please)?\s*[.!?]*", re.I)
+
+
+def open_brain_page():
+    """Open Jarvis's own Brain page (starting its server if needed), as the Jarvis CEO icon does."""
+    import subprocess
+    subprocess.Popen([os.path.join(HERE, ".venv", "Scripts", "pythonw.exe"), os.path.join(HERE, "open_brain.py")],
+                     cwd=HERE, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
 def quick_reply(text):
     """Simple app launches, window and music commands can skip the AI round trip.
 
     Returns None to use the AI, "" for an action done silently, or a sentence to speak."""
+    if OPEN_SELF.fullmatch(text):  # "Jarvis, open (up)" means open Jarvis himself
+        try:
+            open_brain_page()
+        except OSError:
+            return "I couldn't open my Brain page."
+        hud.emit("tool", name="open_brain", input={})
+        return ""
     import music
     played = music.run(text)
     if played is not None:
