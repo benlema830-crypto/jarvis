@@ -1,4 +1,6 @@
-"""Open the second-brain companion without duplicating the voice assistant."""
+"""Open the second-brain companion without duplicating the voice assistant.
+
+--no-browser starts the hidden assistant and Brain server only (used by the Startup shortcut)."""
 from pathlib import Path
 import socket
 import subprocess
@@ -29,4 +31,5 @@ if not running:
             if probe.connect_ex(("127.0.0.1", 7781)) == 0:
                 break
         time.sleep(.1)
-webbrowser.open("http://127.0.0.1:7781")
+if "--no-browser" not in sys.argv:
+    webbrowser.open("http://127.0.0.1:7781")
