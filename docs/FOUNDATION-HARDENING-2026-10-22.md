@@ -19,6 +19,7 @@ measurements use the synthetic fixture in `tests/retrieval_fixture.py`.
 | `40cf195` | D | Approval-gated tools ask *after* the turn (fixes a deadlock in `named_routine run`). |
 | `5658929` | D | HUD server rejects foreign `Origin` headers. |
 | `29ac40f` | D | Encoded/string-built commands and script-language deletes need approval. |
+| `8bd111c` | D | Agents cannot write approval records or guard code; file writes limited to allowed roots. |
 
 ### New or changed model tools
 - `remember(fact, core=False)` — `core` keeps identity facts in every prompt.
@@ -81,6 +82,18 @@ Verified and fixed:
 3. **Guard bypasses.** `-EncodedCommand`, `iex`, base64 payloads and `os.remove`/`shutil.rmtree`/`fs.rmSync`
    were treated as ordinary work and could be auto-accepted for Codex sessions.
 
+4. **Self-approval and allowed roots** (`8bd111c`). A Claude Code terminal task could write
+   `data/cc_approvals.json` (the grant file the guard trusts), edit `cc_guard.py`, or write `C:\Windows`,
+   the Startup folder, `.ssh`, `.codex`/`.claude` config or PowerShell profiles with no pause. Writes to
+   Jarvis's approval records and guard code are now blocked; file writes outside your user folder, or into
+   autostart/credential/agent-config places inside it, need spoken approval (paths resolved first; an
+   unreadable drive fails closed). Codex file-change auto-approval applies the same rules. Codex shell
+   commands are confined by its sandbox (writable root = the project folder, no network); Claude Code shell
+   commands still rely on the keyword guard (that path is unused in subscription-only mode).
+
+Pre-existing usability note: in research mode Codex wraps even read-only searches in a compound PowerShell
+command, which isn't recognised as read-only, so those requests come to you for approval.
+
 Approval channels (documented, unchanged): owner voice, the local console (`--text`), and the local
 HUD/Brain text box. Model output, tool/MCP results, Telegram, HOLO, reminders and agent reports
 arrive as dict items and never reach `approvals.answer()`.
@@ -109,9 +122,12 @@ Proposed, **not merged: needs your decision**:
 | Codex app-server startup and MCP inventory | **Exercised live** | `scripts/check_codex_mcp_isolation.py` (proposal branch), no model turns |
 | Brain UI | Headless check | `tests/check_brain_browser.py` passes |
 | Classic HUD page | Not verified | `tests/check_hud_browser.py` times out in headless Edge before and after these changes (environmental) |
-| Voice: Qwen, Whisper, wake word, ears | Not exercised | No voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
-| Jarvis MCP integrations (`call_mcp_tool`), MCP OAuth, Telegram, HOLO | Not exercised live | Code unchanged; unit tests (`test_mcp_dispatch`, `test_mcp_oauth`, ...) pass |
-| Agent sessions (Codex/Claude project work) | Unit-tested only | Only the spoken label for a new guard category changed on this branch; `test_agent_sessions` passes |
+| Voice: Qwen synthesis → Whisper recognition | **Exercised live** | Jarvis's `qwen_voice` + `ears.Transcriber` (GPU), rendered to memory, never played: 4.5 s of audio; Whisper heard "The Orion Launch Tower bracket is torqued to 25Nm" |
+| Wake word, microphone capture, playback, barge-in | Not exercised | No voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
+| Jarvis MCP (`list_mcp_tools`, `call_mcp_tool`) | **Exercised live** up to approval | Real catalog through `run_tool`: Zapier MCP 17 tools, GitHub 46; a call queued, asked for approval, and after "no" never contacted the server |
+| MCP OAuth, Telegram, HOLO | Not exercised | Code unchanged; unit tests pass. Telegram sending is an outward action and was not attempted |
+| Codex agent session (research mode) | **Exercised live** | Temp session store; connected, ran, routed one approval request (declined in the test) and reported honestly in 9 s. Original and new guard give the same verdict for that command |
+| Claude Code terminal path | Unit-tested only | Not used in subscription-only mode |
 | Claude / OpenAI providers | Unit-tested only | Subscription-only mode; no paid API calls were made |
 | Your real vault and memory | Not touched | File timestamps unchanged; all tests and runs use temporary copies |
 
