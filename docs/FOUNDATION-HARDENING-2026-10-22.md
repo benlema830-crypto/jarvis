@@ -254,3 +254,12 @@ Nothing migrated data, so every rollback is code-only and keeps your memory, his
 - One change: `git revert <commit>` from the table above (they are independent apart from B2 building on B1).
 - Embedding keep-alive only: set `JARVIS_EMBED_KEEP_ALIVE=0` in `.env`.
 - Vector cache: deleting `data\vault-vectors.sqlite3` is safe (derived data; rebuilt on the next search).
+
+## Follow-up (same day): paid providers enabled as options
+At the owner's request: `subscription_only` set to false in `data/preferences.json` (only that key changed;
+previous file kept in the session scratchpad). Codex remains the active default; Claude and OpenAI are selectable
+in the Brain's Model control. Key checks: Claude API OK (`claude-haiku-5-5`); ElevenLabs OK (free account endpoint);
+OpenAI key valid (127 models visible) but the account returned `credit_balance_exhausted`, so add credit before
+choosing OpenAI. Commit `4911bce` keeps terminal tasks on sandboxed Codex sessions even with paid APIs on
+(`terminal_provider: "claude"` opts into Claude Code) and fixes terminal status/stop for Codex tasks. Jarvis was
+restarted quietly and reports ready. To go back: set `"subscription_only": true` in `data/preferences.json`.
