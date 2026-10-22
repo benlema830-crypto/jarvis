@@ -124,8 +124,7 @@ def _save(facts: list[dict]):
 
 def _same(a: str, b: str) -> bool:
     """Exact duplicate apart from case, spacing and final punctuation; never fuzzy."""
-    norm = lambda text: " ".join(text.casefold().split()).rstrip(" .!?;:")
-    return norm(a) == norm(b)
+    return _norm(a) == _norm(b)
 
 
 def facts() -> list[str]:
@@ -150,26 +149,85 @@ def remember(fact: str, core: bool = False) -> str:
             # Never evict silently: the oldest facts are often the most durable ones.
             return (f"Memory is full ({MAX_FACTS} saved facts); nothing was removed and this fact was not saved. "
                     "Ask the user which saved fact to forget or combine, then try again.")
+        similar = _similar(items, fact)
         items.append({"fact": fact, "t": time.time(), **({"core": True} if core else {})})
         _save(items)
+    if similar:
+        # Never overwrite on similarity alone: "sister likes tea" and "brother likes tea" are both true.
+        return (f"Remembered: {fact} Note: a similar fact is already saved: \"{similar}\". If the new one "
+                "replaces it, call correct_memory with the old wording; if both are true, nothing else is needed.")
     return f"Remembered: {fact}"
 
 
+def _norm(text: str) -> str:
+    return " ".join(text.casefold().split()).rstrip(" .!?;:")
+
+
+def _similar(items, fact):
+    best, ratio = None, 0.75
+    for item in items:
+        score = difflib.SequenceMatcher(None, _norm(item["fact"]), _norm(fact)).ratio()
+        if score >= ratio:
+            best, ratio = item["fact"], score
+    return best
+
+
+def _find(items, words):
+    """Index of the one saved fact `words` refers to, or (None, reason). Deleting or rewriting
+    personal facts must never be a guess, so several plausible matches are refused."""
+    wanted = _norm(words or "")
+    if not wanted:
+        return None, "Say which saved fact you mean."
+    exact = [i for i, item in enumerate(items) if _norm(item["fact"]) == wanted]
+    found = exact or [i for i, item in enumerate(items) if wanted in _norm(item["fact"])]
+    if not found:
+        scored = sorted(((difflib.SequenceMatcher(None, wanted, _norm(item["fact"])).ratio(), i)
+                         for i, item in enumerate(items)), reverse=True)
+        found = [i for score, i in scored[:2] if score >= 0.5]
+        if len(found) == 2 and scored[0][0] - scored[1][0] >= 0.05:
+            found = found[:1]
+    if not found:
+        return None, f"No saved fact matches '{words}'."
+    if len(found) > 1:
+        options = "; ".join(f'"{items[i]["fact"]}"' for i in found[:5])
+        return None, f"Several saved facts match '{words}': {options}. Ask the user which one they mean."
+    return found[0], ""
+
+
+def _invalidate():
+    Path(PATH + '.epoch').write_text(str(time.time_ns()), encoding='ascii')
+
+
 def forget(fact: str) -> str:
-    """Forget the stored fact that best matches `fact`."""
+    """Forget the one stored fact that `fact` refers to; ambiguous requests change nothing."""
     with transaction():
         items = _load()
-        texts = [f["fact"] for f in items]
-        lower = fact.lower()
-        match = next((t for t in texts if lower in t.lower()), None)
-        if match is None:
-            close = difflib.get_close_matches(fact, texts, n=1, cutoff=0.4)
-            match = close[0] if close else None
-        if match is None:
-            return f"No memory matching '{fact}'."
-        _save([f for f in items if f["fact"] != match])
-        Path(PATH + '.epoch').write_text(str(time.time_ns()), encoding='ascii')
+        index, problem = _find(items, fact)
+        if index is None:
+            return problem
+        match = items.pop(index)["fact"]
+        _save(items)
+        _invalidate()
     return f"Forgot: {match}"
+
+
+def correct(old: str, new: str) -> str:
+    """Replace an outdated fact in place. The old wording is not kept anywhere, and the
+    privacy epoch makes sessions and restart history drop context that repeated it."""
+    new = privacy.redact((new or "").strip())
+    if not new or len(new) > 2000:
+        raise ValueError('Give the corrected fact in 1–2000 characters.')
+    with transaction():
+        items = _load()
+        index, problem = _find(items, old)
+        if index is None:
+            return problem
+        items[index] = dict(items[index], fact=new, updated=time.time())
+        # If the corrected wording was also saved separately, keep a single copy.
+        items = [item for i, item in enumerate(items) if i == index or not _same(item["fact"], new)]
+        _save(items)
+        _invalidate()
+    return f"Corrected: {new}"
 
 
 def _when(item) -> float:
@@ -236,8 +294,10 @@ def recall(query: str, limit: int = 8) -> str:
     ranked = sorted((pair for pair in scored if pair[0] >= best / 2), key=lambda p: (-p[0], -_when(items[p[1]]), p[1]))
     lines = []
     for _, i in ranked[:limit]:
-        saved = time.strftime("%Y-%m-%d", time.localtime(_when(items[i])))
-        lines.append(f"- {items[i]['fact']} (saved {saved})")
+        item = items[i]
+        day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t))
+        when = f"saved {day(item.get('t', 0))}" + (f", corrected {day(item['updated'])}" if item.get("updated") else "")
+        lines.append(f"- {item['fact']} ({when})")
     return privacy.redact(f"Saved facts matching '{query}' (user-provided memory, newest wording is current):\n"
                           + "\n".join(lines))
 

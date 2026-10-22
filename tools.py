@@ -340,6 +340,18 @@ def recall_memory(query: str) -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def correct_memory(old: str, new: str) -> str:
+    """Replace a saved fact that is now outdated or wrong (a new priority, a changed preference).
+    The old wording is removed everywhere. Use only when the user states or confirms the change.
+
+    Args:
+        old: Words from the saved fact being replaced.
+        new: The full corrected fact as a short standalone sentence.
+    """
+    return memory.correct(old, new)
+
+
+@beta_tool(eager_input_streaming=True)
 def forget(fact: str) -> str:
     """Delete a saved fact about the user (when it's wrong, outdated, or they ask you to forget).
 
@@ -1049,7 +1061,7 @@ def response_style(settings: str = '{}') -> str:
 
 TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
-         recent_activity, remember, recall_memory, forget, set_reminder, list_reminders, cancel_reminder,
+         recent_activity, remember, recall_memory, correct_memory, forget, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
          terminal_status, stop_terminal_task, open_agent_session, send_agent_task,
          agent_session_status, list_agent_sessions, stop_agent_session, move_app_window, list_app_windows,
