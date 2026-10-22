@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
 from urllib.parse import quote, unquote, urlsplit
 
 VAULT = Path.home() / "Documents" / "JARVIS Knowledge"
@@ -46,10 +47,12 @@ def read(relative):
         raise ValueError("Note not found in the vault.")
     if path.stat().st_size > MAX_BYTES:
         raise ValueError("This note exceeds the 256 KB limit.")
-    content = path.read_text(encoding="utf-8-sig")
+    import hashlib
+    raw = path.read_bytes()
+    content = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")  # as read_text() did
     title = next((line[2:].strip() for line in content.splitlines() if line.startswith("# ")), path.stem)
     return {"path": path.relative_to(VAULT).as_posix(), "title": title, "content": content,
-            "uri": uri(relative), "modified": path.stat().st_mtime}
+            "uri": uri(relative), "modified": path.stat().st_mtime, "sha256": hashlib.sha256(raw).hexdigest()}
 
 
 _scan_cache = {}  # (vault, relative path) -> ((mtime_ns, size), note); only files seen in the latest scan
@@ -238,3 +241,137 @@ def create(relative, content):
         except FileExistsError:
             raise ValueError("That note already exists. Choose another name; existing notes are never overwritten.") from None
     return {"created": relative, "uri": uri(relative)}
+
+
+# ---------- Targeted edits of existing notes (separate from create, which never overwrites) ----------
+
+EDIT_ACTIONS = ('replace_section', 'append_to_section', 'set_frontmatter')
+_HEADING = re.compile(r'(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$')
+
+
+def _existing(relative):
+    path = note_path(relative)
+    if not path.is_file():
+        raise ValueError("Note not found in the vault. Existing notes only; use create for new ones.")
+    if path.stat().st_size > MAX_BYTES:
+        raise ValueError("This note exceeds the 256 KB limit.")
+    return path
+
+
+def _headings(lines, start):
+    """(index, level, normalized text) of real headings, skipping fenced code."""
+    found, fence = [], None
+    for i in range(start, len(lines)):
+        stripped = lines[i].rstrip('\r\n')
+        marker = stripped.lstrip()[:3]
+        if marker in ('```', '~~~'):
+            fence = None if fence == marker else fence or marker
+            continue
+        match = None if fence else _HEADING.fullmatch(stripped)
+        if match:
+            found.append((i, len(match[1]), ' '.join(match[2].casefold().split())))
+    return found
+
+
+def _edited(raw, action, target, content):
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    text = raw[3 if bom else 0:].decode('utf-8')
+    lines = text.splitlines(keepends=True)
+    newline = '\r\n' if text.count('\r\n') * 2 > text.count('\n') else '\n'
+    if lines and not lines[-1].endswith(('\n', '\r')):
+        lines[-1] += newline
+    front_end = None
+    if lines and lines[0].rstrip('\r\n') == '---':
+        front_end = next((i for i in range(1, len(lines)) if lines[i].rstrip('\r\n') == '---'), None)
+    if action == 'set_frontmatter':
+        if not re.fullmatch(r'[A-Za-z][\w-]{0,40}', target or ''):
+            raise ValueError("Use a simple frontmatter key such as status.")
+        if not isinstance(content, str) or not content.strip() or len(content) > 200 or '\n' in content or '\r' in content:
+            raise ValueError("Use a one-line frontmatter value of at most 200 characters.")
+        value = content.strip()
+        value = json.dumps(value) if re.search(r'[:#\[\]{}&*!|>\'"%@`]|^[-?]', value) else value
+        entry = f'{target}: {value}{newline}'
+        if front_end is None:
+            return bom, ['---' + newline, entry, '---' + newline] + lines
+        keys = [i for i in range(1, front_end) if re.match(re.escape(target) + r'\s*:', lines[i])]
+        if len(keys) > 1:
+            raise ValueError(f"The frontmatter has several '{target}' keys; edit it in Obsidian.")
+        if keys:
+            lines[keys[0]] = entry
+        else:
+            lines.insert(front_end, entry)
+        return bom, lines
+    wanted = ' '.join(re.sub(r'^#+\s*', '', target or '').casefold().split())
+    headings = _headings(lines, 0 if front_end is None else front_end + 1)
+    matches = [h for h in headings if h[2] == wanted]
+    if not matches:
+        raise ValueError(f"No heading '{target}' in this note.")
+    if len(matches) > 1:
+        raise ValueError(f"Several headings are called '{target}'; edit it in Obsidian or rename one first.")
+    index, level, _ = matches[0]
+    end = next((i for i, lvl, _ in headings if i > index and lvl <= level), len(lines))
+    body = lines[index + 1:end]
+    trailing = 0
+    while trailing < len(body) and not body[len(body) - 1 - trailing].strip():
+        trailing += 1
+    new = [line + newline for line in content.strip('\r\n').replace('\r\n', '\n').split('\n')]
+    if action == 'replace_section':
+        return bom, lines[:index + 1] + new + body[len(body) - trailing:] + lines[end:]
+    insert = index + 1 + len(body) - trailing
+    return bom, lines[:insert] + new + lines[insert:]
+
+
+def plan_edit(relative, action, target, content, expected_sha256):
+    """Validate an edit and return its preview; nothing is written until apply_edit()."""
+    import difflib
+    import hashlib
+    if action not in EDIT_ACTIONS:
+        raise ValueError("Choose replace_section, append_to_section or set_frontmatter.")
+    if not isinstance(content, str) or len(content.encode('utf-8')) > MAX_BYTES:
+        raise ValueError("Provide text under 256 KB.")
+    with LOCK:
+        path = _existing(relative)
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise ValueError("The note changed since it was read. Read it again before editing.")
+        bom, lines = _edited(raw, action, target, content)
+    new = (b'\xef\xbb\xbf' if bom else b'') + ''.join(lines).encode('utf-8')
+    if len(new) > MAX_BYTES:
+        raise ValueError("The edited note would exceed the 256 KB limit.")
+    if new == raw:
+        raise ValueError("That edit would not change the note.")
+    old_text = raw.decode('utf-8-sig').splitlines()
+    diff = '\n'.join(difflib.unified_diff(old_text, ''.join(lines).splitlines(), 'before', 'after', n=1, lineterm=''))
+    relative = path.relative_to(VAULT).as_posix()
+    return {'path': relative, 'action': action, 'target': target, 'expected_sha256': expected_sha256,
+            'diff': diff[:4000] + ('\n…' if len(diff) > 4000 else ''), 'new': new}
+
+
+def apply_edit(plan):
+    """Write a planned edit only if the note is still exactly the version that was previewed."""
+    import hashlib
+    with LOCK:
+        path = _existing(plan['path'])
+        if hashlib.sha256(path.read_bytes()).hexdigest() != plan['expected_sha256']:
+            raise ValueError("The note changed since it was read (perhaps edited in Obsidian). Nothing was written.")
+        temp = path.with_name('.jarvis-edit-' + os.urandom(6).hex() + '.tmp')  # hidden: Obsidian ignores it
+        try:
+            with open(temp, 'xb') as handle:
+                handle.write(plan['new'])
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Win32 ReplaceFile is avoided on purpose: when antivirus briefly holds the new file it
+            # can delete the original and leave the replacement under its temporary name.
+            for attempt in range(5):
+                if not path.is_file():  # deleted meanwhile: never recreate it
+                    raise ValueError("The note was deleted before the edit was written. Nothing was changed.")
+                try:
+                    os.replace(temp, path)  # atomic; the note is either fully old or fully new
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise ValueError("The note is locked by another program. Nothing was changed.") from None
+                    time.sleep(0.1 * (attempt + 1))
+        finally:
+            temp.unlink(missing_ok=True)
+        return {'updated': plan['path'], 'sha256': hashlib.sha256(plan['new']).hexdigest(), 'uri': uri(plan['path'])}
