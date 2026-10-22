@@ -6,6 +6,10 @@ anything else is left to the assistant. run() returns None when the text isn't a
 Uses the local Spotify account saved by scripts/setup_spotify.py (spotify_mcp.dispatch), so it
 works whether or not the separate bridge process is running."""
 import re
+import socket
+import subprocess
+import sys
+from pathlib import Path
 
 import apps
 
@@ -44,6 +48,27 @@ def configured():
         return spotify_mcp.STORE.exists()
     except OSError:
         return False
+
+
+def _listening(port):
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_bridge():
+    """Start the local Spotify bridge (for the assistant's Spotify tools) if it is set up and not running.
+
+    CREATE_NO_WINDOW without DETACHED_PROCESS, like open_brain.py: a detached console program's
+    Python child gets its own console window, and closing that window kills the bridge."""
+    import spotify_mcp
+    if not configured() or _listening(spotify_mcp.PORT):
+        return False
+    root = Path(__file__).resolve().parent
+    subprocess.Popen([sys.executable, str(root / "spotify_mcp.py")], cwd=root, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=subprocess.CREATE_NO_WINDOW)
+    return True
 
 
 def _with_device(name, args):

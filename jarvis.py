@@ -750,6 +750,12 @@ def console_loop(turns: Turns):
 
 def start_bridges(ears):
     """Telegram (if set up), the HOLO event watcher and calendar heads-ups. All optional; all fail quietly."""
+    import music
+    try:
+        if music.start_bridge():
+            print("Spotify bridge started.", flush=True)
+    except Exception as error:
+        print(f"(Spotify bridge not started: {type(error).__name__})", flush=True)
     import holo_bridge
     import telegram_bridge
     bridge = telegram_bridge.BRIDGE

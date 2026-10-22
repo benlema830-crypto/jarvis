@@ -136,5 +136,23 @@ class SpotifyApprovalTest(unittest.TestCase):
             self.assertFalse(called, (name, host, tool))
 
 
+class BridgeAutostartTest(unittest.TestCase):
+    def test_bridge_starts_hidden_when_set_up_and_not_running(self):
+        with mock.patch.object(music, 'configured', return_value=True),                 mock.patch.object(music, '_listening', return_value=False),                 mock.patch.object(music.subprocess, 'Popen') as popen:
+            self.assertTrue(music.start_bridge())
+        flags = popen.call_args.kwargs['creationflags']
+        self.assertTrue(flags & music.subprocess.CREATE_NO_WINDOW)
+        self.assertFalse(flags & getattr(music.subprocess, 'DETACHED_PROCESS', 0))  # no stray console window
+        self.assertTrue(popen.call_args.args[0][-1].endswith('spotify_mcp.py'))
+
+    def test_bridge_is_not_duplicated_or_started_without_setup(self):
+        with mock.patch.object(music.subprocess, 'Popen') as popen:
+            with mock.patch.object(music, 'configured', return_value=True), mock.patch.object(music, '_listening', return_value=True):
+                self.assertFalse(music.start_bridge())
+            with mock.patch.object(music, 'configured', return_value=False):
+                self.assertFalse(music.start_bridge())
+        popen.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
