@@ -5,13 +5,18 @@ anything else is left to the assistant. run() returns None when the text isn't a
 (or Spotify isn't set up), "" when it was done, or a short sentence describing a failure.
 Uses the local Spotify account saved by scripts/setup_spotify.py (spotify_mcp.dispatch), so it
 works whether or not the separate bridge process is running."""
+import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import apps
+
+LAUNCH_WAIT = 20  # seconds to wait for a freshly opened Spotify to appear as a device
 
 _POLITE = re.compile(r"^(?:(?:hey|ok|okay)\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?|(?:,?\s+please)?[\s.!?]*$", re.I)
 _TARGET = r"(?:\s+(?:the|this|my))?(?:\s+(?:music|song|track|spotify|playback|tune))?(?:\s+on\s+spotify)?"
@@ -71,19 +76,58 @@ def start_bridge():
     return True
 
 
+def _spotify_exe():
+    """The desktop app, or the Microsoft Store app's execution alias."""
+    for path in (Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe",
+                 Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "Spotify.exe"):
+        if path.is_file():
+            return str(path)
+    return shutil.which("Spotify.exe")
+
+
+def launch_spotify():
+    exe = _spotify_exe()
+    if not exe:
+        return False
+    try:
+        subprocess.Popen([exe, "--minimized"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
+
+
+def _devices():
+    import spotify_mcp
+    return [d for d in spotify_mcp.dispatch("spotify_devices", {})["devices"] if not d.get("is_restricted")]
+
+
 def _with_device(name, args):
-    """Retry on an available device when Spotify reports none active (prefer this PC)."""
+    """Retry on an available device when none is active (prefer this PC). With no device at all,
+    play/resume open Spotify minimized and wait for it to come online; pause is already done."""
     import spotify_mcp
     try:
         return spotify_mcp.dispatch(name, args)
     except spotify_mcp.SpotifyError as error:
         if "No active Spotify device" not in str(error):
             raise
-        devices = [d for d in spotify_mcp.dispatch("spotify_devices", {})["devices"] if not d.get("is_restricted")]
-        if not devices:
-            raise spotify_mcp.SpotifyError("Open Spotify on one of your devices first.") from None
-        device = next((d for d in devices if d.get("type") == "Computer"), devices[0])
-        return spotify_mcp.dispatch(name, dict(args, device_id=device["id"]))
+    devices = _devices()
+    if not devices:
+        if name == "spotify_pause":
+            return {}  # nothing is playing anywhere
+        if name != "spotify_play":
+            raise spotify_mcp.SpotifyError("Nothing is playing on Spotify.")
+        if not launch_spotify():
+            raise spotify_mcp.SpotifyError("I couldn't open Spotify on this PC.")
+        for _ in range(LAUNCH_WAIT):
+            time.sleep(1)
+            devices = _devices()
+            if devices:
+                break
+        else:
+            raise spotify_mcp.SpotifyError("Spotify opened but didn't come online. Try again in a moment.")
+    device = next((d for d in devices if d.get("type") == "Computer"), devices[0])
+    return spotify_mcp.dispatch(name, dict(args, device_id=device["id"]))
 
 
 def run(text):

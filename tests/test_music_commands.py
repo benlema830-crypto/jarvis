@@ -83,7 +83,7 @@ class RunTest(unittest.TestCase):
         self.assertIn('Premium', music.run('pause'))
         self.responses['spotify_devices'] = {'devices': []}
         self.responses['spotify_next'] = spotify_mcp.SpotifyError('No active Spotify device. Open Spotify and play a track first.')
-        self.assertIn('Open Spotify', music.run('skip'))
+        self.assertIn('Nothing is playing', music.run('skip'))
 
     def test_not_set_up_falls_through_to_the_assistant(self):
         with mock.patch.object(music, 'configured', return_value=False):
@@ -152,6 +152,71 @@ class BridgeAutostartTest(unittest.TestCase):
             with mock.patch.object(music, 'configured', return_value=False):
                 self.assertFalse(music.start_bridge())
         popen.assert_not_called()
+
+
+class OpenSpotifyTest(unittest.TestCase):
+    """No device anywhere: play/resume open Spotify minimized and wait for it; pause is a no-op."""
+    def setUp(self):
+        self.calls, self.launched = [], []
+        self.devices = []
+        def dispatch(name, args):
+            self.calls.append((name, args))
+            if name == 'spotify_devices':
+                return {'devices': list(self.devices)}
+            if name == 'spotify_search':
+                return {'items': [{'uri': 'spotify:track:' + 'B' * 22}]}
+            if 'device_id' not in args:
+                raise spotify_mcp.SpotifyError('No active Spotify device. Open Spotify and play a track first.')
+            return {'accepted': True}
+        def launch():
+            self.launched.append(True)
+            self.devices.append({'id': 'pc1', 'type': 'Computer', 'is_restricted': False})
+            return True
+        for patcher in (mock.patch.object(spotify_mcp, 'dispatch', side_effect=dispatch),
+                        mock.patch.object(music, 'configured', return_value=True),
+                        mock.patch.object(music, 'launch_spotify', side_effect=launch),
+                        mock.patch.object(music.time, 'sleep'),
+                        mock.patch.object(music.apps, 'names', return_value=[])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_play_opens_spotify_and_plays_on_it(self):
+        self.assertEqual(music.run('play highway to hell'), '')
+        self.assertEqual(self.launched, [True])
+        self.assertEqual(self.calls[-1], ('spotify_play', {'uri': 'spotify:track:' + 'B' * 22, 'device_id': 'pc1'}))
+
+    def test_resume_opens_spotify_too(self):
+        self.assertEqual(music.run('resume the music'), '')
+        self.assertEqual(self.calls[-1], ('spotify_play', {'device_id': 'pc1'}))
+
+    def test_pause_with_nothing_running_does_nothing_quietly(self):
+        self.assertEqual(music.run('pause'), '')
+        self.assertEqual(self.launched, [])
+
+    def test_skip_with_nothing_running_says_so_without_opening(self):
+        self.assertIn('Nothing is playing', music.run('next song'))
+        self.assertEqual(self.launched, [])
+
+    def test_spotify_that_never_comes_online_is_reported(self):
+        with mock.patch.object(music, 'launch_spotify', return_value=True):
+            self.assertIn("didn't come online", music.run('play highway to hell'))
+        with mock.patch.object(music, 'launch_spotify', return_value=False):
+            self.assertIn("couldn't open Spotify", music.run('play highway to hell'))
+
+
+
+class LaunchSpotifyTest(unittest.TestCase):
+    def test_launch_starts_spotify_minimized(self):
+        with mock.patch.object(music, '_spotify_exe', return_value='C:/Apps/Spotify.exe'), mock.patch.object(music.subprocess, 'Popen') as popen:
+            self.assertTrue(music.launch_spotify())
+        self.assertEqual(popen.call_args.args[0], ['C:/Apps/Spotify.exe', '--minimized'])
+
+    def test_missing_spotify_is_reported_not_raised(self):
+        with mock.patch.object(music, '_spotify_exe', return_value=None):
+            self.assertFalse(music.launch_spotify())
+        with mock.patch.object(music, '_spotify_exe', return_value='C:/Apps/Spotify.exe'), mock.patch.object(music.subprocess, 'Popen', side_effect=OSError):
+            self.assertFalse(music.launch_spotify())
+
 
 
 if __name__ == '__main__':
