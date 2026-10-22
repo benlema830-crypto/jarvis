@@ -20,11 +20,15 @@ APPROVALS = os.path.join(HERE, "data", "cc_approvals.json")
 PENDING = os.path.join(HERE, "data", "cc_pending.json")
 
 RISKY = {
+    # Keyword rules cannot see through encoding or string-built commands, so those always ask.
+    "hidden or encoded command": re.compile(
+        r"\s-(?:e|ec|en|enc|enco\w*|encodedcommand)\s+[A-Za-z0-9+/=]{12,}|\b(?:Invoke-Expression|iex)\b|FromBase64String", re.I),
     "destructive git": re.compile(r"\bgit\s+(?:reset\s+--hard|push\b[^\n]*(?:--force|-f\b)|checkout\s+--\s|restore\s+(?:--worktree\s+)?\.)", re.I),
     "publish or external message": re.compile(r"\b(?:git\s+push|npm\s+publish|gh\s+(?:release\s+create|pr\s+merge|issue\s+comment|pr\s+comment)|Send-MailMessage)\b", re.I),
     "delete": re.compile(
         r"\b(Remove-Item|rm|rmdir|rd|del|erase|Clear-RecycleBin|Clear-Content)\b|\bri\s|"
-        r"\[(System\.)?IO\.(File|Directory)\]::Delete|\.Delete\(|shred|git\s+clean", re.I),
+        r"\[(System\.)?IO\.(File|Directory)\]::Delete|\.Delete\(|shred|git\s+clean|"
+        r"\bos\.(?:remove|unlink|rmdir|removedirs)\s*\(|\bshutil\.rmtree\b|\.(?:unlink|rmdir|rmSync|unlinkSync|rmdirSync)\s*\(", re.I),
     "install": re.compile(
         r"\b(winget|choco|scoop|msiexec|Add-AppxPackage|Remove-AppxPackage|Install-Package|"
         r"Uninstall-Package|Install-Module|Uninstall-Module|Install-Script)\b|"

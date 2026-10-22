@@ -286,7 +286,8 @@ class SessionManager:
             question = f"{entry['name']} needs approval: {params.get('reason') or detail or 'run a command outside normal access'}. Command: {command}"
             action = {"delete": "delete data", "install": "install or remove software",
                       "system settings": "change system settings", "destructive git": "make a destructive change to project history",
-                      "publish or external message": "publish changes or send an external message"}.get(detail, "run a command requiring additional permission")
+                      "publish or external message": "publish changes or send an external message",
+                      "hidden or encoded command": "run an encoded or hidden command"}.get(detail, "run a command requiring additional permission")
             speech = f"The agent wants to {action}. The details are on screen. May I proceed?"
         elif method == "item/fileChange/requestApproval":
             item = self._items.get(params.get("itemId"), {})
