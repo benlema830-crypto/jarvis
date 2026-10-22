@@ -83,7 +83,15 @@ def interruption_command(text, is_owner, mode, approval_pending=False):
 
 
 def quick_reply(text):
-    """Simple app launches and explicit window commands can skip the AI round trip."""
+    """Simple app launches, window and music commands can skip the AI round trip.
+
+    Returns None to use the AI, "" for an action done silently, or a sentence to speak."""
+    import music
+    played = music.run(text)
+    if played is not None:
+        if played == "":
+            hud.emit("tool", name="spotify", input={"command": text[:80]})
+        return played
     direct = tools.window_control.quick_action(text)
     if direct:
         tool_name, arguments = direct
@@ -997,8 +1005,10 @@ def main():
                 spoke.append(sentence)
                 voice.say(sentence)
         if direct is not None:
-            brain.note(prompt, direct)
-            speak(direct)
+            # "" means done silently (e.g. "pause the music"): keep the turn in history, say nothing.
+            brain.note(prompt, direct or "(Done silently.)")
+            if direct:
+                speak(direct)
         else:
             respond(brain, voice, prompt, speak)
         voice.wait()

@@ -795,6 +795,17 @@ def list_mcp_tools(connection_id: str = "") -> str:
 
 _mcp_busy = __import__("threading").Lock()
 
+# Playback-only tools of the local Spotify bridge (spotify_mcp.py); every other MCP call is confirmed.
+NO_APPROVAL_MCP = {("Spotify (local)", "127.0.0.1:8791"): {
+    "spotify_search", "spotify_devices", "spotify_playback", "spotify_play", "spotify_pause",
+    "spotify_next", "spotify_previous"}}
+
+
+def _no_approval_needed(connection_id, tool_name):
+    import mcp_connections
+    item = next((c for c in mcp_connections.connections() if c["id"] == connection_id), None)
+    return bool(item) and tool_name in NO_APPROVAL_MCP.get((item["name"], item.get("host")), set())
+
 
 @beta_tool(eager_input_streaming=True)
 def call_mcp_tool(connection_id: str, tool_name: str, arguments_json: str = "{}") -> str:
@@ -817,6 +828,9 @@ def call_mcp_tool(connection_id: str, tool_name: str, arguments_json: str = "{}"
     catalogs = mcp_connections.catalog(connection_id)
     if not catalogs or not any(t["name"] == tool_name for t in catalogs[0]["tools"]):
         return "That MCP tool is unavailable. Refresh the tool catalog."
+    if _no_approval_needed(connection_id, tool_name):
+        # The owner chose music control without confirmations; it runs in this turn.
+        return mcp_connections.call(connection_id, tool_name, arguments)
     if not _mcp_busy.acquire(blocking=False):
         return "Another MCP request is pending. Wait for its report."
 
