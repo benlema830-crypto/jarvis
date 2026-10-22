@@ -32,6 +32,12 @@ A live USB test starts Fedora without installing; no resize is needed to try it.
 Keep the Windows disk unmodified during the live test.
 
 BACKUP INVENTORY
+Follow-up: CLOUD-BACKUP-100GB-PLAN.txt now documents a measured 57.632 GB file
+selection for the owner's proposed 100 GB cloud plan, excluding reinstallable
+environments/caches and six base-model files. Originals remain on the PC. The
+account's available quota, actual upload and restore verification are pending.
+The broad inventory figures below are historical estimates before that reduction.
+
 Measured folders total approximately 122 GiB at inspection. This is a partial
 inventory, not a full account of all personal data on C:. It includes some
 reinstallable environments, downloaded models and caches. Allow headroom for

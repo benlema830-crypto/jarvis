@@ -1,0 +1,63 @@
+COMPACT CLOUD BACKUP PLAN - 2026-10-21
+
+RESULT
+Measured selected file contents: 57,631,706,313 bytes (57.632 decimal GB),
+116,930 files, before compression. A 100,000,000,000-byte account would have
+42.368 GB left before existing cloud usage, archive overhead and later changes.
+The account's actual available quota and purchase status have not been checked.
+This is a selection manifest, not a completed backup, deletion or upload.
+
+EXCLUDE FROM THE BACKUP; KEEP ON THE PC
+46.795 GB: six ComfyUI base-model files, listed below.
+12.937 GB: remaining contents of two verified Python virtual environments,
+          Documents/Jarvis-LocalVoice/.tts-qwen and .tts-chatterbox.
+16.197 GB: other Python environments, embedded Python, dependency directories,
+          compiled Python caches and selected browser/tool caches.
+Exclusion groups are disjoint in this accounting; no compression assumed.
+No live voice environment or model was deleted, moved or modified.
+
+Six base-model files relative to AI/ComfyUI_windows_portable/ComfyUI/models:
+checkpoints/flux1-dev-fp8.safetensors
+diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors
+diffusion_models/flux1-krea-dev_fp8_scaled.safetensors
+text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors
+text_encoders/clip_l.safetensors
+vae/ae.safetensors
+These are standard base-model filenames, identified as download candidates;
+upstream checksums/provenance have not been independently verified. If the
+owner has overwritten any of these names with custom weights, retain those.
+Windows originals remain available. Save filenames and versions for rebuilding.
+
+KEEP IN THE BACKUP
+- All three discovered ComfyUI LoRAs, including jax_v1 and jax_v1_step1500.
+- AI training files, outputs, inputs, workflows, configurations and project code,
+  subject to the documented environment/dependency/cache exclusions.
+- Jarvis source/history, memory, handoffs, preferences, voice profiles, recordings,
+  sibling voice projects and knowledge/documents. Voice model caches are kept.
+- Other coding projects, research history/data and tool configuration/history.
+- Personal photos/files in both local and redirected OneDrive folder locations.
+- Minecraft worlds/mods and reviewed application/game settings. Steam userdata
+  and Roblox local data are included; games themselves need not be uploaded.
+- Private configuration and credentials, packaged with encryption before upload.
+This is a file backup, not a full Windows image or exhaustive system-state backup.
+
+LOCAL MANIFESTS (IGNORED BY GIT; METADATA ONLY)
+data/reports/cloud-backup-compact-selection.json: totals, precise model exclusions.
+data/reports/cloud-backup-compact-files.json: selected file paths, sizes and mtimes.
+data/reports/cloud-backup-restore-environments.json: package/version lists for
+  the two excluded voice environments, extracted without importing their code.
+data/reports/cloud-backup-fit-audit.json: initial roots/cache/environment rules.
+data/reports/cloud-backup-size-breakdown.json: measurements for largest folders.
+Include the restore-environments and selection metadata with the eventual backup.
+
+REMAINING WORK BEFORE PARTITIONING
+Check actual cloud quota. Select an encrypted, dated archive/snapshot location
+outside active project folders; never recursively include the archive in itself.
+Store the password/recovery key outside this PC. Coordinate active database
+writers and browser profiles so locked/busy files are backed up consistently.
+Review the inventory's skipped links; hydrate or independently verify cloud-only
+files. Refresh the selection as source files may have changed since this audit.
+Upload the complete archive(s), verify remote sizes/integrity, and perform a
+restore check. Only then mark the backup verified and proceed to disk changes.
+
+See LINUX-BACKUP-PARTITION-PLAN.txt for the proposed 400 GiB Fedora allocation.
