@@ -648,9 +648,12 @@ def search_knowledge(query: str) -> str:
         query: Words or topic to find in the knowledge vault.
     """
     import json
+    import privacy
     import semantic_search
     result = semantic_search.search(query)
-    return json.dumps(result['results'], ensure_ascii=False)
+    keep = ('path', 'title', 'uri', 'excerpt', 'search_mode', 'modified', 'status')
+    return json.dumps([{k: privacy.redact(r[k]) if k in ('title', 'excerpt') else r[k] for k in keep if k in r}
+                       for r in result['results']], ensure_ascii=False)
 
 
 @beta_tool(eager_input_streaming=True)

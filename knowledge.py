@@ -52,10 +52,11 @@ def read(relative):
             "uri": uri(relative), "modified": path.stat().st_mtime}
 
 
-def index():
-    notes, skipped = [], 0
+def notes():
+    """Validated vault notes and the number skipped, without link analysis (used by search)."""
+    found, skipped = [], 0
     if not VAULT.is_dir():
-        return {"notes": [], "links": [], "skipped": 0, "unresolved": 0}
+        return found, skipped
     for directory, folders, files in os.walk(VAULT, followlinks=False):
         folders[:] = sorted(f for f in folders if not f.startswith('.') and
                             not (Path(directory) / f).is_symlink() and
@@ -63,13 +64,24 @@ def index():
         for name in sorted(files):
             if name.startswith('.') or not name.lower().endswith('.md'):
                 continue
-            if len(notes) >= MAX_NOTES:
+            if len(found) >= MAX_NOTES:
                 skipped += 1
                 continue
             try:
-                notes.append(read((Path(directory) / name).relative_to(VAULT).as_posix()))
+                found.append(read((Path(directory) / name).relative_to(VAULT).as_posix()))
             except (OSError, ValueError, UnicodeError):
                 skipped += 1
+    return found, skipped
+
+
+def index():
+    notes_found, skipped = notes()
+    if not VAULT.is_dir():
+        return {"notes": [], "links": [], "skipped": 0, "unresolved": 0}
+    return _with_links(notes_found, skipped)
+
+
+def _with_links(notes, skipped):
     by_path = {n['path'].casefold(): n['path'] for n in notes}
     by_stem = {}
     for n in notes:
@@ -111,18 +123,67 @@ def index():
     return {"notes": notes, "links": links, "skipped": skipped, "unresolved": unresolved}
 
 
-def search(query, limit=8):
-    terms = set(re.findall(r'\w+', query.casefold())) - {'the', 'a', 'an', 'about', 'what', 'did', 'we', 'is', 'of', 'and', 'to', 'in'}
+STOP_WORDS = {'the', 'a', 'an', 'about', 'what', 'did', 'we', 'is', 'of', 'and', 'to', 'in', 'on', 'for', 'my',
+              'i', 'do', 'does', 'how', 'when', 'which', 'who', 'it', 'that', 'this', 'with', 'are', 'was', 'be',
+              'from', 'at', 'by', 'as', 'us', 'our', 'you', 'your', 'me', 'or', 'if', 'so', 'can', 'should', 'will',
+              'would', 'could', 'has', 'have', 'had', 'were', 'been', 'its', 'there', 'then', 'now', 'any', 'all'}
+
+
+def _stem(word):
+    """Tiny suffix folding so change/changed/changes match; not a linguistic stemmer."""
+    for suffix in ('ing', 'ed', 'es', 's'):
+        if suffix == 's' and word.endswith(('ss', 'us', 'is')):
+            break  # pass, status, analysis are not plurals
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            word = word[:-len(suffix)]
+            if suffix in ('ing', 'ed') and len(word) >= 4 and word[-1] == word[-2] and word[-1] not in 'aeioulsfz':
+                word = word[:-1]  # shipped -> ship, running -> run; keeps pull, staff, pass
+            break
+    return word[:-1] if word.endswith('e') and len(word) > 3 else word
+
+
+def _words(text):
+    return [_stem(w) for w in re.findall(r'\w+', text.casefold())]
+
+
+def codes(query):
+    """Identifier-like tokens (PN-4471-B, DWG-0193, v2.3) that deserve an exact match."""
+    return [c for c in re.findall(r'[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|\b\w*\d\w*\b', query) if len(c) >= 3]
+
+
+def exact(code, text):
+    return re.search(r'(?<![\w-])' + re.escape(code) + r'(?![\w-])', text, re.I) is not None
+
+
+def search(query, limit=8, pool=None):
+    """Word-level BM25-style ranking with title and exact-identifier boosts."""
+    import math
+    from collections import Counter
+    pool = notes()[0] if pool is None else pool
+    terms = {_stem(t) for t in re.findall(r'\w+', query.casefold()) if t not in STOP_WORDS}
+    wanted = codes(query)
+    docs = []
+    for note in pool:
+        title = set(_words(note['title'] + ' ' + note['path']))
+        docs.append((note, Counter(_words(note['content'])), title))
+    total = len(docs)
+    frequency = {t: sum(1 for _, body, title in docs if t in body or t in title) for t in terms}
     matches = []
-    for note in index()['notes']:
-        body = note['content'].casefold()
-        title = (note['title'] + ' ' + note['path']).casefold()
-        score = sum(5 * (t in title) + body.count(t) for t in terms)
+    for note, body, title in docs:
+        score = 0.0
+        for t in terms:
+            if t in body or t in title:
+                weight = math.log(1 + (total - frequency[t] + .5) / (frequency[t] + .5))
+                score += weight * (body[t] / (body[t] + 1.2) + 1.5 * (t in title))
+        hits = [c for c in wanted if exact(c, note['title'] + ' ' + note['path'] + ' ' + note['content'])]
+        score += 3 * len(hits)
         if not terms or score:
-            pos = min((body.find(t) for t in terms if t in body), default=0)
-            start = max(0, pos - 100)
+            text = note['content']
+            spots = [m.start() for c in hits for m in [re.search(re.escape(c), text, re.I)] if m]
+            spots += [m.start() for t in terms for m in [re.search(r'\b' + re.escape(t), text, re.I)] if m]
+            start = max(0, min(spots, default=0) - 100)
             matches.append((score, {"path": note['path'], "title": note['title'], "uri": note['uri'],
-                                    "excerpt": note['content'][start:start+1200]}))
+                                    "excerpt": text[start:start+1200]}))
     return [item for _, item in sorted(matches, key=lambda pair: (-pair[0], pair[1]['path']))[:max(1, min(limit, 20))]]
 
 

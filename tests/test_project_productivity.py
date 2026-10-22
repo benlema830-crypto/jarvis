@@ -86,7 +86,7 @@ class ProductivityTests(unittest.TestCase):
             return [[1.,0.] if ('Persistence' in text or 'player' in text) else [0.,1.] for text in texts]
         with patch.object(search, 'identity', return_value='local:test'), patch.object(search, 'embed', side_effect=embed):
             result = search.search('player progress')
-            self.assertEqual(result['mode'], 'semantic')
+            self.assertEqual(result['mode'], 'hybrid')
             self.assertEqual(result['results'][0]['path'], 'Save.md')
             calls.clear(); search.search('player progress')
             self.assertEqual(calls, [['player progress']])

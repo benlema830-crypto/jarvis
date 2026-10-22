@@ -35,7 +35,7 @@
   const query = make('input'); query.placeholder = 'Find notes by meaning…'; query.maxLength = 2000; query.setAttribute('aria-label', 'Search vault by meaning');
   d.append(make('h3', 'Vault search'), query, button('Search notes', async () => {
     show('Searching local notes…'); const data = await post('/knowledge-search', {query:query.value});
-    output.replaceChildren(make('p', data.mode === 'semantic' ? 'Search by meaning · local embeddings' : 'Keyword fallback · local embeddings unavailable'));
+    output.replaceChildren(make('p', ['hybrid', 'semantic'].includes(data.mode) ? 'Meaning + exact words · local embeddings' : 'Keyword only · local embeddings unavailable'));
     for (const note of data.results) {
       const link = make('a', note.path); if (note.uri.startsWith('obsidian://')) link.href = note.uri;
       output.append(link, make('p', note.excerpt));
