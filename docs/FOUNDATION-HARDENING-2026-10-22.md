@@ -160,7 +160,7 @@ That path is off in subscription-only mode; give it an OS sandbox before ever en
    for approval. Recognise safe read-only command shapes instead.
 4. Optional per-tool Roblox Studio policy for work sessions (`execute_luau` still runs without asking there).
 5. A larger, realistic benchmark (anonymised copies of real note shapes) to replace the small tuned fixture.
-6. Telegram pairing when you want it (`scripts/setup_telegram.py`); it is not configured, so it couldn't be tested.
+6. Telegram pairing when you want it (`scripts/setup_telegram.py`); the bridge works against a simulated Bot API, but only you can create the bot.
 7. A per-launch token for `/command` if other local programs should not be able to answer approvals.
 
 **Later, optional AI-CEO features (deliberately not started):** durable task queue with IDs, cancellation and
@@ -221,7 +221,7 @@ times out in headless Edge before and after (environmental).
 | Microphone capture, speaker playback, barge-in, voice lock | Not exercised | Needs a person at the headset; no voice/ears/Qwen/dictation file changed; in `jarvis.py` only `Brain` and the system-prompt text changed |
 | Jarvis MCP (`list_mcp_tools`, `call_mcp_tool`) | **Exercised live** up to approval | Real catalog through `run_tool`: Zapier MCP 17 tools, GitHub 46; a call queued, asked for approval, and after "no" never contacted the server |
 | MCP sign-in (OAuth/bearer) | **Exercised live** | read-only `tools/list` with your saved credentials: Zapier MCP 17 tools, GitHub 46 tools |
-| Telegram | Not configured | Jarvis reports `available` (no bot token, never paired), so there is no live bridge to test; code unchanged |
+| Telegram bridge | **Exercised end to end against a local fake Bot API** | Real `telegram_bridge` polling + `respond_telegram` + Codex + Qwen + Whisper: a stranger's chat ignored; owner text answered ("ready"); owner voice note transcribed and answered from the vault note as text and as a 55 KB Opus voice note. Your real bot is not paired yet (Jarvis reports `available`), so Telegram's own servers were not contacted |
 | HOLO | Installed, not started | Starting it turns on the webcam; code unchanged, unit tests pass |
 | Codex agent session (research mode) | **Exercised live** | Temp session store; connected, ran, routed one approval request (declined in the test) and reported honestly in 9 s. Original and new guard give the same verdict for that command |
 | Claude Code terminal path + guard hook | **Exercised live** | `TerminalWorker` in a temp folder with your Claude Code login: in-folder write allowed; write to `data/cc_approvals.json` blocked by the hook (file unchanged); write to `C:\Windows\Temp` paused for spoken approval, declined, nothing written; guard state files restored byte-for-byte |
