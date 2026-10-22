@@ -134,7 +134,7 @@ class TerminalGuardTest(unittest.TestCase):
         cases = [
             ("PowerShell", r"Get-ChildItem -Recurse -Force ~/Downloads | Format-Table Name, Length", "allow"),
             ("PowerShell", r"pip install requests", "allow"),
-            ("Edit", {"file_path": r"C:\Users\x\Jarvis\notes.txt"}, "allow"),
+            ("Edit", {"file_path": os.path.join(os.path.expanduser("~"), "Jarvis", "notes.txt")}, "allow"),
             ("PowerShell", r"Remove-Item C:\Users\x\Downloads\old.zip", "approval"),
             ("Bash", r"rm -rf ~/AppData/Local/Temp/*", "approval"),
             ("PowerShell", r"winget install Python.Python.3.12", "approval"),

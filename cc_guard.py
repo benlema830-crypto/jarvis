@@ -53,6 +53,41 @@ OUTLOOK_OFF_LIMITS = re.compile(
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 FILE_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep"}
+WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+# An agent must never be able to grant itself approval or rewrite the rules that pause it.
+PROTECTED = {os.path.normcase(os.path.join(HERE, *p)) for p in (
+    ("data", "cc_approvals.json"), ("data", "cc_pending.json"), ("data", "cc_settings.json"),
+    ("cc_guard.py",), ("approvals.py",))}
+STATE_NAMES = re.compile(r"\bcc_(?:approvals|pending|settings)\.json\b", re.I)
+HOME = os.path.expanduser("~")
+# Writes stay inside the user's folder; inside it, autostart, credentials and agent configuration still ask.
+ALLOWED_ROOTS = [HOME]
+SENSITIVE = [os.path.join(HOME, *p) for p in (
+    ("AppData", "Roaming", "Microsoft", "Windows", "Start Menu"), (".ssh",), (".codex",), (".claude",),
+    ("Documents", "WindowsPowerShell"), ("Documents", "PowerShell"))]
+
+
+def _inside(path, root):
+    path, root = os.path.normcase(path), os.path.normcase(os.path.abspath(root))
+    return path == root or path.startswith(root.rstrip("\\/") + os.sep)
+
+
+def _write_verdict(file_path):
+    if not file_path:
+        return None
+    try:  # resolve links/junctions so a link inside the home folder can't point elsewhere
+        path = os.path.realpath(os.path.abspath(file_path))
+    except (OSError, ValueError):
+        path = os.path.abspath(file_path)  # unreadable volume: judged by its plain path (outside -> ask)
+    path = os.path.normcase(path)
+    if path in PROTECTED:
+        return "blocked", "Jarvis's approval records and guard rules can't be changed by an agent."
+    if not any(_inside(path, root) for root in ALLOWED_ROOTS):
+        return "approval", "write outside allowed folders"
+    if any(_inside(path, place) for place in SENSITIVE):
+        return "approval", "change startup, credential or agent settings"
+    return None
 
 
 def outlook_allowed() -> bool:
@@ -68,6 +103,12 @@ def decide(tool: str, tool_input: dict) -> tuple[str, str]:
         return "blocked", "Microsoft Teams (its app and data) is off-limits."
     if text and not outlook_allowed() and OUTLOOK_OFF_LIMITS.search(text):
         return "blocked", "Outlook (its app and data) is off-limits."
+    if tool in WRITE_TOOLS:
+        verdict = _write_verdict(str(tool_input.get("file_path") or tool_input.get("notebook_path") or ""))
+        if verdict:
+            return verdict
+    if tool in SHELL_TOOLS and STATE_NAMES.search(str(tool_input.get("command", ""))):
+        return "blocked", "Jarvis's approval records can't be changed by an agent."
     if tool in SHELL_TOOLS:
         command = str(tool_input.get("command", ""))
         for category, pattern in RISKY.items():
