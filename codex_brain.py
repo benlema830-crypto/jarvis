@@ -163,8 +163,14 @@ class CodexBrain:
                     'dynamicTools': spec})
                 self.thread_id = result['thread']['id']
             import model_provider
-            history = model_provider.text_history(messages)
-            text = json.dumps(history[-30:] if fresh else history[self.sent_messages:], ensure_ascii=False)
+            # Count what was sent in the caller's full message list: text_history() keeps only the
+            # last 40 messages, so an index into it stops advancing and new turns would send "[]".
+            if fresh:
+                history = model_provider.text_history(messages)[-30:]
+            else:
+                history = model_provider.text_history(messages[self.sent_messages:]) or \
+                    model_provider.text_history(messages)[-1:]
+            text = json.dumps(history, ensure_ascii=False)
             self.conn.call('turn/start', {'threadId': self.thread_id, 'model': model,
                 'approvalPolicy': 'untrusted', 'sandboxPolicy': {'type': 'readOnly'},
                 'input': [{'type': 'text', 'text': text}]})
@@ -183,7 +189,7 @@ class CodexBrain:
                     raise RuntimeError('Codex connection ended.')
             if self.complete.get('status') != 'completed':
                 raise RuntimeError('Codex could not complete the turn. Check subscription limits or sign-in.')
-            self.sent_messages = len(history) + 1  # caller appends the assistant answer
+            self.sent_messages = len(messages) + 1  # caller appends the assistant answer
             return ''.join(self.answer)
         except BaseException:
             self.close()  # Never reuse an interrupted/failed event stream.
