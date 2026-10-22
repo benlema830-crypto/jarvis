@@ -490,10 +490,10 @@ def stop_agent() -> str:
 
 @beta_tool(eager_input_streaming=True)
 def terminal_task(task: str, continue_previous: bool = False) -> str:
-    """Hand a job to Claude Code, a powerful agent that works in the terminal: it runs PowerShell,
+    """Hand a job to a background coding agent that works in the terminal: it runs PowerShell,
     reads and edits files, searches folders and the web, and works through multi-step problems.
-    It runs in the background and you're told when it's done; it pauses to ask the user before
-    deleting, installing/uninstalling, or changing system settings.
+    It runs in a sandboxed Codex session limited to the Jarvis folder, reports when it's done, and
+    asks the user before anything outside its sandbox, deleting, installing or changing settings.
 
     Use it for computer jobs that don't need the mouse: files and folders, disk space, system
     checks and troubleshooting (Wi-Fi, slow PC, errors), scripts, coding and project work.
@@ -505,6 +505,12 @@ def terminal_task(task: str, continue_previous: bool = False) -> str:
         continue_previous: True to continue the last terminal task's session (follow-ups like
             "now also do X"), so it remembers what it did.
     """
+    if _terminal_uses_codex():
+        # The Codex session keeps its thread, so follow-ups continue where it left off.
+        if SESSIONS.running:
+            return "A Codex task is already running. Wait or stop it first."
+        SESSIONS.open(name=TASK_SESSION, project='Jarvis', provider='codex')
+        return SESSIONS.start(task, name=TASK_SESSION, mode='work')
     if SESSIONS.running:
         return "A named project agent is running. Wait for it or stop it before starting a separate terminal task."
     started = TERMINAL.start(task, continue_previous)
@@ -513,19 +519,34 @@ def terminal_task(task: str, continue_previous: bool = False) -> str:
     return started
 
 
+TASK_SESSION = 'Jarvis Tasks'
+
+
+def _terminal_uses_codex():
+    """Codex's sandbox is the safer boundary; Claude Code (keyword guard only) needs an explicit opt-in."""
+    import preferences
+    prefs = preferences.read()
+    return prefs.get('subscription_only') or prefs.get('terminal_provider') != 'claude'
+
+
 @beta_tool(eager_input_streaming=True)
 def terminal_status() -> str:
     """How the current terminal task (terminal_task) is going."""
+    if not TERMINAL.running and SESSIONS.running:
+        return SESSIONS.status(TASK_SESSION)
     return TERMINAL.status()
 
 
 @beta_tool(eager_input_streaming=True)
 def stop_terminal_task() -> str:
     """Stop the current terminal task (terminal_task)."""
-    if not TERMINAL.running:
-        return "Nothing is running."
-    TERMINAL.cancel()
-    return "Stopping."
+    if TERMINAL.running:
+        TERMINAL.cancel()
+        return "Stopping."
+    if SESSIONS.running:
+        SESSIONS.cancel()
+        return "Stopping."
+    return "Nothing is running."
 
 
 # ---------- Registry ----------
@@ -1163,12 +1184,6 @@ def run_tool(block) -> dict:
                 raise ValueError('Only Codex sessions are enabled in subscription-only mode.')
             if block.name == 'switch_voice' and block.input.get('engine', '').lower().strip() == 'elevenlabs':
                 raise ValueError('ElevenLabs is disabled; use qwen or kokoro.')
-            if block.name == 'terminal_task':
-                if SESSIONS.running:
-                    raise ValueError('A Codex task is already running. Wait or stop it first.')
-                SESSIONS.open(name='Jarvis Tasks', project='Jarvis', provider='codex')
-                result = SESSIONS.start(block.input.get('task', ''), name='Jarvis Tasks', mode='work')
-                return {'type': 'tool_result', 'tool_use_id': block.id, 'content': result}
         tool = TOOLS_BY_NAME[block.name]
         result = tool.call(block.input)  # validates the input against the tool's schema
         content = result if isinstance(result, list) else str(result)
