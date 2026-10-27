@@ -69,6 +69,33 @@ class VoiceStudioTest(unittest.TestCase):
         self.assertEqual(instance.engine, "voicestudio")  # stays chosen; the next sentence retries it
         instance._reopen_studio.assert_called_once()  # reopened in the background
 
+    def test_keep_alive_reopens_a_closed_voicestudio_once(self):
+        instance = voice.Voice.__new__(voice.Voice)
+        instance.studio = mock.Mock()
+        instance.studio.running.return_value = False
+        instance._studio_reopening, instance._studio_retry_at = False, 0.0
+        instance._reopen_studio = mock.Mock()
+        with mock.patch.object(voice.threading, "Thread") as thread:
+            instance._check_studio()
+            instance._check_studio()  # already reopening: no second launch
+        thread.assert_called_once_with(target=instance._reopen_studio, daemon=True)
+        self.assertTrue(instance._studio_reopening)
+        instance._studio_reopening, instance.studio.running.return_value = False, True
+        with mock.patch.object(voice.threading, "Thread") as thread:
+            instance._check_studio()  # running fine: nothing to do
+            instance.studio = None
+            instance._check_studio()  # another voice chosen: leave VoiceStudio alone
+        thread.assert_not_called()
+
+    def test_launch_never_starts_a_second_copy(self):
+        import voicestudio_voice
+        engine = voicestudio_voice.VoiceStudioEngine()
+        with mock.patch.object(engine, "running", return_value=False), \
+                mock.patch.object(voicestudio_voice, "_app_processes", return_value={123}), \
+                mock.patch.object(voicestudio_voice.subprocess, "Popen") as popen:
+            self.assertFalse(engine.launch())
+        popen.assert_not_called()
+
     def test_no_waiting_on_voicestudio_while_it_reopens(self):
         instance = voice.Voice.__new__(voice.Voice)
         instance.studio = mock.Mock()

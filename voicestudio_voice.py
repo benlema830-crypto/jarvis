@@ -6,6 +6,7 @@ VoiceStudio runs locally and serves an OpenAI-style /v1/audio/speech endpoint on
 """
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -19,6 +20,42 @@ APP = Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "VoiceStudio" / "VoiceS
 
 class VoiceStudioError(Exception):
     pass
+
+
+def _app_processes() -> set[int]:
+    """Process IDs of the running VoiceStudio app (its window and helpers)."""
+    import psutil
+    app = str(APP).casefold()
+    found = set()
+    for proc in psutil.process_iter(["exe"]):
+        try:
+            if (proc.info["exe"] or "").casefold() == app:
+                found.add(proc.pid)
+        except (psutil.Error, OSError):
+            pass
+    return found
+
+
+def _tuck_away(focus, seconds=25):
+    """Minimize VoiceStudio's windows as they appear after a launch, and give focus back."""
+    import win32con
+    import win32gui
+    import win32process
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        pids = _app_processes()
+        def visit(hwnd, _):
+            if (win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd) and win32gui.GetWindowText(hwnd)
+                    and win32process.GetWindowThreadProcessId(hwnd)[1] in pids):
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOWMINNOACTIVE)
+            return True
+        try:
+            win32gui.EnumWindows(visit, None)
+            if focus and win32gui.IsWindow(focus) and win32gui.GetForegroundWindow() != focus:
+                win32gui.SetForegroundWindow(focus)
+        except Exception:
+            pass
+        time.sleep(.25)
 
 
 def base_url() -> str:
@@ -82,10 +119,16 @@ class VoiceStudioEngine:
             return False
 
     def launch(self) -> bool:
-        """Start the VoiceStudio app if it is installed but closed. Returns True if launched."""
-        if self.running() or not APP.is_file():
+        """Start the VoiceStudio app in the background if it is installed but closed. Returns True if launched.
+
+        Its window ignores a minimized start, so it is minimized as it appears and focus goes back to the
+        user's window. Never starts a second copy while one is still starting up."""
+        if self.running() or not APP.is_file() or _app_processes():
             return False
+        import win32gui
+        focus = win32gui.GetForegroundWindow()
         subprocess.Popen([str(APP)], cwd=APP.parent, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        threading.Thread(target=_tuck_away, args=(focus,), daemon=True).start()
         return True
 
     def render(self, text: str) -> np.ndarray:

@@ -356,8 +356,31 @@ class Voice:
         threading.Thread(target=self._synth_worker, daemon=True).start()
         if self.local is not None:
             threading.Thread(target=self._warm_local, daemon=True).start()
+        self._studio_reopening, self._studio_retry_at = False, 0.0
         if self.studio is not None:
-            threading.Thread(target=self._warm_studio, daemon=True).start()
+            self._studio_reopening = True  # Kokoro speaks until it's ready; the keep-alive won't start a second copy
+            threading.Thread(target=self._reopen_studio, daemon=True).start()
+        threading.Thread(target=self._keep_studio_open, daemon=True).start()
+
+    def _keep_studio_open(self, every=20):
+        """While VoiceStudio is the chosen voice, reopen it in the background if it was closed or crashed,
+        so his voice is back before the next reply. After a failed reopen, wait five minutes before retrying."""
+        while True:
+            time.sleep(every)
+            self._check_studio()
+
+    def _check_studio(self):
+        studio = self.studio
+        if studio is None or self._studio_reopening or time.monotonic() < self._studio_retry_at:
+            return
+        try:
+            if studio.running():
+                return
+        except Exception:
+            return
+        print("(VoiceStudio isn't running - reopening it in the background)", flush=True)
+        self._studio_reopening = True
+        threading.Thread(target=self._reopen_studio, daemon=True).start()
 
     def _warm_studio(self):
         """Load VoiceStudio's model before the first reply (and start the app if it's closed)."""
@@ -382,8 +405,11 @@ class Voice:
             hud.info['voice_warming'] = False
 
     def _reopen_studio(self):
+        studio = self.studio
         try:
             self._warm_studio()
+            if studio is not None and not studio.running():
+                self._studio_retry_at = time.monotonic() + 300
         finally:
             self._studio_reopening = False
 
