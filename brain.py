@@ -82,6 +82,7 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/productivity.js": ("productivity.js", "text/javascript"),
           "/automation.js": ("automation.js", "text/javascript"),
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
+          "/holo.js": ("holo.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
 PROXY = {"GET": {"/events", "/status", "/voice-health", "/settings", "/sessions", "/classic", "/models", "/intel"},
@@ -209,6 +210,9 @@ def serve():
                         notify_assistant({"event": "eyes_check"})
                     return eyes.snapshot(), 200
                 return eyes.request(request), 200
+            if route == "/orbit" and get:
+                import orbit
+                return orbit.snapshot(), 200
             if route == "/tasks" and get:
                 import tasks
                 return {"tasks": tasks.items()}, 200

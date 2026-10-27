@@ -178,6 +178,30 @@ addEventListener('load', async () => {
     await wait(() => !document.body.classList.contains('jarvis-main') && $('stageSlot').contains($('reactor')), 'graph is the main view again');
     assert($('graph').getBoundingClientRect().width === innerWidth, 'graph fills the screen again');
 
+    stage('themes'); assert(J.holo && document.querySelectorAll('.themes button').length === 4, 'theme picker');
+    document.querySelector('.themes [data-theme=mark42]').click();
+    assert(document.body.dataset.theme === 'mark42' && J.stateColors.standby === '#f59e0b' && J.linkColors.note === '#f59e0b', 'mark 42 theme');
+    document.querySelector('.themes [data-theme=cyan]').click(); assert(J.stateColors.standby === '#5eead4', 'cyan theme');
+
+    stage('moons'); $('stageSlot').click(); await wait(() => document.body.classList.contains('jarvis-main'), 'main view for moons');
+    await wait(() => J.holo.moons.length === 4, 'agent, event and song moons (' + J.holo.moons.length + ')');
+    const moonKinds = J.holo.moons.map(h => h.m.kind).sort().join();
+    assert(moonKinds === 'agent,agent,event,track', 'moon kinds ' + moonKinds);
+    const song = J.holo.moons.find(h => h.m.kind === 'track');
+    J.holo.showCard(song); assert(!document.querySelector('.moon-card').hidden && document.querySelector('.moon-card').textContent.includes('Thunderstruck'), 'song card');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    document.querySelector('.moon-card .moon-close')?.click(); assert(document.querySelector('.moon-card').hidden, 'card closes');
+
+    stage('holo reply'); window.testStream.emit({ type: 'you', text: 'Status?', t: 2 }); window.testStream.emit({ type: 'jarvis', text: 'Systems nominal, sir.', t: 3 });
+    const holoText = () => document.querySelector('.holo-reply').textContent;
+    // Headless Chrome barely advances animation frames, so step the per-frame work directly.
+    await wait(() => { J.emit('frame'); return holoText().length > 1 && 'Systems nominal, sir.'.startsWith(holoText()); }, 'reply types out under the sphere');
+    assert(!document.querySelector('.holo-reply').hidden && $('replyText').offsetParent === null, 'holo reply replaces the dock text in the main view');
+
+    stage('beams'); window.testStream.emit({ type: 'knowledge', status: 'found', sources: [{ path: 'Projects/Alpha.md', title: 'Alpha' }] });
+    assert(J.holo.beams.some(b => b.id === 'note:Projects/Alpha.md'), 'beam to the note being read');
+    $('stageSlot').click(); await wait(() => !document.body.classList.contains('jarvis-main'), 'graph main again');
+
     stage('armory'); $('armoryBtn').click(); assert($('armoryDialog').open, 'armory open');
     await wait(() => document.querySelectorAll('#armoryDialog .tile').length > 16, 'armory tiles');
     assert($('armoryDialog').textContent.includes('Add your own tool') && $('armoryDialog').textContent.includes('Telegram'), 'connect section');
@@ -316,16 +340,18 @@ def serve(with_checks=True):
             if path == "/":
                 script = CHECK if with_checks else '<script>window.EventSource=class {close(){} addEventListener(){}};</script>'
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + script, 1), "text/html")
-            if path in ("/brain.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/brain.css"):
+            if path in ("/brain.js", "/holo.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": NODES, "links": LINKS, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},
-                "/voice-health": HEALTH, "/status": {"state": "standby", "info": {"model": "gpt-test"}},
+                "/voice-health": HEALTH, "/status": {"state": "standby", "info": {"model": "gpt-test"}, "cpu": 37, "mem": 58, "disk": 40,
+                            "gpu": {"util": 22, "temp": 51}, "net_up": 42000, "net_down": 1800000, "uptime": 200000},
                 "/settings": {"listening_mode": "wake"}, "/visual-modes": visual, "/focus-apps": {"apps": ["chrome.exe", "code.exe"]},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
                             "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
-                    "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": []}, "/tasks": {"tasks": []},
+                    "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": [{"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Playtest the build"},
+                    {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "Done."}]}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
                 "/workspace": {"folders": []}, "/build-plan": {"text": ""}, "/eyes": {"on": False, "age": None},
                 "/routines": {"routines": {"Wrap up": {"project":"Jarvis", "steps":[{"action":"tasks"}]}}},
@@ -335,6 +361,12 @@ def serve(with_checks=True):
                 '/artifacts': {'files':[]},
                 '/response-settings': {'humor':25,'directness':75,'detail':'brief','tone':'classic','pushback':'balanced','address':'occasionally'},
             }
+            if path == "/orbit":
+                import datetime
+                soon = (datetime.datetime.now().astimezone() + datetime.timedelta(minutes=40)).isoformat()
+                return self.send({"events": [{"title": "Team sync", "location": "Zoom", "all_day": False, "start": soon}],
+                                  "track": {"name": "Thunderstruck", "artists": ["AC/DC"], "album": "The Razors Edge", "art": "",
+                                            "uri": "spotify:track:T", "playing": True, "progress_ms": 60000, "duration_ms": 292000}})
             if path == "/integration-status":
                 from unittest.mock import patch
                 sys.path.insert(0, str(ROOT))

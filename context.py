@@ -77,30 +77,37 @@ def upcoming_events(days: int = 1, open_outlook: bool = False) -> str:
     if not urls:
         return "Calendar not connected. Use Connect calendar in the Schedule panel to add your Outlook ICS link."
 
+    events = event_list(days)
+    if not events:
+        return "Nothing scheduled."
+    lines = []
+    for ev in events[:15]:
+        start = ev["start"]
+        when = f"{_day_label(start.date())} (all day)" if ev["all_day"] else f"{_day_label(start.date())} {_fmt_time(start)}"
+        lines.append(f"  - {when}: {ev['title']}" + (f" @ {ev['location']}" if ev["location"] else ""))
+    return "\n".join(lines)
+
+
+def event_list(days: int = 1) -> list[dict]:
+    """Subscribed-calendar events from now until the end of the day `days` days from today, soonest first,
+    as {"start": aware datetime (midnight for all-day), "title", "location", "all_day"}."""
     now = datetime.datetime.now().astimezone()
     end = datetime.datetime.combine(
         now.date() + datetime.timedelta(days=days), datetime.time.max
     ).astimezone()
-
     events = []
-    for url in urls:
-        cal = fetch_calendar(url)
-        for ev in recurring_ical_events.of(cal).between(now, end):
+    for url in calendar_urls():
+        for ev in recurring_ical_events.of(fetch_calendar(url)).between(now, end):
             start = ev.get("DTSTART").dt
-            title = str(ev.get("SUMMARY", "Untitled event"))
-            location = str(ev.get("LOCATION", "")).strip()
-            if isinstance(start, datetime.datetime):
+            all_day = not isinstance(start, datetime.datetime)
+            if all_day:
+                start = datetime.datetime.combine(start, datetime.time.min).astimezone()
+            else:
                 start = start.astimezone()  # naive times are treated as local
-                sort_key, when = start, f"{_day_label(start.date())} {_fmt_time(start)}"
-            else:  # all-day event
-                sort_key = datetime.datetime.combine(start, datetime.time.min).astimezone()
-                when = f"{_day_label(start)} (all day)"
-            events.append((sort_key, f"  - {when}: {title}" + (f" @ {location}" if location else "")))
-
-    if not events:
-        return "Nothing scheduled."
-    events.sort(key=lambda e: e[0])
-    return "\n".join(line for _, line in events[:15])
+            events.append({"start": start, "title": str(ev.get("SUMMARY", "Untitled event")),
+                           "location": str(ev.get("LOCATION", "")).strip(), "all_day": all_day})
+    events.sort(key=lambda e: e["start"])
+    return events
 
 
 def starting_soon(minutes: int = 15) -> list[tuple[datetime.datetime, str]]:
