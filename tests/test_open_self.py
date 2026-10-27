@@ -8,8 +8,10 @@ import music
 
 class OpenSelfTest(unittest.TestCase):
     def setUp(self):
+        # open_app is faked: the test checks routing only, and used to launch a real Notepad each run.
         for patcher in (mock.patch.object(music, 'run', return_value=None),
-                        mock.patch.object(jarvis.tools.window_control, 'quick_action', return_value=None)):
+                        mock.patch.object(jarvis.tools.window_control, 'quick_action', return_value=None),
+                        mock.patch.object(jarvis.tools, 'open_app', mock.Mock(**{'call.return_value': 'Opened'}))):
             patcher.start()
             self.addCleanup(patcher.stop)
 
