@@ -89,6 +89,12 @@ class CodexBrain:
         method, params = event.get('method', ''), event.get('params', {})
         if method == 'item/agentMessage/delta':
             value = params.get('delta', '')
+            item = params.get('itemId')
+            if item != self.message_item:  # a second message in the same turn: don't glue "done.I'll" together
+                glued = self.answer and not self.answer[-1][-1:].isspace() and not value[:1].isspace()
+                if self.message_item is not None and value and glued:
+                    value = ' ' + value
+                self.message_item = item
             self.answer.append(value)
             if self.delta and not self.cancel.is_set():
                 self.delta(value)
@@ -140,6 +146,7 @@ class CodexBrain:
         system = privacy.redact(system)
         self.cancel, self.delta, self.run_tool = cancel, delta, run_tool
         self.complete, self.answer, self.turn_id, self.tool_count = None, [], None, 0
+        self.message_item = None
         self.sources = []
         fresh = self.conn is None or self.model != model
         try:

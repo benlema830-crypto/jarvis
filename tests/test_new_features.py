@@ -40,6 +40,50 @@ class SpeechTest(unittest.TestCase):
         self.assertIn("npm", said)
         self.assertEqual(voice.clean_for_speech("[chuckle] Right then."), "[chuckle] Right then.")
 
+    def test_paths_are_spoken_as_just_the_name(self):
+        said = voice.clean_for_speech
+        self.assertEqual(said(r"Saved C:\Users\Lemab\Documents\JARVIS Documents\budget-27e1190f4b.pptx for you."),
+                         "Saved budget.pptx for you.")
+        self.assertEqual(said("See [README](/C:/Users/Lemab/Jarvis/clip-farm/README.md) and /C:/Users/Lemab/Jarvis/clip-farm/clips/."),
+                         "See README and clips.")
+        self.assertEqual(said("Opened ~/projects/app/main.py."), "Opened main.py.")
+        self.assertEqual(said("It's 72°F and/or 24/7, 3/4 done, at 60 km/h."),
+                         "It's 72 degrees Fahrenheit and/or 24/7, 3/4 done, at 60 km/h.")
+
+    def test_code_is_left_on_screen(self):
+        report = ("Open PowerShell and run this:\n\n```powershell\ncd C:\\Users\\Lemab\\Jarvis\\clip-farm\n"
+                  "& ..\\.venv\\Scripts\\python.exe clip_farm.py \"D:\\v.mp4\" --top 5\n```\n\nNothing was installed.")
+        self.assertEqual(voice.clean_for_speech(report), "Open PowerShell and run this: It's on screen. Nothing was installed.")
+        self.assertEqual(voice.clean_for_speech("Run `python clip_farm.py input.mp4 --model large --top 5` then `ls`."),
+                         "Run the command on screen then ls.")
+
+    def test_separate_codex_messages_are_not_glued_together(self):
+        brain = codex_brain.CodexBrain.__new__(codex_brain.CodexBrain)
+        brain.answer, brain.message_item, spoken = [], None, []
+        brain.delta, brain.cancel = spoken.append, __import__("threading").Event()
+        for item, text in (("m1", "I'll check"), ("m1", " the setup."), ("m2", "I'll let you know."), ("m3", " Done.")):
+            brain._event({"method": "item/agentMessage/delta", "params": {"itemId": item, "delta": text}})
+        self.assertEqual("".join(brain.answer), "I'll check the setup. I'll let you know. Done.")
+        self.assertEqual("".join(spoken), "".join(brain.answer))
+
+    def test_long_reports_are_shortened_for_speech(self):
+        report = " ".join(f"Sentence number {i} explains one more detail of the finished work." for i in range(1, 9))
+        spoken = voice.spoken_report(report)
+        self.assertTrue(spoken.startswith("Sentence number 1 ") and spoken.endswith("The full report is on screen."))
+        self.assertLessEqual(spoken.count("Sentence number"), 3)
+        self.assertEqual(voice.spoken_report("Done. All tests passed."), "Done. All tests passed.")
+
+    def test_long_text_is_queued_sentence_by_sentence(self):
+        instance = voice.Voice.__new__(voice.Voice)
+        instance._lock, instance._pending, instance._gen = __import__("threading").Lock(), 0, 0
+        instance._idle, instance._text_q = __import__("threading").Event(), __import__("queue").Queue()
+        text = " ".join(f"This is sentence {i} of a long spoken report." for i in range(12))
+        with mock.patch.object(voice.hud, "emit"):
+            instance.say(text, shown="full text")
+        pieces = [instance._text_q.get_nowait()[1] for _ in range(instance._text_q.qsize())]
+        self.assertEqual(len(pieces), 12)
+        self.assertEqual(instance._pending, 12)
+
 
 class VaultTestCase(unittest.TestCase):
     def setUp(self):

@@ -95,11 +95,27 @@ MAX_CHUNK_CHARS = 250  # merge queued sentences up to about this length
 PAUSE_SECONDS = 0.18   # breath between chunks
 FADE_SECONDS = 0.008   # tiny fade in/out so chunk edges never click
 
+def _file_name(match) -> str:
+    """A path is spoken as its last part ("README.md", "clip-farm"), without a trailing hash ID."""
+    name = [part for part in re.split(r"[\\/]", match.group(0)) if part][-1]
+    return re.sub(r"[-_][0-9a-f]{8,}(?=\.\w+$|$)", "", name)
+
+
+_PART = r"[^\s\\/:*?\"<>|()\[\],;`]+"  # one path component
 _REPLACEMENTS = [
+    # Code and commands are read on screen, not aloud.
+    (re.compile(r"```[^\n]*\n?[\s\S]*?(?:```|$)"), " It's on screen. "),
+    (re.compile(r"`[^`\n]{40,}`"), "the command on screen"),
     # Links belong in the interface, never in speech: keep a markdown link's label only.
     (re.compile(r"\[([^\]\n]+)\]\((?:https?://|www\.)[^)\s]*\)"), r"\1"),
+    (re.compile(r"\[([^\]\n]+)\]\([^)\n]*\)"), r"\1"),  # links to local files and folders
     (re.compile(r"\(\s*(?:https?://|www\.)[^)\s]*\s*\)"), ""),
     (re.compile(r"(?:https?://|www\.)\S+"), ""),
+    # Full paths are spoken as just the file or folder name. Folders inside a path may contain spaces
+    # ("JARVIS Documents"); the last part may not, since nothing marks where it ends.
+    (re.compile(r"(?<![\w/\\.])/?(?:[A-Za-z]:|~|%\w+%)?(?:[\\/]" + _PART + r"(?: " + _PART + r")*(?=[\\/]))+[\\/](?:(?=\w)" + _PART + r")?"),
+     _file_name),
+    (re.compile(r"\\"), " "),
     (re.compile(r"[*#`_]+"), ""),
     (re.compile(r"°\s*F\b"), " degrees Fahrenheit"),
     (re.compile(r"°\s*C\b"), " degrees Celsius"),
@@ -113,6 +129,24 @@ def clean_for_speech(text: str) -> str:
     for pattern, repl in _REPLACEMENTS:
         text = pattern.sub(repl, text)
     return text.strip()
+
+
+def sentences(text: str) -> list[str]:
+    """Split text into the sentence-sized pieces the voice engines render best."""
+    buf = SentenceBuffer()
+    pieces = buf.feed(text + " ")
+    return [p for p in pieces + [buf.flush()] if p]
+
+
+def spoken_report(text: str, limit: int = 380) -> str:
+    """The first few sentences of a long report, for speaking; the full report stays on screen."""
+    said, total = [], 0
+    for piece in sentences(clean_for_speech(text)):
+        if said and (total + len(piece) > limit or len(said) == 3):
+            ending = " The rest is on screen too." if any("on screen" in p for p in said) else " The full report is on screen."
+            return " ".join(said) + ending
+        said.append(piece); total += len(piece)
+    return " ".join(said)
 
 
 class SentenceBuffer:
@@ -525,19 +559,24 @@ class Voice:
         samples, _ = self.kokoro.create(text, voice=self.voice, speed=self.speed, lang="en-gb")
         yield samples.astype(np.float32)
 
-    def say(self, text: str):
-        """Queue text to be spoken. Returns immediately."""
+    def say(self, text: str, shown: str = ""):
+        """Queue text to be spoken. Returns immediately. `shown` is the fuller text for the screen, if different.
+
+        Long text is queued sentence by sentence: voice engines drift and sound rough on very long passages,
+        and stop() can then cut in between sentences."""
         text = clean_for_speech(text)
         if not text:
             return
-        print(f"JARVIS: {text}", flush=True)
-        hud.emit("jarvis", text=text)
+        print(f"JARVIS: {shown or text}", flush=True)
+        hud.emit("jarvis", text=shown or text)
+        pieces = sentences(text) if len(text) > MAX_CHUNK_CHARS else [text]
         with self._lock:
             if self._pending == 0:
                 hud.emit("state", state="speaking")
-            self._pending += 1
+            self._pending += len(pieces)
             self._idle.clear()
-            self._text_q.put((self._gen, text))
+            for piece in pieces:
+                self._text_q.put((self._gen, piece))
 
     def synthesize(self, text: str) -> np.ndarray:
         """Render text to one float32 array at RATE without playing it (e.g. a Telegram voice note)."""

@@ -53,7 +53,7 @@ import worksafe  # noqa: E402
 from ears import split_wake_word, command_for_mode  # noqa: E402
 import preferences  # noqa: E402
 from tools import TOOL_DEFS, run_tool, web_search_def  # noqa: E402
-from voice import BRITISH_VOICES, RATE, SentenceBuffer, Voice  # noqa: E402
+from voice import BRITISH_VOICES, RATE, SentenceBuffer, Voice, spoken_report  # noqa: E402
 import voice_health
 import model_provider
 from types import SimpleNamespace
@@ -1028,7 +1028,7 @@ def main():
         save_report("terminal task", r)
         status = "finished" if r["ok"] else "didn't finish"
         # Claude Code's report is already written to be spoken, so say it directly
-        hud.commands.put({"label": f"Terminal task {status}", "chime": True, "say": r["report"],
+        hud.commands.put({"label": f"Terminal task {status}", "chime": True, "say": r["report"], "report": True,
                           "note": f"[TASK FINISHED] Your terminal task {status} after {r['minutes']} minutes. "
                                   f"The task was: \"{r['task']}\"."})
 
@@ -1036,7 +1036,7 @@ def main():
         save_report("screen agent", r)
         status = "finished" if r["ok"] else "didn't finish"
         # The agent's report is already written to be spoken, so say it directly (no extra AI round trip)
-        hud.commands.put({"label": f"Computer task {status}", "chime": True, "say": r["report"],
+        hud.commands.put({"label": f"Computer task {status}", "chime": True, "say": r["report"], "report": True,
                           "note": f"[TASK FINISHED] Your work on the computer {status} after {r['steps']} steps. "
                                   f"The task was: \"{r['task']}\"."})
 
@@ -1046,8 +1046,9 @@ def main():
     def on_session_done(r):
         save_report(f"agent session {r['name']}", r)
         status = "finished" if r["ok"] else "didn't finish"
-        hud.commands.put({"label": f"{r['name']} {status}", "chime": True,
-                          "say": f"{r['name']}: {r['report']}",
+        # The everyday task session needs no name read out; named project sessions are introduced naturally.
+        intro = "" if r["name"] == tools.TASK_SESSION else f"The {r['name']} session {status}. "
+        hud.commands.put({"label": f"{r['name']} {status}", "chime": True, "say": intro + r["report"], "report": True,
                           "note": f"[TASK FINISHED] Agent session {r['name']} {status}. Task: {r['task']}"})
     tools.SESSIONS.on_done = on_session_done
 
@@ -1083,7 +1084,8 @@ def main():
                 if "say" in item:  # spoken as-is (an agent question or report)
                     if "note" in item:
                         brain.note(item["note"], item["say"])
-                    voice.say(item["say"])
+                    # Reports: speak the first few sentences; the full report is shown and remembered.
+                    voice.say(spoken_report(item["say"]) if item.get("report") else item["say"], shown=item["say"])
                     voice.wait()
                     turns.followup_until = time.time() + FOLLOWUP_SECONDS
                     hud.emit("state", state="listening")
