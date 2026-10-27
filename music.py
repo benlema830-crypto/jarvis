@@ -99,6 +99,117 @@ def launch_spotify():
     return True
 
 
+def _spotify_windows():
+    """(main, miniplayer) window handles of the running desktop app; either may be None.
+
+    The Miniplayer is the app's always-on-top window; the main one has a title but isn't topmost."""
+    import psutil
+    import win32con
+    import win32gui
+    import win32process
+    pids = {p.pid for p in psutil.process_iter(["name"]) if (p.info["name"] or "").lower() == "spotify.exe"}
+    found = {"main": None, "mini": None}
+    def visit(hwnd, _):
+        if (win32process.GetWindowThreadProcessId(hwnd)[1] in pids and win32gui.GetWindowText(hwnd)
+                and win32gui.GetClassName(hwnd) == "Chrome_WidgetWin_1"):
+            topmost = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOPMOST
+            if topmost and win32gui.IsWindowVisible(hwnd):
+                found["mini"] = found["mini"] or hwnd
+            elif not topmost:
+                found["main"] = found["main"] or hwnd
+        return True
+    if pids:
+        win32gui.EnumWindows(visit, None)
+    return found["main"], found["mini"]
+
+
+def _main_in_view():
+    """Whether the full Spotify window is open on screen (then the user is using it; leave it alone)."""
+    import win32gui
+    try:
+        main, _ = _spotify_windows()
+        return bool(main and win32gui.IsWindowVisible(main) and not win32gui.IsIconic(main))
+    except Exception:
+        return False
+
+
+def show_miniplayer():
+    """Open Spotify's Miniplayer (the small always-on-top corner window) and tuck the main window away.
+
+    Spotify has no shortcut or command line switch for it, and the accessibility Invoke action
+    doesn't count as a click (it is a picture-in-picture window, which needs a real user gesture),
+    so a click is posted to its "Open Miniplayer" button. That needs the main window laid out, so a
+    minimized or hidden one is shown fully transparent and without focus for the click, then put back.
+    Doesn't move the mouse or steal focus. Premium-only; returns False if it couldn't be opened."""
+    import uiautomation as auto
+    import win32api
+    import win32con
+    import win32gui
+    main, mini = _spotify_windows()
+    for second in range(LAUNCH_WAIT):  # a freshly opened Spotify takes a few seconds to show its window;
+        if main and (win32gui.IsWindowVisible(main) or second >= 3):  # one closed to the tray stays hidden
+            break
+        time.sleep(1)
+        main, mini = _spotify_windows()
+    if mini:
+        return True
+    if not main:
+        return False
+    focus = win32gui.GetForegroundWindow()
+    hidden = not win32gui.IsWindowVisible(main)
+    style = win32gui.GetWindowLong(main, win32con.GWL_EXSTYLE)
+    win32gui.SetWindowLong(main, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED)
+    win32gui.SetLayeredWindowAttributes(main, 0, 0, win32con.LWA_ALPHA)
+    try:
+        win32gui.ShowWindow(main, win32con.SW_SHOWNOACTIVATE)
+        with auto.UIAutomationInitializerInThread():
+            button = auto.ControlFromHandle(main).ButtonControl(Name="Open Miniplayer", searchDepth=30)
+            if not button.Exists(15):
+                return False
+            for _ in range(20):
+                rect = button.BoundingRectangle
+                if rect.width():
+                    break
+                time.sleep(0.1)
+        x, y = win32gui.ScreenToClient(main, ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2))
+        point = win32api.MAKELONG(x, y)
+        win32gui.PostMessage(main, win32con.WM_MOUSEMOVE, 0, point)
+        win32gui.PostMessage(main, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, point)
+        win32gui.PostMessage(main, win32con.WM_LBUTTONUP, 0, point)
+        for _ in range(30):
+            time.sleep(0.1)
+            if _spotify_windows()[1]:
+                return True
+        return False
+    finally:
+        win32gui.ShowWindow(main, win32con.SW_HIDE if hidden else win32con.SW_SHOWMINNOACTIVE)
+        win32gui.SetWindowLong(main, win32con.GWL_EXSTYLE, style)
+        _refocus(focus, main)
+
+
+def _refocus(hwnd, spotify):
+    """Give the keyboard back to the window the user was in; the Miniplayer takes focus when it opens."""
+    import win32gui
+    time.sleep(0.3)
+    if not hwnd or hwnd == spotify or not win32gui.IsWindow(hwnd) or win32gui.GetForegroundWindow() == hwnd:
+        return
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
+def _miniplayer_soon():
+    """show_miniplayer() in the background so the spoken command isn't held up; never fails playback."""
+    import threading
+    def run():
+        try:
+            show_miniplayer()
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _devices():
     import spotify_mcp
     return [d for d in spotify_mcp.dispatch("spotify_devices", {})["devices"] if not d.get("is_restricted")]
@@ -134,10 +245,14 @@ def perform(action, uri=None):
 
     Verified live 2026-10-22: the Web API play command stops playback here, and a track link doesn't
     switch songs mid-track. So: a link when idle, queue + media Next mid-song, media keys otherwise.
+    Starting playback also pops up the Miniplayer in the screen corner unless the full Spotify window is open.
     Both the instant voice commands and the assistant's Spotify tools go through this."""
     import spotify_mcp
     try:
         playing = spotify_mcp.dispatch("spotify_playback", {}).get("is_playing", False)
+        if (action == "play" or action == "resume" and not playing or action == "queue" and uri and not playing) \
+                and not _main_in_view():
+            _miniplayer_soon()  # waits for a Spotify being opened by the steps below
         if action in ("play", "queue") and uri:
             if not playing:
                 os.startfile(uri)  # starts Spotify if needed and plays the track

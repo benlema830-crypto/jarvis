@@ -42,6 +42,7 @@ class ParseTest(unittest.TestCase):
 class RunTest(unittest.TestCase):
     def setUp(self):
         self.calls, self.keys, self.opened, self.playing, self.devices = [], [], [], False, [{'id': 'pc1', 'type': 'Computer'}]
+        self.in_view, self.minis = False, []
         def dispatch(name, args):
             self.calls.append(name)
             if name == 'spotify_search':
@@ -59,6 +60,8 @@ class RunTest(unittest.TestCase):
                         mock.patch.object(music, '_press', side_effect=self.keys.append),
                         mock.patch.object(music.os, 'startfile', side_effect=self.opened.append, create=True),
                         mock.patch.object(music, 'launch_spotify', return_value=True),
+                        mock.patch.object(music, '_main_in_view', side_effect=lambda: self.in_view),
+                        mock.patch.object(music, '_miniplayer_soon', side_effect=lambda: self.minis.append(1)),
                         mock.patch.object(music.time, 'sleep'),
                         mock.patch.object(music.apps, 'names', return_value=[])):
             patcher.start(); self.addCleanup(patcher.stop)
@@ -99,6 +102,25 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.keys, ['next', 'previous'])
         self.playing, self.devices = False, []
         self.assertIn('Nothing is playing', music.run('skip'))
+
+    def test_starting_playback_pops_up_the_miniplayer(self):
+        music.run('play highway to hell')
+        music.run('resume')
+        self.assertEqual(len(self.minis), 2)
+        self.playing = True
+        music.run('pause'); music.run('next song'); music.run('queue thunderstruck')
+        self.assertEqual(len(self.minis), 2)
+        music.run('play thunderstruck')  # switching songs shows it too, in case it was closed
+        self.assertEqual(len(self.minis), 3)
+
+    def test_no_miniplayer_while_the_full_spotify_window_is_open(self):
+        self.in_view = True
+        music.run('play highway to hell')
+        self.assertEqual(self.minis, [])
+
+    def test_miniplayer_gives_up_quietly_without_a_spotify_window(self):
+        with mock.patch.object(music, '_spotify_windows', return_value=(None, None)):
+            self.assertFalse(music.show_miniplayer())
 
     def test_errors_and_missing_results_are_spoken(self):
         with mock.patch.object(spotify_mcp, 'dispatch', return_value={'items': []}):
