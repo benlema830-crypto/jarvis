@@ -11,6 +11,7 @@ import urllib.parse
 import webbrowser
 
 import pyperclip
+import re
 import win32api
 import win32gui
 from anthropic import beta_tool
@@ -1053,6 +1054,9 @@ def send_telegram(text: str) -> str:
 def switch_model(model: str) -> str:
     """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to
     GPT-6 Sol". Validated with a short test and applied after this turn; tell the user that.
+    Claude models exist twice: on the user's Claude plan (provider claude_code, no API credits) and
+    on API credits (provider anthropic). Include "subscription"/"plan" or "API" in `model` when the
+    user says which; otherwise the current provider, then a plan, is preferred.
 
     Args:
         model: The model name as the user said it; matched against the available models.
@@ -1062,9 +1066,15 @@ def switch_model(model: str) -> str:
     snapshot = model_provider.SELECTION.snapshot()
     provider = snapshot["active"]["provider"]
     options = {p: m for p, m in snapshot["models"].items()
-               if not snapshot["subscription_only"] or p in ("codex", "ollama")}
-    flat = [(p, m) for p, ms in options.items() for m in ms]
-    want = model.lower().strip().replace(" ", "-")
+               if not snapshot["subscription_only"] or p in model_provider.SUBSCRIPTION_PROVIDERS}
+    # The same model can be on a plan and on API credits: prefer the current provider, then plans.
+    said = model.lower()
+    hint = (["claude_code"] if re.search(r"\b(subscription|plan|claude code)\b", said) else
+            ["anthropic", "openai"] if re.search(r"\bapi\b", said) else [])
+    rank = {p: i for i, p in enumerate(dict.fromkeys([*hint, provider, *model_provider.SUBSCRIPTION_PROVIDERS]))}
+    flat = sorted(((p, m) for p, ms in options.items() for m in ms), key=lambda pm: rank.get(pm[0], 99))
+    said = re.sub(r"\b(on|via|with|using|my|the|claude code|subscription|plan|api|credits?)\b", " ", said)
+    want = "-".join(said.split())
     names = [m.lower() for _, m in flat]
     match = next((pm for pm in flat if pm[1].lower() == want), None)
     if not match:

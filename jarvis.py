@@ -234,14 +234,16 @@ class Brain:
         self._openai_turns = []
         self._openai_message_count = 0
         self._codex_brain = None
+        self._claude_code_brain = None
+        self._limit_notice = 0.0  # when Jarvis last said the Claude plan limit was reached
         self.cancel = threading.Event()
         self._speech_lock = threading.Lock()
         saved = preferences.read().get('conversation_model')
-        if preferences.read().get('subscription_only') and (not isinstance(saved, dict) or saved.get('provider') not in ('codex', 'ollama')):
+        if preferences.read().get('subscription_only') and (not isinstance(saved, dict) or saved.get('provider') not in model_provider.SUBSCRIPTION_PROVIDERS):
             raise RuntimeError('Subscription-only mode needs a saved Codex or local model. Paid API fallback is disabled.')
         if saved:
             if (isinstance(saved, dict) and set(saved) == {'provider', 'model'} and
-                saved.get('provider') in ('openai', 'anthropic', 'codex', 'ollama') and isinstance(saved.get('model'), str) and
+                saved.get('provider') in ('openai', 'anthropic', 'codex', 'claude_code', 'ollama') and isinstance(saved.get('model'), str) and
                 re.fullmatch(r'[A-Za-z0-9_./:-]{1,100}', saved['model'])):
                 # This file is written only after successful validation. Reuse the
                 # preference without a paid startup probe or provider fallback.
@@ -260,6 +262,8 @@ class Brain:
         """Codex threads fix their base prompt at start; OpenAI turns may hold tool pairs."""
         if self._codex_brain is not None:
             self._codex_brain.close()
+        if self._claude_code_brain is not None:
+            self._claude_code_brain.close()
         if text_only:
             self.messages = model_provider.text_history(self.messages)
             self._openai_turns = []
@@ -312,6 +316,8 @@ class Brain:
         if config != self.config:
             if self._codex_brain is not None:
                 self._codex_brain.close()
+            if self._claude_code_brain is not None:
+                self._claude_code_brain.close()
             self.messages = model_provider.text_history(self.messages)
             self._openai_turns = []
             self._openai_message_count = 0
@@ -351,6 +357,8 @@ class Brain:
             return self._run_ollama(speak)
         if self.config['provider'] == 'codex':
             return self._run_codex(speak)
+        if self.config['provider'] == 'claude_code':
+            return self._run_claude_code(speak)
         if self.config['provider'] == 'openai':
             return self._run_openai(speak)
         if self.client is None:
@@ -460,6 +468,51 @@ class Brain:
             raise Interrupted()
         except Exception:
             raise model_provider.ProviderError('Codex conversation failed. Check ChatGPT sign-in or usage limits; no API fallback was used.') from None
+        voice_health.api_state('responded')
+        if self.cancel.is_set():
+            raise Interrupted()
+        if rest := buf.flush():
+            speak(rest)
+        self.messages.append({'role': 'assistant', 'content': answer})
+
+    def _run_claude_code(self, speak):
+        """Claude on the owner's Claude plan via Claude Code. If the plan's limit is reached,
+        say so (at most every 30 minutes) and answer with API credits instead, unless the
+        owner turned on subscription-only mode."""
+        import claude_code_brain
+        if self._claude_code_brain is None:
+            self._claude_code_brain = claude_code_brain.ClaudeCodeBrain()
+        buf = SentenceBuffer()
+        spoken = []
+        def delta(text):
+            for sentence in buf.feed(text):
+                spoken.append(sentence)
+                speak(sentence)
+        voice_health.api_state('requesting')
+        try:
+            answer = self._claude_code_brain.ask(self.config['model'], self.system, self.messages,
+                TOOL_DEFS, run_tool, delta, self.cancel)
+        except InterruptedError:
+            raise Interrupted()
+        except claude_code_brain.LimitReached:
+            if preferences.read().get('subscription_only') or spoken:
+                raise model_provider.ProviderError("My Claude plan's usage limit is reached. "
+                                                   "Switch my brain or wait for the limit to reset.") from None
+            if time.time() - self._limit_notice > 1800:
+                self._limit_notice = time.time()
+                speak("My Claude plan limit is reached, so I'm using API credits for now.")
+            subscription = self.config
+            self.config = {'provider': 'anthropic', 'model': subscription['model']}
+            try:
+                return self._run(speak)  # the API path records the answer itself
+            finally:
+                self.config = subscription
+        except claude_code_brain.WouldBillAPI:
+            raise model_provider.ProviderError('Claude Code is not signed in to your Claude plan, so I stopped '
+                                               'rather than use API credits. Sign in to Claude Code.') from None
+        except Exception:
+            raise model_provider.ProviderError('Claude subscription conversation failed. Check that Claude Code '
+                                               'is signed in.') from None
         voice_health.api_state('responded')
         if self.cancel.is_set():
             raise Interrupted()
@@ -844,7 +897,7 @@ def main():
     if "--voices" in sys.argv:
         demo_voices()
         return
-    if (saved_provider() != "codex" and not os.getenv("ANTHROPIC_API_KEY")
+    if (saved_provider() not in ("codex", "claude_code") and not os.getenv("ANTHROPIC_API_KEY")
             and model_provider.credential_state() != 'available'):
         print("No usable conversation credential found. Sign in to Codex with ChatGPT, configure Claude in .env, "
               "or OpenAI with scripts/setup_openai_key.py.")

@@ -112,3 +112,6 @@ urllib3==2.8.0
 webrtcvad-wheels==2.0.14.post1
 x-wr-timezone==2.0.1
 yarl==1.25.1
+
+# Conversation on the Claude subscription via Claude Code (claude_code_brain.py)
+claude-agent-sdk==0.2.174

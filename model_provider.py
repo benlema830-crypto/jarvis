@@ -13,6 +13,8 @@ from model_credentials import load_openai_key
 ROOT = Path(__file__).resolve().parent
 CLAUDE_MODEL = os.getenv('JARVIS_MODEL', 'claude-haiku-5-5')
 DEFAULT = {'provider': 'anthropic', 'model': CLAUDE_MODEL}
+# Providers that never spend API credits: ChatGPT plan, Claude plan, local models.
+SUBSCRIPTION_PROVIDERS = ('codex', 'claude_code', 'ollama')
 # Selectable Claude conversation models, quickest and cheapest first.
 CLAUDE_MODELS = list(dict.fromkeys([CLAUDE_MODEL, 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']))
 
@@ -43,7 +45,8 @@ def catalog():
     except Exception:
         codex_models = []
     import ollama_brain
-    return {'anthropic': CLAUDE_MODELS, 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
+    import claude_code_brain
+    return {'claude_code': claude_code_brain.MODELS, 'anthropic': CLAUDE_MODELS, 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
             'ollama': ollama_brain.models()}
 
 
@@ -177,6 +180,12 @@ class Selection:
                 codex_brain.validate(config['model'])
             except Exception:
                 raise ProviderError('Codex validation failed. Check ChatGPT sign-in and subscription limits.') from None
+        elif config['provider'] == 'claude_code':
+            import claude_code_brain
+            try:
+                claude_code_brain.validate(config['model'])
+            except Exception:
+                raise ProviderError('Claude subscription validation failed. Check that Claude Code is signed in to your Claude plan.') from None
         elif config['provider'] == 'openai':
             Responses().validate(config['model'])
         else:
@@ -202,7 +211,7 @@ class Selection:
             raise ValueError('Choose a provider and model.')
         if not all(isinstance(v, str) for v in config.values()):
             raise ValueError('Choose a provider and model.')
-        if preferences.read().get('subscription_only') and config['provider'] not in ('codex', 'ollama'):
+        if preferences.read().get('subscription_only') and config['provider'] not in SUBSCRIPTION_PROVIDERS:
             raise ValueError('Paid API providers are disabled in subscription-only mode. Choose Codex or an enabled local model.')
         available = catalog()
         if config['provider'] not in available or config['model'] not in available[config['provider']]:

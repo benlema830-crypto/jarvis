@@ -237,7 +237,7 @@
   const model = dialog('modelDialog', "JARVIS's brain", 'Pick the conversation model. Codex uses your ChatGPT sign-in and plan limits — no API key. Changes are validated with a short test and apply after the current turn. You can also say "Jarvis, switch your brain to …".', true);
   const modelStatus = make('p', '', 'muted'), provider = make('select'), choice = make('select'), apply = make('button', 'Validate and apply', 'primary');
   modelStatus.setAttribute('role', 'status'); apply.type = 'button';
-  for (const [id, label] of [['codex', 'Codex / ChatGPT subscription'], ['ollama', 'Ollama / local models'], ['anthropic', 'Anthropic / Claude API'], ['openai', 'OpenAI API']]) { const o = make('option', label); o.value = id; provider.append(o); }
+  for (const [id, label] of [['codex', 'Codex / ChatGPT subscription'], ['claude_code', 'Claude / Claude subscription'], ['ollama', 'Ollama / local models'], ['anthropic', 'Anthropic / Claude API (credits)'], ['openai', 'OpenAI API']]) { const o = make('option', label); o.value = id; provider.append(o); }
   const modelForm = make('div', null, 'form'); modelForm.append(make('label', 'Provider'), provider, make('label', 'Model'), choice, apply, modelStatus);
   model.body.append(modelForm);
   let modelData = null, modelBusy = false;
@@ -248,18 +248,25 @@
     'claude-opus-5-5': 'Opus 5.5 · smartest everyday · ~35× Haiku cost',
     'claude-fable-5-1': 'Fable 5.1 · most capable, slowest · ~85× Haiku cost',
   };
+  // On the Claude plan there's no per-use cost; bigger models use up the plan's limits faster.
+  const PLAN_LABELS = {
+    'claude-opus-5-5': 'Opus 5.5 · smartest · on your Claude plan',
+    'claude-sonnet-5-5': 'Sonnet 5.5 · smart, lighter on plan limits',
+    'claude-haiku-5-5': 'Haiku 5.5 · fastest, lightest on plan limits',
+  };
   function choices() {
     const previous = choice.value; choice.replaceChildren();
-    for (const id of modelData?.models?.[provider.value] || []) { const o = make('option', CLAUDE_LABELS[id] || id); o.value = id; choice.append(o); }
+    const labels = provider.value === 'anthropic' ? CLAUDE_LABELS : provider.value === 'claude_code' ? PLAN_LABELS : {};
+    for (const id of modelData?.models?.[provider.value] || []) { const o = make('option', labels[id] || id); o.value = id; choice.append(o); }
     if ([...choice.options].some(o => o.value === previous)) choice.value = previous;
     apply.disabled = !modelData?.ready || !!modelData?.pending || modelData?.validating || !choice.value || modelBusy;
   }
   function renderModel(value, first) {
     modelData = value;
-    for (const o of provider.options) o.disabled = !!value.subscription_only && !['codex', 'ollama'].includes(o.value);
+    for (const o of provider.options) o.disabled = !!value.subscription_only && !['codex', 'claude_code', 'ollama'].includes(o.value);
     if (first) { provider.value = value.active.provider; choices(); choice.value = value.active.model; } else choices();
     const pending = value.pending ? ` Pending: ${value.pending.model}${value.validating ? ' (validating…)' : ' (after this turn)'}.` : '';
-    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (value.subscription_only ? ' Paid API providers are off.' : '') + (provider.value === 'ollama' ? ' Local models require Ollama and JARVIS_OLLAMA_ENABLED=1. Models must be installed and support tools. No automatic fallback.' : '');
+    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (value.subscription_only ? ' Paid API providers are off.' : '') + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code, not API credits. If the plan limit is reached, Jarvis says so and uses API credits until it resets.' : '') + (provider.value === 'ollama' ? ' Local models require Ollama and JARVIS_OLLAMA_ENABLED=1. Models must be installed and support tools. No automatic fallback.' : '');
     el('modelName').textContent = value.active.model;
   }
   async function refreshModel(first) {
