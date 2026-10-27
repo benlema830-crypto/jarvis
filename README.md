@@ -1,4 +1,4 @@
-# J.A.R.V.I.S.
+# Jarvis CEO
 
 A personal AI assistant for Windows, modelled on the reference video
 ([I Built JARVIS with GPT-6 Astra](https://www.youtube.com/watch?v=mitzci4FsOg); target and acceptance
@@ -14,7 +14,7 @@ your local Qwen voice clone speaks, Whisper on the GPU listens. Nothing paid is 
 
 ## Start
 
-- Double-click the **JARVIS Brain** desktop shortcut (or `.venv\Scripts\python.exe open_brain.py`).
+- Double-click the **Jarvis CEO** desktop shortcut (or `.venv\Scripts\python.exe open_brain.py`).
   It starts the assistant if needed and opens the Brain at http://127.0.0.1:7781.
 - Or run `run.bat` (voice) / `run.bat --text` (keyboard). Add `--quiet-start` to skip the spoken briefing.
 - Say **"Jarvis…"** (or press **Ctrl+Alt+J**) any time, even mid-sentence, to get his attention.
@@ -98,7 +98,7 @@ companion (end the `pythonw … brain.py` process, then open the shortcut).
 
 ## Troubleshooting
 
-- **Brain says OFFLINE:** the assistant isn't running — open the JARVIS Brain shortcut. `data/brain-assistant.log` has its output.
+- **Brain says OFFLINE:** the assistant isn't running — open the Jarvis CEO shortcut. `data/brain-assistant.log` has its output.
 - **He doesn't react to his name:** More → Voice health shows the mic, voice-lock and last recognition result. "Voice not matched" means the voice lock rejected it; re-run `enroll.bat` if your setup changed.
 - **"Codex conversation failed":** check the Codex app is signed in with ChatGPT and you're within plan limits.
 - **Camera modes say permission denied:** click the camera icon in the address bar and allow it for 127.0.0.1.

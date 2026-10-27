@@ -42,7 +42,8 @@ const G = {
   hidden: new Set(store.get('hiddenGroups', ['Tool'])),
   selected: null, focus: new Set(), depth: 1, path: null, hover: null, matches: null,
   alpha: 1, is3d: true, orbit: false,
-  cam: { yaw: .35, pitch: .22, zoom: 1, panX: 0, panY: 0, target: { x: 0, y: 0, z: 0 }, goal: null },
+  cam: { yaw: .35, pitch: .22, zoom: 1, panX: 0, panY: 0, target: { x: 0, y: 0, z: 0 }, goal: null,
+    velocityYaw: 0, velocityPitch: 0 },
 };
 J.graph = G;
 function colorOf(group) {
@@ -96,6 +97,8 @@ function forces() {
   return { repel, length };
 }
 function simulate() {
+  const held = drag?.node && drag.moved ? drag.node : null;
+  if (held) { pinDraggedNode(); reheat(.7); }
   if (G.alpha < .004) return;
   // Hidden groups sit still: otherwise 55 invisible tool nodes shove the visible graph into a long thin streak.
   const ns = G.nodes.filter(visible), n = ns.length, { repel, length } = forces(), a = G.alpha;
@@ -123,9 +126,11 @@ function simulate() {
     if (G.is3d) { p.vz += dz * k; q.vz -= dz * k; }
   }
   for (const p of ns) {
+    if (p === held) { p.vx = p.vy = p.vz = 0; continue; }
     p.vx -= p.x * .004 * a; p.vy -= p.y * .004 * a; p.vz -= p.z * .004 * a;
     if (p.id === 'root') { p.x *= .9; p.y *= .9; p.z *= .9; }
-    p.vx *= .62; p.vy *= .62; p.vz *= .62;
+    const damping = held && !reduced.matches ? .78 : .62;
+    p.vx *= damping; p.vy *= damping; p.vz *= damping;
     p.x += p.vx; p.y += p.vy; p.z = G.is3d ? p.z + p.vz : p.z * .85;
   }
   G.alpha *= .988;
@@ -136,14 +141,16 @@ function reheat(value = .4) { G.alpha = Math.max(G.alpha, value); }
 
 /* ---------- Camera and projection ---------- */
 const canvas = $('graph'), ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = 1;
+let W = 0, H = 0, DPR = 1, graphCenterX = 0;
 const FOCAL = 620;
 function resize() {
   W = innerWidth; H = innerHeight; DPR = Math.min(devicePixelRatio || 1, 2);
   canvas.width = W * DPR; canvas.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const left = $('left').getBoundingClientRect(), right = document.querySelector('.right').getBoundingClientRect();
+  graphCenterX = ((W > 900 && left.width ? left.right + 16 : 0) + right.left - 16) / 2;
 }
 addEventListener('resize', resize); resize();
-function centerX() { return (W + ($('left').hidden ? 0 : 230) - 190) / 2; }
+function centerX() { return graphCenterX; }
 function project(n) {
   const c = G.cam, t = c.target;
   let x = n.x - t.x, y = n.y - t.y, z = G.is3d ? n.z - t.z : 0;
@@ -161,6 +168,7 @@ function project(n) {
 }
 let settling = 0;  // keep re-fitting while the first layout settles, until the user takes over
 function fit(subset) {
+  stopMomentum();
   const shown = Array.isArray(subset) ? subset : G.nodes.filter(visible);
   if (!shown.length) return;
   const c = G.cam;
@@ -171,8 +179,67 @@ function fit(subset) {
   const radius = Math.max(60, spread[Math.floor(spread.length * .92)] * 1.08);  // ignore a few far outliers
   c.goal = { x: cx, y: cy, z: G.is3d ? cz : 0, panX: 0, panY: 0, zoom: Math.min(2.6, Math.max(.3, 285 / radius)) };  // margin for perspective: near nodes project larger
 }
-function stepCamera() {
+// Hand release uses recent camera movement, not one noisy landmark frame.
+const handMotion = { held: false, samples: [], age: 1, yaw: 0, pitch: 0 };
+function cancelHandMotion() {
+  handMotion.held = false; handMotion.samples = []; handMotion.age = 1;
+  handMotion.yaw = handMotion.pitch = 0;
+}
+function sampleHand(now) {
+  const s = handMotion.samples;
+  if (s.length && now <= s[s.length - 1].at) return;
+  s.push({ at: now, yaw: G.cam.yaw, pitch: G.cam.pitch });
+  while (s.length > 16 || (s.length > 1 && now - s[0].at > 120)) s.shift();
+}
+function beginHandDrag(now) {
+  stopMomentum(); settling = 0; G.cam.goal = G.cam.follow = null;
+  handMotion.held = true; sampleHand(now);
+}
+function moveHandDrag(dx, dy, now) {
+  if (!handMotion.held) { beginHandDrag(now); return; }
+  J.camera.rotate(dx * .008, dy * .006); sampleHand(now);
+}
+function endHandDrag(now, tap = false) {
+  if (!handMotion.held) return;
+  handMotion.held = false;
+
+  sampleHand(now);
+  const s = handMotion.samples, first = s[0], last = s[s.length - 1];
+  if (tap || reduced.matches || !G.is3d || s.length < 2 || last.at - first.at < 16) { cancelHandMotion(); return; }
+  const seconds = (last.at - first.at) / 1000;
+  let yaw = (last.yaw - first.yaw) / seconds, pitch = (last.pitch - first.pitch) / seconds;
+  const limit = Math.min(1, 4 / (Math.hypot(yaw, pitch) || 1));
+  handMotion.yaw = yaw * limit; handMotion.pitch = pitch * limit;
+  handMotion.age = 0; handMotion.samples = [];
+}
+function stepHandMotion(dt) {
+  if (drag) { cancelHandMotion(); return; }
+  if (reduced.matches || !G.is3d) { if (!handMotion.held) cancelHandMotion(); return; }
+  if (handMotion.held || handMotion.age >= 1) return;
+  const a = handMotion.age, b = Math.min(1, a + Math.max(0, dt));
+  // Exact integral of exponential friction tapered to zero at one second.
+  // Same travel at 30/60/144 Hz, including a delayed animation frame.
+  const tail = Math.exp(-5), travel = ((Math.exp(-5 * a) - Math.exp(-5 * b)) / 5 - tail * (b - a)) / (1 - tail);
+  G.cam.yaw += handMotion.yaw * travel;
+  const pitch = G.cam.pitch + handMotion.pitch * travel;
+  G.cam.pitch = Math.max(-1.45, Math.min(1.45, pitch));
+  if (pitch !== G.cam.pitch) handMotion.pitch = 0;
+  handMotion.age = b;
+  if (b === 1) cancelHandMotion();
+}
+function stopMomentum() { G.cam.velocityYaw = G.cam.velocityPitch = 0; cancelHandMotion(); }
+function stepCamera(dt = 1 / 60, handDt = dt) {
   const c = G.cam, g = c.goal;
+  stepHandMotion(handDt);
+  if (reduced.matches || !G.is3d) { c.velocityYaw = c.velocityPitch = 0; if (!handMotion.held) cancelHandMotion(); }
+  if (!drag && G.is3d && !reduced.matches) {
+    const decay = Math.exp(-5.5 * dt), travel = (1 - decay) / 5.5;
+    c.yaw += c.velocityYaw * travel;
+    const pitch = c.pitch + c.velocityPitch * travel;
+    c.pitch = Math.max(-1.45, Math.min(1.45, pitch));
+    c.velocityYaw *= decay; c.velocityPitch = pitch === c.pitch ? c.velocityPitch * decay : 0;
+    if (Math.abs(c.velocityYaw) + Math.abs(c.velocityPitch) < .004) c.velocityYaw = c.velocityPitch = 0;
+  }
   if (g && c.follow) { g.x = c.follow.x; g.y = c.follow.y; g.z = G.is3d ? c.follow.z : 0; }  // track a node that is still settling
   if (g) {
     const k = .12;
@@ -182,21 +249,25 @@ function stepCamera() {
     if (Math.abs(g.x - c.target.x) + Math.abs(g.y - c.target.y) + Math.abs(g.z - c.target.z) < .5 &&
         (g.zoom == null || Math.abs(g.zoom - c.zoom) < .01) && (!c.follow || G.alpha < .01)) c.goal = c.follow = null;
   }
-  if (G.orbit && !reduced.matches && !drag && !G.hover) c.yaw += .0016;  // pauses under the pointer so clicks land
+  if (G.orbit && !reduced.matches && !drag && !handMotion.held && handMotion.age >= 1 && !G.hover) c.yaw += .096 * dt;  // pauses during direct manipulation
   if (settling && (performance.now() - settling > 12000 || drag || G.alpha < .03)) settling = 0;
   if (settling && Math.round(performance.now() / 16) % 20 === 0) fit();
 }
 J.camera = { fit, rotate(dYaw, dPitch) { G.cam.yaw += dYaw; G.cam.pitch = Math.max(-1.45, Math.min(1.45, G.cam.pitch + dPitch)); },
-  zoomBy(f) { G.cam.goal = null; G.cam.zoom = Math.max(.2, Math.min(6, G.cam.zoom * f)); },
+  hand: { begin: beginHandDrag, move: moveHandDrag, end: endHandDrag, cancel: stopMomentum },
+  zoomBy(f) { stopMomentum(); G.cam.goal = null; G.cam.zoom = Math.max(.2, Math.min(6, G.cam.zoom * f)); },
   pan(dx, dy) { G.cam.panX += dx; G.cam.panY += dy; } };
 
 /* ---------- Rendering ---------- */
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const stars = Array.from({ length: 220 }, (_, i) => ({ x: ((i * 127.31 + 17) % 997) / 997, y: ((i * 213.73 + 31) % 991) / 991, r: i % 11 === 0 ? 1.1 : .5, p: i * 1.7 }));
 function hex(color, alpha) { const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0'); return color + a; }
+let lastFrame = 0;
 function draw(now) {
+  const elapsed = Math.max(0, (now - (lastFrame || now - 16.667)) / 1000);
+  const dt = Math.max(.001, Math.min(.05, elapsed)); lastFrame = now;
   const t = reduced.matches ? 0 : now / 1000;
-  simulate(); stepCamera();
+  simulate(); stepCamera(dt, elapsed);
   ctx.fillStyle = '#030608'; ctx.fillRect(0, 0, W, H);
   if ($('showStars').checked) {
     const glow = ctx.createRadialGradient(centerX(), H * .5, 10, centerX(), H * .5, Math.max(W, H) * .6);
@@ -269,13 +340,13 @@ function draw(now) {
   ctx.textAlign = 'center';
   for (const { n, r, alpha, rank } of labels.sort((a, b) => a.rank - b.rank || (b.n.degree || 0) - (a.n.degree || 0))) {
     const big = rank <= 3;
-    ctx.font = `${big ? 600 : 400} ${big ? 11.5 : 10}px "Segoe UI", sans-serif`;
+    ctx.font = `${big ? 600 : 400} ${big ? 14 : 12}px "Segoe UI", sans-serif`;
     const text = n.label.length > 34 ? n.label.slice(0, 32) + '…' : n.label, w = ctx.measureText(text).width;
-    const box = { x: n.sx - w / 2 - 2, y: n.sy + r + 2, w: w + 4, h: 13 };
+    const box = { x: n.sx - w / 2 - 2, y: n.sy + r + 2, w: w + 4, h: big ? 17 : 15 };
     if (rank > 1 && placed.some(b => box.x < b.x + b.w && b.x < box.x + box.w && box.y < b.y + b.h && b.y < box.y + box.h)) continue;
     placed.push(box);
     ctx.globalAlpha = alpha; ctx.fillStyle = big ? '#eef6f4' : '#a8bbb7';
-    ctx.fillText(text, n.sx, n.sy + r + 12);
+    ctx.fillText(text, n.sx, n.sy + r + 15);
   }
   ctx.globalAlpha = 1;
   drawReactor(t);
@@ -284,6 +355,22 @@ function draw(now) {
 
 /* ---------- Pointer interaction ---------- */
 let drag = null;
+// Unproject onto the grabbed node's screen-parallel depth plane, undoing
+// camera rotation in reverse order. The grab point stays under the cursor.
+function pinDraggedNode() {
+  if (!drag?.node || !drag.moved) return;
+  const c = G.cam, n = drag.node, scale = Math.min(W, H) / 820 * c.zoom;
+  const persp = G.is3d ? FOCAL / (FOCAL + Math.max(drag.depth, -FOCAL * .6)) : 1;
+  let x = (drag.x + drag.offsetX - centerX() - c.panX) / (scale * persp);
+  let y = (drag.y + drag.offsetY - H * .46 - c.panY) / (scale * persp);
+  let z = drag.depth;
+  if (G.is3d) {
+    [y, z] = [y * Math.cos(c.pitch) + z * Math.sin(c.pitch), -y * Math.sin(c.pitch) + z * Math.cos(c.pitch)];
+    [x, z] = [x * Math.cos(c.yaw) + z * Math.sin(c.yaw), -x * Math.sin(c.yaw) + z * Math.cos(c.yaw)];
+  }
+  n.x = x + c.target.x; n.y = y + c.target.y; n.z = G.is3d ? z + c.target.z : 0;
+  n.vx = n.vy = n.vz = 0;
+}
 function hit(x, y) {
   let best = null, bestD = Infinity;
   for (const n of G.nodes) {
@@ -296,8 +383,18 @@ function hit(x, y) {
 J.hit = hit;
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => {
-  drag = { x: e.clientX, y: e.clientY, moved: false, pan: e.button === 2 || e.button === 1 || !G.is3d || e.ctrlKey };
-  if (drag.pan) { G.cam.goal = G.cam.follow = null; }
+  if (drag) return;
+  stopMomentum(); settling = 0;
+  G.hover = null; $('tooltip').hidden = true;
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY,
+    at: performance.now(), moved: false, pan: e.button === 2 || e.button === 1 || !G.is3d || e.ctrlKey };
+  drag.node = e.button === 0 && !e.ctrlKey && !e.shiftKey ? hit(e.clientX, e.clientY) : null;
+  if (drag.node) {
+    const n = drag.node;
+    drag.pan = false; drag.depth = n.sz; drag.offsetX = n.sx - e.clientX; drag.offsetY = n.sy - e.clientY;
+    G.cam.goal = G.cam.follow = null;
+  }
+  else if (drag.pan) { G.cam.goal = G.cam.follow = null; }
   canvas.setPointerCapture(e.pointerId); canvas.classList.add('dragging');
 });
 canvas.addEventListener('pointermove', e => {
@@ -309,12 +406,27 @@ canvas.addEventListener('pointermove', e => {
     else { tip.hidden = true; canvas.style.cursor = ''; }
     return;
   }
+  if (e.pointerId !== drag.id) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-  if (drag.pan) J.camera.pan(dx, dy); else J.camera.rotate(dx * .006, dy * .005);
-  drag.x = e.clientX; drag.y = e.clientY;
+  if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 4) drag.moved = true;
+  const now = performance.now(), seconds = Math.max(.008, (now - drag.at) / 1000);
+  if (drag.node) {
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.moved) { pinDraggedNode(); reheat(.7); }
+  }
+  else if (drag.pan) J.camera.pan(dx, dy);
+  else {
+    J.camera.rotate(dx * .006, dy * .005);
+    G.cam.velocityYaw = .35 * G.cam.velocityYaw + .65 * Math.max(-4, Math.min(4, dx * .006 / seconds));
+    G.cam.velocityPitch = .35 * G.cam.velocityPitch + .65 * Math.max(-3, Math.min(3, dy * .005 / seconds));
+  }
+  drag.x = e.clientX; drag.y = e.clientY; drag.at = now;
 });
 canvas.addEventListener('pointerup', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  if (drag.node && drag.moved) { pinDraggedNode(); reheat(.7); }
+  if (!drag.moved || drag.pan || performance.now() - drag.at > 100 || reduced.matches) stopMomentum();
+
   canvas.classList.remove('dragging');
   if (drag && !drag.moved && e.button === 2) { const n = hit(e.clientX, e.clientY); if (n) { select(n, { keepCamera: true }); J.emit('read', n); } }
   if (drag && !drag.moved && e.button === 0) {
@@ -324,8 +436,13 @@ canvas.addEventListener('pointerup', e => {
     else clearSelection();
   }
   drag = null;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
 });
-canvas.addEventListener('pointercancel', () => { drag = null; canvas.classList.remove('dragging'); });
+function cancelDrag() { drag = null; stopMomentum(); canvas.classList.remove('dragging'); }
+canvas.addEventListener('pointercancel', cancelDrag);
+canvas.addEventListener('lostpointercapture', () => { if (drag) cancelDrag(); });
+addEventListener('blur', cancelDrag);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelDrag(); });
 canvas.addEventListener('dblclick', e => { const n = hit(e.clientX, e.clientY); if (n) J.emit('read', n); });
 canvas.addEventListener('wheel', e => { e.preventDefault(); J.camera.zoomBy(Math.exp(-e.deltaY * .0012)); }, { passive: false });
 addEventListener('keydown', e => {
@@ -347,6 +464,7 @@ function neighborhood(id, depth) {
   return seen;
 }
 function select(n, options = {}) {
+  stopMomentum();
   G.selected = n; G.path = null; settling = 0;
   if (!visible(n)) { G.hidden.delete(n.group); store.set('hiddenGroups', [...G.hidden]); renderFilters(); }
   G.focus = neighborhood(n.id, G.depth);
@@ -463,6 +581,7 @@ $('search').addEventListener('keydown', e => {
 /* ---------- Toolbar and panel chrome ---------- */
 $('fit').onclick = () => { clearSelection(); $('search').value = ''; search(); fit(); };
 $('dimension').onclick = () => {
+  stopMomentum();
   G.is3d = !G.is3d; $('dimension').textContent = G.is3d ? '3D' : '2D';
   if (!G.is3d) { G.cam.yaw = 0; G.cam.pitch = 0; }
   else {  // 2D flattened every z to 0, and nothing pushes a perfectly flat sheet back out: re-seed the depth
@@ -471,12 +590,17 @@ $('dimension').onclick = () => {
   }
   reheat(G.is3d ? .9 : .6); setTimeout(fit, 400);
 };
-G.orbit = store.get('orbit', true);
+G.orbit = store.get('orbit', false);
 $('orbit').setAttribute('aria-pressed', String(G.orbit));
 $('orbit').onclick = () => { G.orbit = !G.orbit; store.set('orbit', G.orbit); $('orbit').setAttribute('aria-pressed', String(G.orbit)); };
 $('refresh').onclick = () => load(true);
-function setLeft(open) { $('left').hidden = !open; $('expandLeft').hidden = open; store.set('leftOpen', open); }
-$('collapseLeft').onclick = () => setLeft(false); $('expandLeft').onclick = () => setLeft(true);
+function setLeft(open, mobile = false) {
+  $('left').hidden = !open; $('expandLeft').hidden = open;
+  $('left').classList.toggle('mobile-open', open && mobile && innerWidth <= 900);
+  document.body.classList.toggle('panel-collapsed', !open);
+  store.set('leftOpen', open); resize();
+}
+$('collapseLeft').onclick = () => setLeft(false); $('expandLeft').onclick = () => setLeft(true, true);
 setLeft(store.get('leftOpen', true));
 for (const id of ['showLabels', 'showFlow', 'showStars']) {
   $(id).checked = store.get(id, true); $(id).addEventListener('change', () => store.set(id, $(id).checked));

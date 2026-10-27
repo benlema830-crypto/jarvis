@@ -196,7 +196,7 @@
   const holoStatus = make('div', '', 'status'), holoCanvas = make('canvas', null, 'cam mirror');
   const holoBtn = button('Turn on hand control', () => holo.on ? holoStop() : holoStart(), 'primary');
   const legend = make('ul');
-  for (const line of ['Pinch & drag — orbit the graph', 'Quick pinch — select the node under your finger', 'Two-hand pinch — zoom (spread) and twist (rotate)',
+  for (const line of ['Hold pinch, then move — orbit the graph', 'Quick pinch — select; small hand tremors are ignored', 'Two-hand pinch — zoom (spread) and twist (rotate)',
     'Open palm, hold 1 s — fit everything', 'Peace sign, hold — clear selection']) legend.append(make('li', line));
   const appTitle = make('h3', 'HOLO app'), appStatus = make('p', 'Checking…'), appBtn = button('Open HOLO', () => J.send('Open HOLO'));
   holoBox.append(make('p', 'Control this second brain with your hands through the webcam. Tracking runs in this page with Google MediaPipe; the first start downloads the model (about 8 MB).'),
@@ -221,29 +221,63 @@
       return this.x;
     }
   }
-  const tracks = [0, 1].map(() => ({ fx: new OneEuro(), fy: new OneEuro(), pinched: false, since: 0, moved: 0, x: 0, y: 0, palmSince: 0, peaceSince: 0 }));
+  const tracks = [0, 1].map(() => ({ fx: new OneEuro(), fy: new OneEuro(),
+    mx: new OneEuro(1, .35), my: new OneEuro(1, .35),
+    pinched: false, dragging: false, blocked: false, since: 0, moved: 0, x: 0, y: 0, palmSince: 0, peaceSince: 0 }));
   let two = null;
   const cursor = el('handCursor');
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const extended = (lm, tip, pip) => dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.08;
   function interpret(hands, now) {
     const points = [];
+    // Missing tracking is cancellation, not a deliberate throw. Two-hand
+    // zoom/twist also takes over immediately from a single-hand coast.
+    if (hands.length !== 1) {
+      J.camera.hand.cancel();
+      for (const t of tracks) if (t.pinched) { t.blocked = true; t.dragging = false; }
+    }
     hands.slice(0, 2).forEach((lm, i) => {
       const t = tracks[i], size = dist(lm[0], lm[9]) || .1, pinch = dist(lm[4], lm[8]) / size;
       const x = t.fx.filter(1 - (lm[4].x + lm[8].x) / 2, now) * innerWidth, y = t.fy.filter((lm[4].y + lm[8].y) / 2, now) * innerHeight;
+      // Palm movement is stable when the thumb closes: finger motion must not rotate the graph.
+      const px = t.mx.filter(1 - (lm[0].x + lm[9].x) / 2, now) * innerWidth;
+      const py = t.my.filter((lm[0].y + lm[9].y) / 2, now) * innerHeight;
+      const threshold = Math.max(20, Math.min(44, Math.min(innerWidth, innerHeight) * .03));
       const wasPinched = t.pinched;
       t.pinched = wasPinched ? pinch < .5 : pinch < .32;
-      if (t.pinched && !wasPinched) { t.since = now; t.moved = 0; }
-      if (t.pinched && wasPinched && hands.length === 1) { J.camera.rotate((x - t.x) * .008, (y - t.y) * .006); t.moved += Math.abs(x - t.x) + Math.abs(y - t.y); }
-      if (!t.pinched && wasPinched && now - t.since < 350 && t.moved < 30) { const n = J.hit(x, y); n ? J.select(n) : J.clearSelection(); }
+      if (t.pinched && !wasPinched) {
+        t.since = now; t.moved = 0; t.dragging = false; t.blocked = hands.length !== 1;
+        t.startX = px; t.startY = py; t.target = J.hit(x, y);
+        if (hands.length === 1) J.camera.hand.cancel();
+      }
+      if (t.pinched && wasPinched && hands.length === 1 && !t.blocked) {
+        t.moved = Math.max(t.moved, Math.hypot(px - t.startX, py - t.startY));
+        if (!t.dragging && now - t.since >= 180 && t.moved >= threshold) {
+          t.dragging = true; J.camera.hand.begin(now); // No catch-up jump from the selection grace period.
+        } else if (t.dragging) {
+          const dx = Math.max(-35, Math.min(35, (px - t.px) * 1000 / innerWidth));
+          const dy = Math.max(-35, Math.min(35, (py - t.py) * 800 / innerHeight));
+          J.camera.hand.move(dx * .85, dy * .85, now);
+        }
+      }
+      if (!t.pinched && wasPinched) {
+        const tap = !t.dragging && !t.blocked && hands.length === 1 && now - t.since < 450 && t.moved < threshold * 2;
+        if (t.dragging && hands.length === 1) J.camera.hand.end(now, false);
+        // Select where the pinch began, not where opening the fingers pushes the cursor.
+        if (tap) { t.target ? J.select(t.target) : J.clearSelection(); }
+        t.dragging = false; t.target = null;
+      }
       const fingers = [[8, 6], [12, 10], [16, 14], [20, 18]].map(([a, b]) => extended(lm, a, b));
       const palm = fingers.every(Boolean) && pinch > .6, peace = fingers[0] && fingers[1] && !fingers[2] && !fingers[3];
       t.palmSince = palm ? (t.palmSince || now) : 0; t.peaceSince = peace ? (t.peaceSince || now) : 0;
       if (t.palmSince && now - t.palmSince > 1000) { J.camera.fit(); t.palmSince = now + 2000; }
       if (t.peaceSince && now - t.peaceSince > 700) { J.clearSelection(); t.peaceSince = now + 2000; }
-      t.x = x; t.y = y; points.push(t);
+      t.x = x; t.y = y; t.px = px; t.py = py; points.push(t);
     });
-    for (let i = hands.length; i < 2; i++) { tracks[i].pinched = false; tracks[i].fx.x = tracks[i].fy.x = null; }
+    for (let i = hands.length; i < 2; i++) {
+      const t = tracks[i]; t.pinched = t.dragging = false; t.target = null;
+      t.fx.x = t.fy.x = t.mx.x = t.my.x = null;
+    }
     if (points.length === 2 && points[0].pinched && points[1].pinched) {
       const d = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y), a = Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
       if (two) { J.camera.zoomBy(d / two.d); J.camera.rotate((a - two.a) * .8, 0); }
@@ -287,7 +321,11 @@
     }
     updateHolo();
   }
-  function holoStop() { holo.on = false; holo.last = []; cursor.hidden = true; cameraOff('holo'); updateHolo(); }
+  function holoStop() {
+    J.camera.hand.cancel(); two = null;
+    for (const t of tracks) { t.pinched = t.dragging = false; t.target = null; t.fx.x = t.fy.x = t.mx.x = t.my.x = null; }
+    holo.on = false; holo.last = []; cursor.hidden = true; cameraOff('holo'); updateHolo();
+  }
   function updateHolo() {
     holoBtn.textContent = holo.on ? 'Turn off hand control' : 'Turn on hand control';
     holoStatus.textContent = holo.error || (holo.on ? 'Tracking. Raise a hand in front of the camera.' : 'Off. The camera is not in use.');

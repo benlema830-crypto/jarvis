@@ -1,19 +1,28 @@
-# JARVIS project map
+# Jarvis CEO project map
 
-`C:\Users\Lemab\Documents\Jarvis Agent` is the navigation hub. Use the desktop
-**JARVIS Brain** shortcut for the app and **JARVIS Workspace** for files.
+Jarvis CEO is the active project, previously named Jarvis Brain. The workspace at
+`C:\Users\Lemab\Documents\Jarvis Agent` contains two project folders:
+`Jarvis CEO` and `Old Jarvis's`. Open **Jarvis CEO** on the desktop for the app
+and **JARVIS Workspace** for the active project's files.
 
-| Hub folder | Contents |
+| Jarvis CEO folder | Contents |
 | --- | --- |
-| 01 Launchers | Brain, classic assistants, Codex, voice shutdown helper |
-| 02 Knowledge | Link to the actual Obsidian vault |
-| 03 Development | Links to Blue, Orange, and LocalVoice installations |
+| 01 Launchers | Jarvis CEO app and Codex development launchers |
+| 02 Knowledge | Link to the existing Obsidian vault |
+| 03 Development/Jarvis CEO Source | Link to the main repository at `C:\Users\Lemab\jarvis` |
 | 04 Plans | Link to this repository's docs/plans |
 | 05 Reports | Link to this repository's data/reports |
 | 06 References | Video screenshots and earlier UI previews |
 
-Directory links are navigation aids. Installed repositories, virtual environments,
-models, credentials and the registered Obsidian vault retain their real paths.
+`Old Jarvis's` contains links to the CustomVoice and LocalVoice projects, plus
+archived classic assistant shortcuts. The classic launcher for the main installation
+uses the same source as CEO; it is not a separate codebase.
+
+Directory links organize the projects without relocating installed repositories,
+virtual environments, models, credentials or the registered Obsidian vault.
+CEO still requires the LocalVoice Qwen environment, model cache and voice references.
+Archiving the standalone LocalVoice project does not disable that shared dependency.
+Move records and original shortcut backups are in `data/reports/ceo-separation-2026-10-22`.
 
 ## Processes
 

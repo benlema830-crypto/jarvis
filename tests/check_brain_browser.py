@@ -55,9 +55,78 @@ addEventListener('load', async () => {
     assert($('filters').children.length === 4, 'filter rows');
     assert($('hubs').children.length >= 5, 'top hubs');
     const box = s => document.querySelector(s).getBoundingClientRect();
-    assert(box('.left').width <= 232 && box('.right').width <= 190, 'panels exceed compact proportions');
+    assert(box('.left').width >= 270 && box('.right').width >= 215, 'readable sidebar sizes');
+    assert(parseFloat(getComputedStyle($('search')).fontSize) >= 14, 'readable search text');
     assert(box('.toolbar').top < 30 && box('.dock').bottom <= innerHeight, 'toolbar/dock placement');
+    assert(box('.dock').left > box('.left').right && box('.dock').right < box('.right').left, 'dock clears sidebars');
     assert(!document.body.innerHTML.includes('<script>alert'), 'unsafe');
+
+    stage('graph momentum');
+    // Synthetic input exercises the real handlers; capture itself needs a hardware pointer.
+    const graph = $('graph'), captures = new Set();
+    graph.setPointerCapture = id => captures.add(id);
+    graph.hasPointerCapture = id => captures.has(id);
+    graph.releasePointerCapture = id => captures.delete(id);
+    const pointer = (type, x, y, button = 0) => graph.dispatchEvent(new PointerEvent(type,
+      {pointerId: 91, pointerType: 'mouse', clientX: x, clientY: y, button, buttons: type === 'pointerup' ? 0 : 1}));
+    G.orbit = false; settling = 0; G.cam.goal = G.cam.follow = null;
+    pointer('pointerdown', 780, 350); pointer('pointermove', 830, 365); pointer('pointerup', 830, 365);
+    const yaw = G.cam.yaw, velocity = Math.abs(G.cam.velocityYaw);
+    assert(velocity > .1, 'flick starts momentum');
+    stepCamera(1 / 60);
+    assert(G.cam.yaw > yaw && Math.abs(G.cam.velocityYaw) < velocity, 'rotation continues and slows after release');
+    for (let i = 0; i < 240; i++) stepCamera(1 / 60);
+    assert(G.cam.velocityYaw === 0, 'rotation settles');
+    pointer('pointerdown', 780, 350); pointer('pointermove', 830, 350);
+    drag.at -= 150; pointer('pointerup', 830, 350);
+    assert(G.cam.velocityYaw === 0, 'holding before release prevents fling');
+    pointer('pointerdown', 780, 350); pointer('pointermove', 830, 350); pointer('pointercancel', 830, 350);
+    assert(!drag && G.cam.velocityYaw === 0, 'cancel stops momentum');
+    pointer('pointerdown', 780, 350, 2); pointer('pointermove', 810, 350, 2); pointer('pointerup', 810, 350, 2);
+    assert(G.cam.velocityYaw === 0, 'pan does not start rotation');
+    pointer('pointerdown', 780, 350); pointer('pointermove', 830, 350); pointer('pointerup', 830, 350);
+    pointer('pointerdown', 780, 350);
+    assert(G.cam.velocityYaw === 0, 'new grab stops the previous fling');
+    pointer('pointercancel', 780, 350);
+    Object.defineProperty(reduced, 'matches', {value:true, configurable:true});
+    pointer('pointerdown', 780, 350); pointer('pointermove', 830, 350); pointer('pointerup', 830, 350);
+
+    assert(G.cam.velocityYaw === 0, 'reduced motion disables coast');
+    delete reduced.matches;
+    stage('elastic node dragging');
+    G.cam.goal = G.cam.follow = null;
+    const savedNodes = G.nodes.map(n => ({n, x:n.x, y:n.y, z:n.z}));
+    const grab = G.byId.get('note:Projects/Alpha.md');
+    const neighbor = G.byId.get('note:Projects/Beta.md');
+    G.cam.yaw = .8; G.cam.pitch = -.3; G.cam.zoom = 1.4;
+    project(grab);
+    const gx = grab.sx, gy = grab.sy, cameraYaw = G.cam.yaw, neighborX = neighbor.x, neighborY = neighbor.y;
+    for (const n of G.nodes) if (n !== grab) n.sx = n.sy = -10000;
+    pointer('pointerdown', gx, gy);
+    assert(drag.node === grab, 'node is grabbed instead of orbiting');
+    pointer('pointermove', gx + 110, gy + 55);
+    project(grab);
+    assert(Math.hypot(grab.sx - gx - 110, grab.sy - gy - 55) < .001, 'grab tracks cursor at rotated camera and zoom');
+    for (let i=0;i<35;i++) simulate();
+    project(grab);
+    assert(Math.hypot(grab.sx - gx - 110, grab.sy - gy - 55) < .001, 'springs cannot move held node');
+    assert(Math.hypot(neighbor.x-neighborX, neighbor.y-neighborY)>1, 'connected nodes follow the pull');
+    assert(G.cam.yaw === cameraYaw, 'node drag does not rotate camera');
+    pointer('pointerup', gx + 110, gy + 55);
+    const released = {x:grab.x,y:grab.y,z:grab.z};
+    for (let i=0;i<30;i++) simulate();
+    assert(Math.hypot(grab.x-released.x,grab.y-released.y,grab.z-released.z)>.1,'released node relaxes with graph');
+    for (const mode of [true,false]) {
+      G.is3d=mode;const root=G.byId.get('root');project(root);
+      for (const n of G.nodes) if(n!==root)n.sx=n.sy=-10000;
+      const x=root.sx,y=root.sy;pointer('pointerdown',x,y);pointer('pointermove',x+70,y+25);simulate();project(root);
+      assert(Math.hypot(root.sx-x-70,root.sy-y-25)<.001,'root can be pulled in 2D and 3D');
+      pointer('pointercancel',x+70,y+25);assert(!drag,'cancel releases held node');
+    }
+    G.is3d=true;
+    for (const s of savedNodes) Object.assign(s.n,{x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0});
+    G.nodes.forEach(project);fit();
+    delete graph.setPointerCapture; delete graph.hasPointerCapture; delete graph.releasePointerCapture;
 
     stage('search'); $('search').value = 'beta'; $('search').dispatchEvent(new Event('input'));
     await wait(() => $('searchResults').querySelector('button'), 'search results');
@@ -213,7 +282,7 @@ HEALTH = {"startup": "ready", "text_mode": False, "microphone": "Mock mic", "mic
           "output_error": False, "input_level": .1, "state": "standby"}
 
 
-def serve():
+def serve(with_checks=True):
     visual = {"state": "off", "mode": None, "session": "", "reason": "Not started.", "error": "", "target": "", "remaining_seconds": 0,
               "samples": 0, "drift_count": 0, "evidence": [], "preview": None, "observation": "Not observed.", "needs_heartbeat": True}
 
@@ -233,7 +302,8 @@ def serve():
         def do_GET(self):
             path = self.path.split("?")[0]
             if path == "/":
-                return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + CHECK, 1), "text/html")
+                script = CHECK if with_checks else '<script>window.EventSource=class {close(){} addEventListener(){}};</script>'
+                return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + script, 1), "text/html")
             if path in ("/brain.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
@@ -335,7 +405,12 @@ def main():
                 proc.wait(timeout=10)
         if "--screenshot" in sys.argv:
             out = Path(sys.argv[sys.argv.index("--screenshot") + 1]).resolve()
-            subprocess.run(args + [f"--screenshot={out}", url], capture_output=True, timeout=120)
+            # A preview must not rerun checks against the first run's mutated fixture state.
+            preview = serve(with_checks=False)
+            try:
+                subprocess.run(args + [f"--screenshot={out}", f"http://127.0.0.1:{preview.server_port}/"], capture_output=True, timeout=120)
+            finally:
+                preview.shutdown(); preview.server_close()
     result=server.check.get('result','browser did not report completion')
     stage=server.check.get('stage','unknown')
     server.shutdown();server.server_close()
