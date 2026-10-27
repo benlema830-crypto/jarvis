@@ -114,6 +114,7 @@ class PreferencesTest(unittest.TestCase):
         try:
             with mock.patch.object(hud, "ALLOWED_HOSTS", {f"127.0.0.1:{port}"}), \
                  mock.patch.object(context, "fetch_calendar", return_value=context.icalendar.Calendar()), \
+                 mock.patch.object(hud, "voice_settings", return_value={}), \
                  mock.patch.object(hud, "intel", return_value={"weather": "test", "schedule": "Nothing scheduled."}) as intel:
                 status, body = request("POST", "/settings", {"listening_mode": "continuous"})
                 self.assertEqual(status, 200)

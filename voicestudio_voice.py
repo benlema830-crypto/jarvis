@@ -6,6 +6,7 @@ VoiceStudio runs locally and serves an OpenAI-style /v1/audio/speech endpoint on
 """
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
@@ -24,8 +25,25 @@ def base_url() -> str:
     return os.getenv("VOICESTUDIO_URL", DEFAULT_URL).strip().rstrip("/")
 
 
-def profiles() -> list[dict]:
-    """The voices saved in VoiceStudio (newest first), as [{"id", "name"}]. Empty if the app isn't running."""
+PROFILE_CACHE_SECONDS = 15
+_profiles_cache = (0.0, [])
+
+
+def profiles(max_age=PROFILE_CACHE_SECONDS) -> list[dict]:
+    """The voices saved in VoiceStudio (newest first), as [{"id", "name"}]. Empty if the app isn't running.
+
+    A list fetched within max_age seconds is reused: the Brain page asks on every load and settings
+    change, and a busy VoiceStudio can take seconds to answer. Pass max_age=0 to ask the app now."""
+    global _profiles_cache
+    fetched, found = _profiles_cache
+    if time.monotonic() - fetched < max_age:
+        return [dict(p) for p in found]
+    found = _fetch_profiles()
+    _profiles_cache = (time.monotonic(), found)
+    return [dict(p) for p in found]
+
+
+def _fetch_profiles() -> list[dict]:
     try:  # the app's own list answers in milliseconds
         voices = requests.get(base_url() + "/profiles", timeout=2).json()
         if not isinstance(voices, list):

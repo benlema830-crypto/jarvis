@@ -421,7 +421,7 @@ def switch_voice(engine: str) -> str:
     """
     import voicestudio_voice
     wanted = engine.strip()
-    named = next((p for p in voicestudio_voice.profiles()
+    named = next((p for p in voicestudio_voice.profiles(max_age=0)  # a voice saved moments ago counts
                   if wanted.casefold() in (p["name"].casefold(), p["id"].casefold())), None)
     if named:
         set_voice_engine(f"voicestudio:{named['id']}")

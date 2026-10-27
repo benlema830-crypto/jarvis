@@ -61,11 +61,30 @@ class VoiceStudioTest(unittest.TestCase):
         instance.voice, instance.speed = "bm_george", 1.0
         instance.kokoro = mock.Mock()
         instance.kokoro.create.return_value = (np.ones(10), 24000)
+        instance._reopen_studio = mock.Mock()
         with mock.patch.object(voice.hud, "emit"):
             pieces = list(instance._render("Hello."))
         self.assertEqual(len(pieces), 1)
         instance.kokoro.create.assert_called_once()
         self.assertEqual(instance.engine, "voicestudio")  # stays chosen; the next sentence retries it
+        instance._reopen_studio.assert_called_once()  # reopened in the background
+
+    def test_no_waiting_on_voicestudio_while_it_reopens(self):
+        instance = voice.Voice.__new__(voice.Voice)
+        instance.studio = mock.Mock()
+        instance._studio_reopening = True
+        instance.local = instance.eleven = None
+        instance.voice, instance.speed = "bm_george", 1.0
+        instance.kokoro = mock.Mock()
+        instance.kokoro.create.return_value = (np.ones(10), 24000)
+        self.assertEqual(len(list(instance._render("Hello."))), 1)
+        instance.studio.render.assert_not_called()
+        instance.studio = mock.Mock()  # once it's back, it's used again
+        instance._studio_reopening = False
+        instance.studio.render.return_value = np.ones(5, dtype=np.float32)
+        instance._studio_failures = 0
+        list(instance._render("Hello."))
+        instance.studio.render.assert_called_once()
 
     def test_switching_between_voicestudio_and_kokoro(self):
         instance = voice.Voice.__new__(voice.Voice)
@@ -88,6 +107,17 @@ class VoiceStudioProfilesTest(unittest.TestCase):
         self.assertEqual(ids[:2], ["voicestudio:9e78e6cd", "voicestudio:27c8e8a9"])
         self.assertIn("kokoro", ids)
         self.assertEqual(current, "voicestudio:9e78e6cd")
+
+    def test_profile_list_is_reused_briefly_unless_a_fresh_one_is_asked_for(self):
+        import voicestudio_voice
+        with mock.patch.object(voicestudio_voice, "_profiles_cache", (0.0, [])), \
+                mock.patch.object(voicestudio_voice, "_fetch_profiles", return_value=self.PROFILES) as fetch:
+            self.assertEqual(voicestudio_voice.profiles(), self.PROFILES)
+            voicestudio_voice.profiles()[0]["name"] = "changed by a caller"
+            self.assertEqual(voicestudio_voice.profiles(), self.PROFILES)
+            self.assertEqual(fetch.call_count, 1)
+            voicestudio_voice.profiles(max_age=0)
+            self.assertEqual(fetch.call_count, 2)
 
     def test_closed_app_still_lists_the_current_voice(self):
         import voicestudio_voice

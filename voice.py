@@ -347,6 +347,12 @@ class Voice:
         finally:
             hud.info['voice_warming'] = False
 
+    def _reopen_studio(self):
+        try:
+            self._warm_studio()
+        finally:
+            self._studio_reopening = False
+
     def _warm_local(self):
         local = self.local
         hud.info['voice_warming'] = True
@@ -471,7 +477,7 @@ class Voice:
     def _render(self, text: str):
         """Yield audio pieces for `text` from the chosen engine, falling back to Kokoro."""
         studio = getattr(self, "studio", None)
-        if studio is not None:
+        if studio is not None and not getattr(self, "_studio_reopening", False):
             from voicestudio_voice import VoiceStudioError
             try:
                 started = time.monotonic()
@@ -486,6 +492,10 @@ class Voice:
                 print(f"(VoiceStudio: {e} - using Kokoro for this sentence)", flush=True)
                 if self._studio_failures == 1:
                     hud.emit("error", text=f"VoiceStudio voice unavailable: {e}. Using Kokoro.")
+                    # It may have been closed since startup: reopen it, and speak with Kokoro until it is ready
+                    # instead of waiting on the dead connection every sentence.
+                    self._studio_reopening = True
+                    threading.Thread(target=self._reopen_studio, daemon=True).start()
         if self.local is not None:
             started = time.monotonic()
             samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())
