@@ -1,4 +1,4 @@
-"""Reuse the owner's installed Qwen clone, models and isolated environment."""
+"""The owner's Qwen voice clone, models and isolated environment, kept in models/qwen-voice."""
 import importlib.util
 import json
 import os
@@ -9,7 +9,7 @@ import threading
 
 
 def create():
-    root = Path.home() / 'Documents' / 'Jarvis-LocalVoice'
+    root = Path(__file__).resolve().parent / 'models' / 'qwen-voice'
     for relative in ('local_tts.py', 'tts_worker.py', '.tts-qwen/Scripts/python.exe',
                      'reference/voice.wav', 'reference/transcript.txt'):
         if not (root / relative).is_file():

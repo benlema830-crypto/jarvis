@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import time
 
-ROOT = Path.home() / 'Documents' / 'Jarvis-LocalVoice'
+ROOT = Path(__file__).resolve().parent / 'models' / 'qwen-voice'
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'vendor' / 'qwen_cuda'))
 os.environ.update(HF_HOME=str(ROOT / 'model-cache'), HF_HUB_OFFLINE='1',
                   TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1')
