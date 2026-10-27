@@ -13,6 +13,8 @@ from model_credentials import load_openai_key
 ROOT = Path(__file__).resolve().parent
 CLAUDE_MODEL = os.getenv('JARVIS_MODEL', 'claude-haiku-5-5')
 DEFAULT = {'provider': 'anthropic', 'model': CLAUDE_MODEL}
+# Selectable Claude conversation models, quickest and cheapest first.
+CLAUDE_MODELS = list(dict.fromkeys([CLAUDE_MODEL, 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']))
 
 
 class ProviderError(RuntimeError):
@@ -41,7 +43,7 @@ def catalog():
     except Exception:
         codex_models = []
     import ollama_brain
-    return {'anthropic': [CLAUDE_MODEL], 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
+    return {'anthropic': CLAUDE_MODELS, 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
             'ollama': ollama_brain.models()}
 
 

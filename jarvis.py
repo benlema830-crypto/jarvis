@@ -55,6 +55,9 @@ from instance_config import MUTEX_NAME  # noqa: E402
 
 MODEL = os.getenv("JARVIS_MODEL", "claude-haiku-5-5")
 BETAS = ["compact-2026-01-12"]
+# Models with safety classifiers that can decline a request. "default" fallbacks retry a
+# declined request on a suitable model server-side instead of failing the turn (not Haiku).
+FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
 COMPACT_AT = 60_000  # input tokens; older conversation is summarized beyond this (API minimum 50,000)
 USAGE_LOG = os.path.join(HERE, "data", "usage.jsonl")
 START_TIME = time.time()
@@ -346,6 +349,8 @@ class Brain:
             return self._run_openai(speak)
         if self.client is None:
             self.client = anthropic.Anthropic()
+        fallback = self.config['model'] in FALLBACK_MODELS
+        extra = {"fallbacks": "default"} if fallback else {}
         for _ in range(10):  # at most 10 rounds of tool use per request
             buf = SentenceBuffer()
             voice_health.api_state("requesting")
@@ -355,7 +360,8 @@ class Brain:
                 system=privacy.redact(self.system),
                 tools=self.tools,
                 messages=privacy.payload(self.messages),
-                betas=BETAS,
+                betas=BETAS + (["server-side-fallback-2026-07-01"] if fallback else []),
+                **extra,
                 context_management={"edits": [{"type": "compact_20260112",
                                                "trigger": {"type": "input_tokens", "value": COMPACT_AT}}]},
                 output_config={"effort": "low"},  # quick replies; it still thinks when it needs to

@@ -241,9 +241,16 @@
   const modelForm = make('div', null, 'form'); modelForm.append(make('label', 'Provider'), provider, make('label', 'Model'), choice, apply, modelStatus);
   model.body.append(modelForm);
   let modelData = null, modelBusy = false;
+  // API cost per conversation, relative to Haiku (published prices, with prompt caching)
+  const CLAUDE_LABELS = {
+    'claude-haiku-5-5': 'Haiku 5.5 · fastest, cheapest',
+    'claude-sonnet-5-5': 'Sonnet 5.5 · smarter · ~20× Haiku cost',
+    'claude-opus-5-5': 'Opus 5.5 · smartest everyday · ~35× Haiku cost',
+    'claude-fable-5-1': 'Fable 5.1 · most capable, slowest · ~85× Haiku cost',
+  };
   function choices() {
     const previous = choice.value; choice.replaceChildren();
-    for (const id of modelData?.models?.[provider.value] || []) { const o = make('option', id); o.value = id; choice.append(o); }
+    for (const id of modelData?.models?.[provider.value] || []) { const o = make('option', CLAUDE_LABELS[id] || id); o.value = id; choice.append(o); }
     if ([...choice.options].some(o => o.value === previous)) choice.value = previous;
     apply.disabled = !modelData?.ready || !!modelData?.pending || modelData?.validating || !choice.value || modelBusy;
   }
