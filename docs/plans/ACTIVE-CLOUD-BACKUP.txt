@@ -1,3 +1,11 @@
+UPDATE 2026-10-26 - THE BACKUP IS COMPLETE; THE ORIGINAL 2026-10-21 NOTE FOLLOWS UNCHANGED
+- cloud-status.json reports phase "backup_verified" (2026-10-22): 50 parts in sync in OneDrive.
+- The local archive copies (archives-final, ~49 GB) were deleted on 2026-10-26 after every part
+  was matched by size in OneDrive. recovery-key.txt and the indexes remain in the local job folder;
+  see LOCAL-ARCHIVES-REMOVED.txt there.
+- The backup is a 2026-10-21 snapshot. It includes the old Jarvis variants deleted on 2026-10-26,
+  but not later changes; the source code itself is on GitHub.
+
 ACTIVE ONEDRIVE BACKUP - STARTED 2026-10-21 EVENING, AMERICA/CHICAGO
 
 This is a background job in progress, NOT a claim that the backup is complete.

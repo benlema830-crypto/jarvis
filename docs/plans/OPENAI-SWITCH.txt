@@ -1,3 +1,7 @@
+UPDATE 2026-10-26 - HISTORICAL request from 2026-10-21. Selectable models were built; the default
+brain is now Codex (ChatGPT sign-in), with Claude, OpenAI and local models selectable in the
+Brain page's model control.
+
 OWNER REQUEST, Oct 21: JARVIS should run on OpenAI, selectable models in the UI.
 Current live assistant is Claude Haiku; coding agents are separate Codex sessions.
 Do not mislabel Claude as ChatGPT. This is implementation authorization, including

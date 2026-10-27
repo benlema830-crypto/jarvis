@@ -1,3 +1,17 @@
+UPDATE 2026-10-26 - READ THIS FIRST; THE ORIGINAL 2026-10-21 HANDOFF FOLLOWS UNCHANGED
+- Still true: no Linux was installed, no partition resized, no boot settings changed.
+  Treat everything below as a roadmap, not completed work.
+- The OneDrive backup FINISHED and was verified on 2026-10-22 (50 encrypted parts,
+  C:\Users\Lemab\OneDrive\Jarvis Backups\backup-20261021-202950). The local archive
+  copies were deleted on 2026-10-26 after matching every part's size in OneDrive.
+- Documents\Jarvis-CustomVoice, Documents\Jarvis-LocalVoice and "Old Jarvis's" were deleted on
+  2026-10-26. Jarvis CEO (C:\Users\Lemab\Jarvis) is the only Jarvis. The Qwen voice's
+  environment, model and reference moved to models\qwen-voice inside it. Those deleted
+  folders remain restorable from the backup above.
+- The default voice is now VoiceStudio (local app, 127.0.0.1:3900), with Kokoro as fallback;
+  Qwen is optional. The default brain is Codex (see docs/PROJECT-MAP.md for current processes).
+- Disk figures below predate ~66 GB of cleanup; re-measure before partitioning.
+
 JARVIS: CLAUDE HANDOFF AND NATIVE LINUX ROADMAP
 Prepared 2026-10-21. This file is a development handoff, not a claim that the
 Linux port or the proposed upgrades have been implemented.

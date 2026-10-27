@@ -1,3 +1,9 @@
+> **Update 2026-10-26:** this checklist was last audited on 2026-10-21 and is out of date. Since then:
+> Codex became the default brain (Claude via Claude Code is selectable), VoiceStudio became the default
+> voice with Kokoro as fallback, the second brain gained task reports, a daily journal and meaning search,
+> Spotify playback pops up the Miniplayer, the hologram became a 3D sphere that can swap with the graph,
+> and the old Jarvis variants were deleted. See docs/PROJECT-MAP.md for current processes.
+
 # Status against the reference checklist
 
 IDs follow [plans/JARVIS-TARGET.txt](plans/JARVIS-TARGET.txt). Updated 2026-10-21 (source audit and automated verification).

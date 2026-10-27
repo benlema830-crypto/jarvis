@@ -1,3 +1,7 @@
+> **Update 2026-10-26:** a one-time checklist from 2026-10-21. Parts of it are out of date (the voice is
+> now VoiceStudio, the brain is Codex, and the LocalVoice/CustomVoice installs were removed). See
+> docs/PROJECT-MAP.md for the current setup.
+
 # Setup and acceptance checklist
 
 Updated 2026-10-21. The workday build is installed and was quietly activated after automated

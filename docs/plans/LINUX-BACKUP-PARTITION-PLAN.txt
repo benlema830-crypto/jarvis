@@ -1,3 +1,9 @@
+UPDATE 2026-10-26 - HISTORICAL PLAN; THE ORIGINAL FOLLOWS UNCHANGED
+- An independent backup now exists: the OneDrive backup finished and was verified on
+  2026-10-22 (see ACTIVE-CLOUD-BACKUP.txt). Still no partition resized and no Linux installed.
+- Measurements below are stale: on 2026-10-26 about 17 GB of old Jarvis variants and 49 GB of
+  local backup archive copies were deleted (C: had ~440 GB free). Re-measure before use.
+
 WINDOWS / FEDORA BACKUP AND PARTITION PLAN
 Prepared 2026-10-21. This is a proposed plan, not an executed backup or resize.
 

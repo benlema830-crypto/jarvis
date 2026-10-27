@@ -1,3 +1,6 @@
+UPDATE 2026-10-26 - HISTORICAL one-time build prompt from 2026-10-21. The Orange and LocalVoice
+copies it mentions were deleted; Jarvis CEO (this repository) is the only Jarvis.
+
 JARVIS BUILDER - FIRST BEDTIME BUILD PASS
 
 Work in C:\Users\Lemab\jarvis. Read README.md and applicable AGENTS.md first.

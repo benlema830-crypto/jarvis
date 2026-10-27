@@ -1,3 +1,7 @@
+UPDATE 2026-10-26 - SUPERSEDED: this compact plan was replaced by the full backup described in
+ACTIVE-CLOUD-BACKUP.txt, which completed and was verified on 2026-10-22. Paths below to
+Documents\Jarvis-LocalVoice no longer exist (deleted 2026-10-26; Qwen now lives in models\qwen-voice).
+
 COMPACT CLOUD BACKUP PLAN - 2026-10-21
 
 RESULT

@@ -108,8 +108,13 @@ Proposed as a separate change, then **approved by you and merged** (`a8b8777`):
   The live 5-turn Codex conversation passes with isolation on. Roll back with `git revert -m 1 a8b8777`.
 - **Keyword guard limits.** `cc_guard` cannot see intent (e.g. `Set-Content` emptying a file, uploads
   via `Invoke-WebRequest -Method Post`). For Codex sessions the real boundary is the platform sandbox
-  (workspace-write to the project folder, no network). Whether Codex's Windows sandbox is actually
-  enforced on this PC was **not verified** and should be checked once with a harmless probe.
+  (workspace-write to the project folder, no network). **Verified 2026-10-26** with a harmless probe
+  run through `codex sandbox` (codex-cli 0.163.0, `[windows] sandbox = "elevated"`): under `:workspace`,
+  writes succeeded only in the project folder and %TEMP%; a sibling folder, Jarvis's `data` and Documents
+  were blocked, and so was the network. Under `:read-only` every write and the network were blocked.
+  Reads outside the project are allowed in both, by design. The user's own `~/.codex/config.toml`
+  defaults to `danger-full-access`; Jarvis requests its sandbox explicitly per thread and turn, which
+  should override that default. The probe did not drive a full Jarvis agent turn through the app-server.
 - **Local processes.** Any program running as you can POST `/command` (including "yes"). This is the
   accepted local-trust model; a per-launch token would close it but touches every HUD client.
 - `agent_sessions` one-job-at-a-time guard is untouched, as required.

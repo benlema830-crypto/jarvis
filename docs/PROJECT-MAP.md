@@ -1,8 +1,8 @@
 # Jarvis CEO project map
 
 Jarvis CEO is the active project, previously named Jarvis Brain. The workspace at
-`C:\Users\Lemab\Documents\Jarvis Agent` contains two project folders:
-`Jarvis CEO` and `Old Jarvis's`. Open **Jarvis CEO** on the desktop for the app
+`C:\Users\Lemab\Documents\Jarvis Agent` contains the `Jarvis CEO` project folder; it is the only
+Jarvis (the older variants were deleted on 2026-10-26). Open **Jarvis CEO** on the desktop for the app
 and **JARVIS Workspace** for the active project's files.
 
 | Jarvis CEO folder | Contents |
@@ -14,15 +14,13 @@ and **JARVIS Workspace** for the active project's files.
 | 05 Reports | Link to this repository's data/reports |
 | 06 References | Video screenshots and earlier UI previews |
 
-`Old Jarvis's` contains links to the CustomVoice and LocalVoice projects, plus
-archived classic assistant shortcuts. The classic launcher for the main installation
-uses the same source as CEO; it is not a separate codebase.
+The Start menu "Jarvis" launcher uses the same source as CEO; it is not a separate codebase.
 
 Directory links organize the projects without relocating installed repositories,
 virtual environments, models, credentials or the registered Obsidian vault.
 Jarvis speaks with voices saved in the VoiceStudio app (local, 127.0.0.1:3900); any saved voice
-appears in the Brain page's voice picker. The Qwen voice still uses the LocalVoice environment, model
-cache and references when chosen, so archiving LocalVoice would disable only that option.
+appears in the Brain page's voice picker. The Qwen voice's environment, model cache and voice
+reference live in `models\qwen-voice` (gitignored).
 Move records and original shortcut backups are in `data/reports/ceo-separation-2026-10-22`.
 
 ## Processes
@@ -32,7 +30,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | `jarvis.py` (the assistant) | 7778 (classic HUD + event stream) | `open_brain.py`, `run.bat` | Ears, voice, brain, tools, Telegram bridge, HOLO watcher, calendar heads-ups |
 | `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Brain page, the graph data, Eyes frames and Watch/Focus sessions; proxies chat/status to 7778 |
 | VoiceStudio app | 3900 | the user / Jarvis on voice warm-up | Default voices (VoiceStudio profiles), GPU synthesis |
-| `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in the LocalVoice environment |
+| `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
 | Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Local-only conversation models; idle until a model is requested |
 
