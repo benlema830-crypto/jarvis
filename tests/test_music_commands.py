@@ -26,6 +26,14 @@ class ParseTest(unittest.TestCase):
             'queue up thunderstruck on spotify': ('queue', 'thunderstruck'),
             'add back in black to the queue': ('queue', 'back in black'),
             'add back in black to my queue please': ('queue', 'back in black'),
+            'Throw in an Iron Man playlist on Spotify.': ('playlist', 'Iron Man'),
+            'thrown on an iron man playlist': ('playlist', 'iron man'),
+            'find an ironman playlist on spotify': ('playlist', 'ironman'),
+            'put on the album Back in Black': ('album', 'Back in Black'),
+            'play the playlist called chill vibes': ('playlist', 'chill vibes'),
+            'play my workout playlist': ('playlist', 'my workout'),
+            'throw on the song Thunderstruck': ('play', 'Thunderstruck'),
+            'put on some music': ('resume', None),
         }
         with mock.patch.object(music.apps, 'names', return_value=['roblox', 'notepad']):
             for text, expected in cases.items():
@@ -35,7 +43,8 @@ class ParseTest(unittest.TestCase):
         with mock.patch.object(music.apps, 'names', return_value=['roblox', 'notepad']):
             for text in ('play roblox', 'play a video on youtube', 'what song is this', 'pause the timer',
                          'open spotify', 'skip the intro of this video', 'play the game', 'next', 'previous',
-                         'add a reminder for tomorrow', 'queue the video'):
+                         'add a reminder for tomorrow', 'queue the video', 'put on a timer', 'throw on a jacket',
+                         'queue the gym playlist'):
                 self.assertIsNone(music.parse(text), text)
 
 
@@ -121,6 +130,31 @@ class RunTest(unittest.TestCase):
     def test_miniplayer_gives_up_quietly_without_a_spotify_window(self):
         with mock.patch.object(music, '_spotify_windows', return_value=(None, None)):
             self.assertFalse(music.show_miniplayer())
+
+    def test_playlist_starts_on_this_pc_in_the_background(self):
+        found = {'items': [{'name': 'tony stark / iron man playlist', 'uri': 'spotify:playlist:B'},
+                           {'name': 'Iron Man', 'uri': 'spotify:playlist:A'}]}
+        self.devices = [{'id': 'phone', 'name': 'Pixel', 'type': 'Smartphone'}, {'id': 'pc1', 'name': 'DRACO420', 'type': 'Computer'}]
+        with mock.patch.object(spotify_mcp, 'dispatch', side_effect=lambda n, a: found if n == 'spotify_search' else
+                               {'devices': self.devices} if n == 'spotify_devices' else {'is_playing': True}),                 mock.patch.object(spotify_mcp, 'api', return_value={}) as api, mock.patch.dict(music.os.environ, {'COMPUTERNAME': 'DRACO420'}):
+            self.assertEqual(music.run('throw on an iron man playlist'), '')
+        api.assert_called_once_with('PUT', '/me/player/play', params={'device_id': 'pc1'}, body={'context_uri': 'spotify:playlist:A'})
+        self.assertEqual((self.keys, self.opened), ([], []))  # no media keys, no Spotify window
+
+    def test_playlist_opens_spotify_minimized_when_closed(self):
+        self.devices = []
+        def appear():
+            self.devices = [{'id': 'pc1', 'name': 'PC', 'type': 'Computer'}]
+            return True
+        with mock.patch.object(music, 'launch_spotify', side_effect=appear) as launch,                 mock.patch.object(spotify_mcp, 'api', return_value={}) as api:
+            self.assertEqual(music.perform('play', 'spotify:album:' + 'a' * 22), '')
+        launch.assert_called_once()
+        self.assertEqual(api.call_args.kwargs['params'], {'device_id': 'pc1'})
+
+    def test_playlists_cannot_be_queued(self):
+        with mock.patch.object(spotify_mcp, 'api') as api:
+            self.assertIn('only queue songs', music.perform('queue', 'spotify:playlist:' + 'a' * 22))
+        api.assert_not_called()
 
     def test_errors_and_missing_results_are_spoken(self):
         with mock.patch.object(spotify_mcp, 'dispatch', return_value={'items': []}):

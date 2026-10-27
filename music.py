@@ -1,7 +1,7 @@
 """Spoken Spotify commands that act immediately, without an AI turn or a spoken reply.
 
-parse() recognises only plain playback requests ("pause the music", "next song", "play <song>");
-anything else is left to the assistant. run() returns None when the text isn't a music command
+parse() recognises only plain playback requests ("pause the music", "next song", "play <song>",
+"throw on an Iron Man playlist", "put on the album Back in Black"); anything else is left to the assistant. run() returns None when the text isn't a music command
 (or Spotify isn't set up), "" when it was done, or a short sentence describing a failure.
 Uses the local Spotify account saved by scripts/setup_spotify.py (spotify_mcp.dispatch), so it
 works whether or not the separate bridge process is running."""
@@ -30,22 +30,43 @@ _ACTIONS = [
 ]
 _PLAY = re.compile(r"play\s+(.+?)(?:\s+on\s+spotify)?", re.I)
 _QUEUE = re.compile(r"queue(?:\s+up)?\s+(.+?)(?:\s+on\s+spotify)?|add\s+(.+?)\s+to\s+(?:the|my)\s+(?:spotify\s+)?queue", re.I)
+# "put on / throw on / find ... on Spotify": only taken as music when it names Spotify or a playlist/album/song,
+# so "put on a timer" still reaches the assistant.
+_PUT = re.compile(r"(?:put|throw|thrown|stick|slap)\s+(?:on|in)\s+(.+?)(?:\s+on\s+spotify)?"
+                  r"|(?:find|pull\s+up|get)\s+(?:me\s+)?(.+?)\s+on\s+spotify", re.I)
+_MUSIC_WORD = re.compile(r"\b(?:playlist|album|song|track|music|tunes?)\b", re.I)
+_COLLECTION = [re.compile(r"(?:(?:a|an|the|some|that)\s+)?(.+?)\s+(playlist|album)", re.I),
+               re.compile(r"(?:(?:a|an|the)\s+)?(playlist|album)\s+(?:called\s+|named\s+)?(.+)", re.I)]
 _NOT_MUSIC = re.compile(r"\b(?:video|youtube|game|movie|film|episode|show|roblox)\b", re.I)
 
 
 def parse(text):
-    """(action, query) for a plain playback request, else None."""
+    """(action, query) for a plain playback request, else None.
+
+    Actions: pause, resume, next, previous, play/queue (a song), playlist/album (play that collection;
+    a query starting "my " prefers the user's own playlists)."""
     said = _POLITE.sub("", (text or "").strip())
     for action, pattern in _ACTIONS:
         if pattern.fullmatch(said):
             return action, None
-    for action, pattern in (("queue", _QUEUE), ("play", _PLAY)):
+    for action, pattern in (("queue", _QUEUE), ("play", _PLAY), ("put", _PUT)):
         match = pattern.fullmatch(said)
         if match:
             query = next(group for group in match.groups() if group).strip()
             if _NOT_MUSIC.search(query) or query.lower() in apps.names():
                 return None
-            return action, query
+            if action == "put" and not ("spotify" in said.lower() or _MUSIC_WORD.search(query)):
+                return None
+            if action == "put" and re.fullmatch(r"(?:(?:the|some|my)\s+)?(?:music|tunes?|spotify)", query, re.I):
+                return "resume", None
+            for form in _COLLECTION:
+                collection = form.fullmatch(query)
+                if collection:
+                    name, kind = collection.groups() if form is _COLLECTION[0] else collection.groups()[::-1]
+                    # Spotify can only queue songs; "queue a playlist" is left to the assistant to explain.
+                    return (kind.lower(), name.strip()) if action != "queue" else None
+            query = re.sub(r"^(?:(?:a|an|the)\s+)?(?:song|track)\s+(?:called\s+)?", "", query, flags=re.I)
+            return ("play" if action == "put" else action), query
     return None
 
 
@@ -215,6 +236,33 @@ def _devices():
     return [d for d in spotify_mcp.dispatch("spotify_devices", {})["devices"] if not d.get("is_restricted")]
 
 
+def _this_pc():
+    """This computer's Spotify Connect device, else None. Naming the device is what lets Spotify's play
+    command start a playlist here (verified 2026-10-26, idle and mid-song)."""
+    computers = [d for d in _devices() if d.get("type") == "Computer"]
+    name = os.environ.get("COMPUTERNAME", "").casefold()
+    return next((d for d in computers if d.get("name", "").casefold() == name), None) or \
+        next((d for d in computers if d.get("is_active")), None) or (computers[0] if computers else None)
+
+
+def _play_collection(uri):
+    """Start a playlist/album/artist on this PC in the background, opening Spotify minimized if needed."""
+    import spotify_mcp
+    device = _this_pc()
+    if not device:
+        if not launch_spotify():
+            return "I couldn't open Spotify on this PC."
+        for _ in range(LAUNCH_WAIT):
+            time.sleep(1)
+            device = _this_pc()
+            if device:
+                break
+        else:
+            return "Spotify didn't start in time."
+    spotify_mcp.api("PUT", "/me/player/play", params={"device_id": device["id"]}, body={"context_uri": uri})
+    return ""
+
+
 MEDIA_KEYS = {"play_pause": 0xB3, "next": 0xB0, "previous": 0xB1}
 
 
@@ -240,11 +288,33 @@ def _best_track(query):
     return max(items, key=score) if items else None
 
 
+def _best_collection(query, kind):
+    """URI of the best playlist/album for `query`; "my ..." checks the user's own playlists first."""
+    import spotify_mcp
+    wanted = query
+    if kind == "playlist" and query.casefold().startswith("my "):
+        wanted = query[3:]
+        try:
+            mine = spotify_mcp.api("GET", "/me/playlists", params={"limit": 50}).get("items", [])
+        except spotify_mcp.SpotifyError:
+            mine = []
+        own = [p for p in mine if isinstance(p, dict) and p.get("uri") and _norm(wanted) in _norm(p.get("name", ""))]
+        if own:
+            return min(own, key=lambda p: len(p.get("name", "")))["uri"]
+    items = [i for i in spotify_mcp.dispatch("spotify_search", {"query": wanted[:300], "type": kind, "limit": 5})["items"]
+             if i.get("uri")]
+    if not items:
+        return None
+    return max(items, key=lambda i: 2 * (_norm(i.get("name", "")) == _norm(wanted)) + (_norm(wanted) in _norm(i.get("name", ""))))["uri"]
+
+
 def perform(action, uri=None):
     """Do one playback action the way that works on this PC; "" on success, else a short sentence.
 
-    Verified live 2026-10-22: the Web API play command stops playback here, and a track link doesn't
-    switch songs mid-track. So: a link when idle, queue + media Next mid-song, media keys otherwise.
+    Verified live 2026-10-22: a track link doesn't switch songs mid-track, and the Web API play command
+    sent without a device stopped playback. So songs: a link when idle, queue + media Next mid-song,
+    media keys otherwise. Playlists and albums go through the play command naming this PC's device
+    (verified 2026-10-26).
     Starting playback also pops up the Miniplayer in the screen corner unless the full Spotify window is open.
     Both the instant voice commands and the assistant's Spotify tools go through this."""
     import spotify_mcp
@@ -253,6 +323,10 @@ def perform(action, uri=None):
         if (action == "play" or action == "resume" and not playing or action == "queue" and uri and not playing) \
                 and not _main_in_view():
             _miniplayer_soon()  # waits for a Spotify being opened by the steps below
+        if action in ("play", "queue") and uri and not uri.startswith("spotify:track:"):
+            if action == "queue":
+                return "Spotify can only queue songs, not whole playlists or albums."
+            return _play_collection(uri)
         if action in ("play", "queue") and uri:
             if not playing:
                 os.startfile(uri)  # starts Spotify if needed and plays the track
@@ -291,6 +365,16 @@ def run(text):
         return None
     import spotify_mcp
     action, query = command
+    if action in ("playlist", "album"):
+        try:
+            found = _best_collection(query, action)
+        except spotify_mcp.SpotifyError as error:
+            return str(error).split(". Run setup")[0].rstrip(".") + "."
+        except Exception:
+            return "Spotify isn't responding."
+        if not found:
+            return f"I couldn't find a {action} called {query} on Spotify."
+        return perform("play", found)
     if action in ("play", "queue"):
         try:
             track = _best_track(query)

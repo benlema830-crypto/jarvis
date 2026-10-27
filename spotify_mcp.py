@@ -108,8 +108,9 @@ TOOLS = [
         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10}}, ['query']),
     tool('spotify_devices', 'List available Spotify Connect devices.'),
     tool('spotify_playback', 'Read current Spotify playback state.'),
-    tool('spotify_play', 'Play a Spotify track URI or resume. Requires Premium and an active Spotify device.', {
-        'uri': {'type': 'string', 'pattern': '^spotify:track:[A-Za-z0-9]{22}$'}, 'device_id': DEVICE}),
+    tool('spotify_play', 'Play a Spotify track, playlist, album or artist URI (from spotify_search), or resume. '
+         'Runs in the background; requires Premium.', {
+        'uri': {'type': 'string', 'pattern': '^spotify:(?:track|playlist|album|artist):[A-Za-z0-9]{22}$'}, 'device_id': DEVICE}),
     tool('spotify_queue', 'Add a Spotify track URI to the playback queue. Requires Premium and something playing.', {
         'uri': {'type': 'string', 'pattern': '^spotify:track:[A-Za-z0-9]{22}$'}, 'device_id': DEVICE}, ['uri']),
     tool('spotify_pause', 'Pause Spotify playback. Requires Premium.', {'device_id': DEVICE}),
@@ -136,7 +137,7 @@ def dispatch(name, args):
             if not isinstance(value, str) or not 1 <= len(value) <= prop.get('maxLength', 128):
                 raise SpotifyError('Invalid Spotify text argument.')
             if ('enum' in prop and value not in prop['enum']) or ('pattern' in prop and not re.fullmatch(prop['pattern'], value)):
-                raise SpotifyError('Invalid Spotify type or track URI.')
+                raise SpotifyError('Invalid Spotify type or URI.')
             if key == 'device_id' and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
                 raise SpotifyError('Invalid Spotify device ID.')
         elif type(value) is not int or not prop['minimum'] <= value <= prop['maximum']:
@@ -158,7 +159,8 @@ def dispatch(name, args):
     if action == 'queue':
         api('POST', '/me/player/queue', params=dict(params or {}, uri=args['uri']))
         return {'accepted': True, 'message': 'Spotify accepted the track for the queue.'}
-    body = {'uris': [args['uri']]} if 'uri' in args else None
+    uri = args.get('uri', '')
+    body = ({'uris': [uri]} if uri.startswith('spotify:track:') else {'context_uri': uri}) if uri else None
     api('POST' if action in ('next', 'previous') else 'PUT', '/me/player/' + action, params=params, body=body)
     return {'accepted': True, 'message': 'Spotify accepted the playback command; read playback state to confirm.'}
 

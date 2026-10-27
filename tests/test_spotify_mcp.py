@@ -218,6 +218,9 @@ class SpotifyTest(unittest.TestCase):
             api.reset_mock()
             spotify.dispatch('spotify_next', {})
             self.assertEqual(api.call_args.args, ('POST', '/me/player/next'))
+            api.reset_mock()
+            spotify.dispatch('spotify_play', {'uri': 'spotify:playlist:' + 'b' * 22, 'device_id': 'pc1'})
+            api.assert_called_once_with('PUT', '/me/player/play', params={'device_id': 'pc1'}, body={'context_uri': 'spotify:playlist:' + 'b' * 22})
             spotify.dispatch('spotify_playback', {})  # 204/no active player is valid.
 
     def test_refresh_rotates_and_encrypts(self):

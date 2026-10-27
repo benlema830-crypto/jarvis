@@ -482,7 +482,8 @@ def do_on_computer(task: str) -> str:
     finishes; it asks the user before anything consequential.
 
     Use it for jobs that need the mouse, e.g. "make a Spotify playlist called Focus", "close my
-    YouTube tab". For files, folders, system checks, scripts or coding, use terminal_task instead;
+    YouTube tab". Never use it just to play, find or control music: the Spotify tools (call_mcp_tool,
+    spotify_search then spotify_play with the track, playlist or album URI) do that in the background. For files, folders, system checks, scripts or coding, use terminal_task instead;
     never use it for off-limits work apps. When it starts, tell the user briefly that
     you're on it and to keep their hands off the mouse until you're done.
 
@@ -854,7 +855,7 @@ def call_mcp_tool(connection_id: str, tool_name: str, arguments_json: str = "{}"
         return "That MCP tool is unavailable. Refresh the tool catalog."
     if _no_approval_needed(connection_id, tool_name):
         # The owner chose music control without confirmations; it runs in this turn. Playback goes
-        # through music.perform(), the method that works on this PC (Spotify's play API stops music here).
+        # through music.perform(), the method verified to work on this PC for songs and playlists.
         import music
         if tool_name in music.CONTROL_ACTIONS:
             return music.control(tool_name, arguments)
