@@ -122,7 +122,8 @@ class ReminderTest(unittest.TestCase):
         reminders.add("call mum", time.time() + 3600)
         self.assertIn("Cancelled", reminders.cancel("mum"))
         fired = []
-        reminders.start(fired.append)
+        stop = reminders.start(fired.append)
+        self.addCleanup(stop.set)  # never leave a thread polling the real reminders file
         time.sleep(1.5)
         self.assertEqual([r["id"] for r in fired], [item["id"]])
         self.assertEqual(reminders.pending(), [])

@@ -10,8 +10,10 @@ import threading
 
 import hud
 
-YES = re.compile(r"^(?:please\s+)?(yes|yeah|yep|yup|sure|do it|go ahead|go for it|confirm(ed)?|please do|proceed|affirmative|ok(ay)?)\b", re.I)
-NO = re.compile(r"\b(no|nope|don'?t|cancel|wait|stop|hold on)\b", re.I)
+YES = re.compile(r"^(?:please\s+)?(yes|yeah|yep|yup|sure|do it|go ahead|go for it|confirm(ed)?|please do|proceed|"
+                 r"affirmative|ok(ay)?|(i\s+)?approved?|(you\s+have\s+)?my\s+(approval|permission)|permission\s+granted|"
+                 r"granted|you\s+(may|can)(?!')\b)\b", re.I)
+NO = re.compile(r"\b(no|nope|not|don'?t|can'?t|cannot|cancel|wait|stop|hold on)\b", re.I)
 TIMEOUT = 120
 
 on_question = None  # set by jarvis.py: says the question out loud

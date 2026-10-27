@@ -216,7 +216,10 @@ class Ears:
                 self.wake.reset()
                 self._log(f"wake word {score:.2f} while {'idle' if self.accepting.is_set() else 'busy'}")
                 if self.on_wake:
-                    self.on_wake()
+                    try:
+                        self.on_wake()
+                    except Exception as exc:  # runs on the mic thread: an error here would deafen Jarvis
+                        self._log(f"wake handler failed ({type(exc).__name__}); still listening")
 
             speech = self._is_speech(block)
             if not phrase:

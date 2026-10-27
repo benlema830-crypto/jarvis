@@ -142,8 +142,8 @@ class Bridge:
                 self.error = "Can't reach Telegram; retrying."
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 60)
-            except RuntimeError as error:
-                self.error = str(error)[:200]
+            except Exception as error:  # anything unexpected: report, back off, keep polling
+                self.error = str(error)[:200] or type(error).__name__
                 if "Unauthorized" in self.error or "Conflict" in self.error:
                     time.sleep(30)  # revoked token, or another program polling the same bot
                 time.sleep(backoff)

@@ -174,6 +174,8 @@ class CodexBrain:
             self.conn.call('turn/start', {'threadId': self.thread_id, 'model': model,
                 'approvalPolicy': 'untrusted', 'sandboxPolicy': {'type': 'readOnly'},
                 'input': [{'type': 'text', 'text': text}]})
+            # A stall timeout, not a turn limit: tools (including waiting for a spoken
+            # approval) run inside this loop, and a working turn must not be cut off.
             deadline = time.monotonic() + 180
             while self.complete is None:
                 if cancel.is_set():
@@ -185,6 +187,7 @@ class CodexBrain:
                 event = self.conn.receive()
                 if event:
                     self._event(event)
+                    deadline = time.monotonic() + 180
                 elif self.conn.proc.poll() is not None:
                     raise RuntimeError('Codex connection ended.')
             if self.complete.get('status') != 'completed':

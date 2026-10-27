@@ -468,7 +468,8 @@ class SessionManager:
                     self._event(event)
             ok = self._complete.get("status") == "completed" and not self.cancelled.is_set()
             error = self._complete.get("error") or {}
-            report = self._report if ok else error.get("message", "Codex was interrupted or failed.")
+            report = self._report if ok else "Stopped, as you asked." if self.cancelled.is_set() \
+                else error.get("message", "Codex was interrupted or failed.")
             report = report or "Codex finished without a written report."
         except InterruptedError:
             report = "Stopped."

@@ -24,6 +24,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+# Started hidden (Brain shortcut), output goes to a log file in the Windows code page, where a
+# single "→" or emoji in a reply used to raise UnicodeEncodeError and kill the main loop.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 import anthropic
 import win32api
 import win32event
@@ -729,32 +735,36 @@ def listen_loop(ears, voice: Voice, turns: Turns):
             continue
         if not heard or turns.count != turn:  # nothing, or something else was answered meanwhile
             continue
-        text, woke = heard
-        if time.time() < getattr(turns, "dictate_until", 0.0):
-            turns.dictate_until = 0.0
-            import dictation
-            result = dictation.type_into_focus(text)
-            print(f"(dictated: {text})", flush=True)
-            hud.emit("event", text="Dictated" if result == "Typed." else result)
+        try:
+            text, woke = heard
+            if time.time() < getattr(turns, "dictate_until", 0.0):
+                turns.dictate_until = 0.0
+                import dictation
+                result = dictation.type_into_focus(text)
+                print(f"(dictated: {text})", flush=True)
+                hud.emit("event", text="Dictated" if result == "Typed." else result)
+                voice_health.recognition("accepted")
+                continue
+            print(f"You: {text}", flush=True)
+            command = command_for_mode(text, woke, preferences.listening_mode(),
+                                       time.time() < turns.followup_until)
+            if approvals.waiting():
+                named = split_wake_word(text)
+                command = named if named is not None else text
+            if command is None:
+                voice_health.recognition("wake_word_required")
+                continue
+            if not command:  # just "Jarvis" - wait for the rest
+                if not woke:
+                    voice.chime()
+                turns.followup_until = time.time() + FOLLOWUP_SECONDS
+                continue
+            turns.idle.clear()
             voice_health.recognition("accepted")
-            continue
-        print(f"You: {text}", flush=True)
-        command = command_for_mode(text, woke, preferences.listening_mode(),
-                                   time.time() < turns.followup_until)
-        if approvals.waiting():
-            named = split_wake_word(text)
-            command = named if named is not None else text
-        if command is None:
-            voice_health.recognition("wake_word_required")
-            continue
-        if not command:  # just "Jarvis" - wait for the rest
-            if not woke:
-                voice.chime()
-            turns.followup_until = time.time() + FOLLOWUP_SECONDS
-            continue
-        turns.idle.clear()
-        voice_health.recognition("accepted")
-        hud.commands.put(command)
+            hud.commands.put(command)
+        except Exception as e:  # the only voice listener: log and keep listening, never exit
+            print(f"(listener error: {e!r})", flush=True)
+            voice_health.recognition("recognition_error")
 
 
 def console_loop(turns: Turns):
@@ -972,81 +982,87 @@ def main():
 
     while True:
         item = hud.commands.get()
-        turns.idle.clear()
-        turns.count += 1
-        if isinstance(item, dict):  # a reminder, finished task, or the agent asking permission
-            hud.emit("event", text=item["label"])
-            if item.get("chime"):
-                voice.chime()
-            if "say" in item:  # spoken as-is (an agent question or report)
-                if "note" in item:
-                    brain.note(item["note"], item["say"])
-                voice.say(item["say"])
-                voice.wait()
-                turns.followup_until = time.time() + FOLLOWUP_SECONDS
-                hud.emit("state", state="listening")
-                turns.idle.set()
-                continue
-            if "telegram" in item:  # the owner's phone: answer there, not out loud
-                hud.emit("state", state="thinking")
-                respond_telegram(brain, voice, item)
-                hud.emit("state", state="standby")
-                turns.idle.set()
-                continue
-            prompt = item["prompt"]
-        else:
-            prompt = item.strip()
-            hud.emit("you", text=prompt)
-            said = prompt.lower().strip(" .!?")
-            if approvals.waiting():  # the user's own words decide - the model can't approve for them
-                named = split_wake_word(prompt)
-                approved = approvals.answer(named if named is not None else prompt)
-                voice.say("Approved." if approved is True else
-                          "Understood, I won't." if approved is False else "Please say yes or no.")
-                voice.wait()
-                hud.emit("state", state="standby")
-                turns.idle.set()
-                continue
-            if said in EXIT_PHRASES:
-                halt_tasks()
-                voice.say("Powering down. Goodbye, sir.")
-                voice.wait()
-                hud.emit("state", state="offline")
-                break
-            if is_stop(said):  # "Hey Jarvis... never mind" - and stops any computer task
-                if halt_tasks():
-                    voice.say("Stopping, sir.")
+        try:
+            turns.idle.clear()
+            turns.count += 1
+            if isinstance(item, dict):  # a reminder, finished task, or the agent asking permission
+                hud.emit("event", text=item["label"])
+                if item.get("chime"):
+                    voice.chime()
+                if "say" in item:  # spoken as-is (an agent question or report)
+                    if "note" in item:
+                        brain.note(item["note"], item["say"])
+                    voice.say(item["say"])
                     voice.wait()
-                hud.emit("state", state="standby")
-                turns.idle.set()
-                continue
-            if BRIEFING_WORDS.fullmatch(said):  # "Good morning, Jarvis" -> the full briefing, on demand
-                hud.emit("state", state="thinking")
-                prompt = gather_briefing_context().replace(
-                    "[STARTUP] You've just come online as the user logged in. Deliver the startup briefing.",
-                    "[BRIEFING] The user asked for their briefing. Greet them and deliver it.")
-                item = {"label": "Briefing", "prompt": prompt}
+                    turns.followup_until = time.time() + FOLLOWUP_SECONDS
+                    hud.emit("state", state="listening")
+                    turns.idle.set()
+                    continue
+                if "telegram" in item:  # the owner's phone: answer there, not out loud
+                    hud.emit("state", state="thinking")
+                    respond_telegram(brain, voice, item)
+                    hud.emit("state", state="standby")
+                    turns.idle.set()
+                    continue
+                prompt = item["prompt"]
+            else:
+                prompt = item.strip()
+                hud.emit("you", text=prompt)
+                said = prompt.lower().strip(" .!?")
+                if approvals.waiting():  # the user's own words decide - the model can't approve for them
+                    named = split_wake_word(prompt)
+                    approved = approvals.answer(named if named is not None else prompt)
+                    voice.say("Approved." if approved is True else
+                              "Understood, I won't." if approved is False else "Please say yes or no.")
+                    voice.wait()
+                    hud.emit("state", state="standby")
+                    turns.idle.set()
+                    continue
+                if said in EXIT_PHRASES:
+                    halt_tasks()
+                    voice.say("Powering down. Goodbye, sir.")
+                    voice.wait()
+                    hud.emit("state", state="offline")
+                    break
+                if is_stop(said):  # "Hey Jarvis... never mind" - and stops any computer task
+                    if halt_tasks():
+                        voice.say("Stopping, sir.")
+                        voice.wait()
+                    hud.emit("state", state="standby")
+                    turns.idle.set()
+                    continue
+                if BRIEFING_WORDS.fullmatch(said):  # "Good morning, Jarvis" -> the full briefing, on demand
+                    hud.emit("state", state="thinking")
+                    prompt = gather_briefing_context().replace(
+                        "[STARTUP] You've just come online as the user logged in. Deliver the startup briefing.",
+                        "[BRIEFING] The user asked for their briefing. Greet them and deliver it.")
+                    item = {"label": "Briefing", "prompt": prompt}
 
-        hud.emit("state", state="thinking")
-        direct = quick_reply(prompt) if not isinstance(item, dict) else None
-        spoke = []
+            hud.emit("state", state="thinking")
+            direct = quick_reply(prompt) if not isinstance(item, dict) else None
+            spoke = []
 
-        def speak(sentence):  # system checks (Eyes coach) may answer "(quiet)": say nothing then
-            if not ("(quiet)" in sentence.lower() and isinstance(item, dict) and item.get("quiet")):
-                spoke.append(sentence)
-                voice.say(sentence)
-        if direct is not None:
-            # "" means done silently (e.g. "pause the music"): keep the turn in history, say nothing.
-            brain.note(prompt, direct or "(Done silently.)")
-            if direct:
-                speak(direct)
-        else:
-            respond(brain, voice, prompt, speak)
-        voice.wait()
-        if spoke:  # only invite a follow-up after actually saying something
-            turns.followup_until = time.time() + FOLLOWUP_SECONDS
-        hud.emit("state", state="standby")
-        turns.idle.set()
+            def speak(sentence):  # system checks (Eyes coach) may answer "(quiet)": say nothing then
+                if not ("(quiet)" in sentence.lower() and isinstance(item, dict) and item.get("quiet")):
+                    spoke.append(sentence)
+                    voice.say(sentence)
+            if direct is not None:
+                # "" means done silently (e.g. "pause the music"): keep the turn in history, say nothing.
+                brain.note(prompt, direct or "(Done silently.)")
+                if direct:
+                    speak(direct)
+            else:
+                respond(brain, voice, prompt, speak)
+            voice.wait()
+            if spoke:  # only invite a follow-up after actually saying something
+                turns.followup_until = time.time() + FOLLOWUP_SECONDS
+            hud.emit("state", state="standby")
+            turns.idle.set()
+        except Exception as e:  # one bad turn must never take the whole assistant down
+            print(f"(turn failed: {e!r})", flush=True)
+            hud.emit("error", text=f"That request failed: {e!r}")
+            hud.emit("state", state="standby")
+            turns.idle.set()
 
 
 if __name__ == "__main__":

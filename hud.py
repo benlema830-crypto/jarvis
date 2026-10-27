@@ -407,7 +407,10 @@ def track_voice(level_fn):
 def _level_loop(level_fn):
     last = 0.0
     while True:
-        level = level_fn()
+        try:
+            level = level_fn()
+        except Exception:  # e.g. the audio device changed mid-read; keep the meter alive
+            level = 0.0
         if level > 0.002 or last > 0.002:
             emit("level", v=round(level, 4))
         last = level

@@ -29,7 +29,14 @@ def _save(items: list[dict]):
     tmp = PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(items, f, indent=1, ensure_ascii=False)
-    os.replace(tmp, PATH)
+    for attempt in range(20):  # Windows briefly locks files (antivirus, sync tools) - retry like preferences.py
+        try:
+            os.replace(tmp, PATH)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def _when(ts: float) -> str:
@@ -94,17 +101,24 @@ def cancel(query: str) -> str:
     return f"Cancelled: {describe(match)}"
 
 
-def start(on_due):
+def start(on_due, stop: threading.Event | None = None) -> threading.Event:
+    """Deliver due reminders in the background until `stop` is set. Returns the stop event."""
+    stop = stop or threading.Event()
+
     def loop():
-        while True:
-            now = time.time()
-            with _lock:
-                items = _load()
-                due = [r for r in items if r["due"] <= now]
-                if due:
-                    _save([r for r in items if r["due"] > now])
-            for r in due:
-                on_due(r)
-            time.sleep(1)
+        while not stop.is_set():
+            try:
+                now = time.time()
+                with _lock:
+                    items = _load()
+                    due = [r for r in items if r["due"] <= now]
+                    if due:
+                        _save([r for r in items if r["due"] > now])
+                for r in due:
+                    on_due(r)
+            except Exception as e:  # a failed save must not stop every future reminder; retry next tick
+                print(f"(reminders: {e!r})", flush=True)
+            stop.wait(1)
 
     threading.Thread(target=loop, daemon=True).start()
+    return stop
