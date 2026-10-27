@@ -241,7 +241,12 @@ def _semantic(query, notes, timings, counts):
         return sorted(best.values(), key=lambda item: (-item[1], item[0]['path']))[:POOL]
 
 
+_unavailable_until = 0.0  # after a failed connection, skip embeddings briefly
+UNAVAILABLE_RETRY = 60    # a refused loopback connection costs ~2 s on Windows; don't pay it every search
+
+
 def search(query, limit=8):
+    global _unavailable_until
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         raise ValueError('Enter a search query of 1–2000 characters.')
     limit = max(1, min(20, int(limit)))
@@ -254,10 +259,14 @@ def search(query, limit=8):
     timings['keyword'] = time.perf_counter() - began
     mode, reason = 'hybrid', ''
     try:
+        if time.monotonic() < _unavailable_until:
+            raise requests.ConnectionError('embedding service was unreachable moments ago')
         semantic = _semantic(query, notes, timings, counts) if notes else []
     except (requests.RequestException, OSError, ValueError, KeyError, sqlite3.Error) as error:
         semantic, mode = [], 'keyword'
         reason = 'Local semantic search unavailable: ' + type(error).__name__
+        if isinstance(error, requests.ConnectionError):
+            _unavailable_until = time.monotonic() + UNAVAILABLE_RETRY
 
     wanted = knowledge.codes(query)
     phrase = ' '.join(query.casefold().split())

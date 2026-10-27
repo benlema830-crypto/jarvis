@@ -20,8 +20,9 @@ uses the same source as CEO; it is not a separate codebase.
 
 Directory links organize the projects without relocating installed repositories,
 virtual environments, models, credentials or the registered Obsidian vault.
-CEO still requires the LocalVoice Qwen environment, model cache and voice references.
-Archiving the standalone LocalVoice project does not disable that shared dependency.
+Jarvis speaks with voices saved in the VoiceStudio app (local, 127.0.0.1:3900); any saved voice
+appears in the Brain page's voice picker. The Qwen voice still uses the LocalVoice environment, model
+cache and references when chosen, so archiving LocalVoice would disable only that option.
 Move records and original shortcut backups are in `data/reports/ceo-separation-2026-10-22`.
 
 ## Processes
@@ -30,7 +31,8 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | --- | --- | --- | --- |
 | `jarvis.py` (the assistant) | 7778 (classic HUD + event stream) | `open_brain.py`, `run.bat` | Ears, voice, brain, tools, Telegram bridge, HOLO watcher, calendar heads-ups |
 | `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Brain page, the graph data, Eyes frames and Watch/Focus sessions; proxies chat/status to 7778 |
-| `qwen_fast_worker.py` | — | the assistant | Local Qwen voice synthesis in the LocalVoice environment |
+| VoiceStudio app | 3900 | the user / Jarvis on voice warm-up | Default voices (VoiceStudio profiles), GPU synthesis |
+| `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in the LocalVoice environment |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
 | Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Local-only conversation models; idle until a model is requested |
 
@@ -41,7 +43,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Main loop, prompt, turn handling | jarvis.py |
 | Conversation providers | codex_brain.py (Codex + live web search), ollama_brain.py (optional local models), model_provider.py, model_credentials.py |
 | Tools the AI can call | tools.py (registry), plus tasks.py, documents.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
-| Voice and hearing | voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
+| Voice and hearing | voice.py, voicestudio_voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
 | Project continuity and routines | project_memory.py, routines.py, hud/productivity.js |
 | Digests, privacy and file tools | digests.py, privacy.py, artifacts.py, hud/automation.js |
@@ -52,7 +54,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Proactive | reminders.py, nudges.py, activity.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
-| Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py |
+| Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py, task_effort.py (learned per-task effort) |
 | Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_openai_key.py |
 | Checks | scripts/verify_project.py; tests/ (unit tests), tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks) |
 
