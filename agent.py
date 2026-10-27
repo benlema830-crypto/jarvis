@@ -30,10 +30,14 @@ import win32api
 
 import approvals
 import hud
+import task_effort
 import worksafe
 
 MODEL = os.getenv("JARVIS_AGENT_MODEL", "claude-sonnet-5-5")
-EFFORT = os.getenv("JARVIS_AGENT_EFFORT", "low")  # low = quickest; medium/high think harder on tricky tasks
+EFFORT = os.getenv("JARVIS_AGENT_EFFORT", "low")  # normal effort; task_effort raises it for tasks that prove hard
+HIGHER = {"low": "medium", "medium": "high"}
+ESCALATE_STEPS = 15     # a task still going after this many steps gets more thought for the rest
+ESCALATE_ERRORS = 2     # ...as does one whose actions failed this many turns in a row
 SETTLE_SECONDS = 0.4  # let the screen update before the after-action screenshot
 MAX_STEPS = 60
 MAX_MINUTES = 15
@@ -138,6 +142,7 @@ class Agent:
         self._thread: threading.Thread | None = None
         self.task = ""
         self.steps = 0
+        self.effort = EFFORT
         self.log: list[str] = []
         self.on_done = None  # called with {"task", "ok", "report", "steps"}
         self._configure_screen()
@@ -181,9 +186,18 @@ class Agent:
 
     # ---------- the loop ----------
 
+    def _escalate(self, why: str):
+        higher = HIGHER.get(self.effort)
+        if higher:
+            print(f"(Screen agent: {why} - thinking harder, effort {higher})", flush=True)
+            self.effort, self.escalated = higher, True
+
     def _run(self, task: str):
         started = time.time()
         report, ok = "", False
+        self.effort, reason = task_effort.choose("screen", task, EFFORT, HIGHER.get(EFFORT, EFFORT))
+        self.escalated, failed_turns = False, 0
+        print(f"(Screen agent effort: {self.effort} - {reason})", flush=True)
         try:
             # The first screenshot comes with the task, so the first step can already act.
             messages = [{"role": "user", "content": [{"type": "text", "text": f"Task from the user: {task}\n\nThe screen right now:"}]
@@ -202,7 +216,7 @@ class Agent:
                 response = self.client.beta.messages.create(
                     model=MODEL, max_tokens=16000, system=privacy.redact(system), tools=TOOLS, messages=privacy.payload(messages),
                     betas=BETAS, context_management=CONTEXT_MANAGEMENT, fallbacks="default",
-                    output_config={"effort": EFFORT}, cache_control={"type": "ephemeral"},
+                    output_config={"effort": self.effort}, cache_control={"type": "ephemeral"},
                 )
                 if response.stop_reason == "refusal":
                     report = "The model declined to carry out this task."
@@ -215,7 +229,13 @@ class Agent:
                     report = " ".join(b.text for b in response.content if b.type == "text").strip() or "Done."
                     ok = True
                     break
-                messages.append({"role": "user", "content": self._execute(uses)})
+                results = self._execute(uses)
+                messages.append({"role": "user", "content": results})
+                failed_turns = failed_turns + 1 if any(r.get("is_error") for r in results) else 0
+                if not self.escalated and failed_turns >= ESCALATE_ERRORS:
+                    self._escalate("actions keep failing")
+                elif not self.escalated and self.steps >= ESCALATE_STEPS:
+                    self._escalate("the task is taking many steps")
         except pyautogui.FailSafeException:
             report = "Stopped: the mouse was moved into a screen corner."
         except anthropic.APIError as e:
@@ -224,6 +244,8 @@ class Agent:
             report = f"The agent failed: {e!r}"
         finally:
             hud.emit("agent", running=False, task=task, kind="screen")
+            task_effort.record("screen", task, self.effort, ok, time.time() - started, report, self.steps,
+                               self.escalated, stopped_by_user=self._cancel.is_set() or report.startswith("Stopped:"))
             if self.on_done:
                 self.on_done({"task": task, "ok": ok, "report": report, "steps": self.steps})
 

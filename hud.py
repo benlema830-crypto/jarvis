@@ -23,6 +23,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -71,7 +72,15 @@ def emit(kind: str, /, **data):
             q.put_nowait(event)
 
 
+def _under_test() -> bool:
+    """The test suite emits fake conversations; keep them out of the real transcript."""
+    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+    return bool(spec and spec.name.startswith("unittest")) or "pytest" in sys.modules
+
+
 def _save_transcript(event: dict):
+    if _under_test():
+        return
     try:
         os.makedirs(TRANSCRIPTS, exist_ok=True)
         day = datetime.date.today().isoformat()

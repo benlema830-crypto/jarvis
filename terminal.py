@@ -21,6 +21,7 @@ import time
 
 import approvals
 import hud
+import task_effort
 import worksafe
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +36,8 @@ MARKER = "APPROVAL NEEDED:"
 GUARDED_TOOLS = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep"
 
 RULES = """You're working for JARVIS, the user's voice assistant, on their Windows PC. Nobody is watching this session; the user asked for this out loud and is waiting to hear the result.
-- Do the job thoroughly, but don't wander beyond what was asked.
+- Do the job thoroughly, but don't wander beyond what was asked. Take every step you can yourself; hand back only what truly needs the user (an approval below, a sign-in, or something physical).
+- Before reporting success, check it worked with the quickest meaningful test (run the relevant tests, run the feature, or read its output or log). Only report what you verified, and say plainly if something couldn't be checked.
 - Your final message is read aloud by Jarvis. Be brief by default: give the shortest useful statement of what changed and the outcome. For simple success, a short confirmation is enough. Include more detail when the user requested it, or a problem, important caveat or decision needs explanation. No filler, unsolicited next steps, or "anything else?" follow-up. Plain spoken English, no markdown, no long paths or code.
 - {off_limits} (apps and data) are off-limits.
 - Routine reading, project edits, builds, tests and local dependency installation are authorized within the task. Do not ask for permission for these. Destructive deletion or Git operations, publishing/deployment, external messages, purchases, machine-wide installation and system/security changes need explicit approval. When paused, stop at once and make your final message start with "APPROVAL NEEDED:" and one short spoken sentence saying exactly what you want to do and why. Never look for a workaround.
@@ -101,6 +103,7 @@ class TerminalWorker:
         self.on_done = None  # called with {"task", "ok", "report", "minutes"}
         self.cwd = cwd or HOME
         self.research = research
+        self.effort = ""  # "" = Claude Code's normal effort; task_effort raises it for tasks that proved hard
         self.on_progress = None
         self.on_session = None
 
@@ -144,6 +147,8 @@ class TerminalWorker:
         timer.daemon = True
         timer.start()
         prompt, report, ok = task, "", False
+        self.effort, reason = task_effort.choose("terminal", task, "", "high")
+        print(f"(Terminal task effort: {self.effort or 'normal'} - {reason})", flush=True)
         try:
             write_settings()
             while True:
@@ -181,6 +186,8 @@ class TerminalWorker:
             report = f"The terminal task failed: {e!r}"
         finally:
             timer.cancel()
+            task_effort.record("terminal", task, self.effort, ok, time.time() - started, report,
+                               stopped_by_user=self._cancel.is_set())
             self.session_id = session
             hud.emit("agent", running=False, task=task, kind="terminal")
             if self.on_done:
@@ -199,6 +206,8 @@ class TerminalWorker:
                "--append-system-prompt", RULES.format(off_limits=worksafe.blocked_apps())]
         if MODEL:
             cmd += ["--model", MODEL]
+        if self.effort:
+            cmd += ["--effort", self.effort]
         if session:
             cmd += ["--resume", session]
         self._proc = subprocess.Popen(
