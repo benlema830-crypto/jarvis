@@ -688,7 +688,30 @@ $('micBtn').onclick = async () => {
   try { const s = await J.api('/settings', { listening_mode: J.mode === 'wake' ? 'continuous' : 'wake' }); settings(s); }
   catch (e) { J.notice(e.message); }
 };
-function settings(s) { if (s?.listening_mode) J.mode = s.listening_mode; renderStatus(); }
+function settings(s) {
+  if (s?.listening_mode) J.mode = s.listening_mode;
+  if (Array.isArray(s?.voice_engines)) {
+    const pick = $('voicePick');
+    const add = make('option', '＋ Make a new voice…'); add.value = NEW_VOICE;
+    pick.replaceChildren(...s.voice_engines.map(v => { const o = make('option', String(v.label)); o.value = String(v.id); return o; }), add);
+    pick.value = s.voice_engine; pick.dataset.current = s.voice_engine; pick.disabled = false;
+  }
+  renderStatus();
+}
+const NEW_VOICE = '__new_voice__';
+$('voicePick').onchange = async e => {
+  const pick = e.target;
+  if (pick.value === NEW_VOICE) {  // voices saved in VoiceStudio appear here automatically
+    pick.value = pick.dataset.current || '';
+    try { await J.api('/settings', { open_voice_studio: true }); J.notice('VoiceStudio is opening. Save a voice there and it will appear in this list.'); }
+    catch (err) { J.notice(err.message); }
+    return;
+  }
+  pick.disabled = true;
+  try { const s = await J.api('/settings', { voice_engine: pick.value }, { timeout: 30000 }); settings(s); J.notice('Voice: ' + pick.selectedOptions[0].textContent); }
+  catch (err) { J.notice(err.message); J.api('/settings').then(settings).catch(() => {}); }
+  finally { pick.disabled = false; }
+};
 
 /* ---------- Live status ---------- */
 function healthLabel() {
@@ -728,6 +751,8 @@ $('modelPill').onclick = () => J.emit('open-model');
 /* ---------- Event stream from the assistant ---------- */
 const stream = new EventSource('/events');
 J.stream = stream;
+// Coming back from VoiceStudio (or anywhere): refresh so newly saved voices are listed.
+window.addEventListener('focus', () => { if (J.online && !$('voicePick').disabled) J.api('/settings').then(settings).catch(() => {}); });
 stream.onopen = () => { J.online = true; J.api('/settings').then(settings).catch(() => {}); pollHealth(); pollModel(); };
 stream.onerror = () => { J.online = false; uiState = 'offline'; J.health = null; renderStatus(); };
 stream.onmessage = e => {

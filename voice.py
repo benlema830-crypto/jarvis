@@ -1,6 +1,9 @@
 """Text-to-speech.
 
 Engines:
+  voicestudio - The owner's VoiceStudio clone, generated on the GPU by the local
+               VoiceStudio app. Falls back to Kokoro if the app is closed.
+  qwen       - The owner's local Qwen clone.
   elevenlabs - ElevenLabs over the network (most human). Audio streams in, so
                playback starts before the whole sentence is generated.
   kokoro     - Kokoro on the CPU. Instant, offline, and the automatic fallback
@@ -56,6 +59,38 @@ RATE = 24000  # Kokoro's rate, and the PCM format we ask ElevenLabs for
 SOUND_TAGS = re.compile(r"\s*\[(chuckle|laugh|sigh|clear throat|cough|gasp|groan|sniff)\]\s*", re.I)
 ELEVEN_TAGS = {"chuckle": "[soft chuckle]", "laugh": "[laughing]", "sigh": "[sigh]", "clear throat": "[clears throat]"}
 BRITISH_VOICES = ["bm_george", "bm_fable", "bm_lewis", "bm_daniel"]
+ENGINES = ("voicestudio", "qwen", "kokoro", "elevenlabs")
+ENGINE_LABELS = {"voicestudio": "Jarvis (VoiceStudio)", "qwen": "Qwen clone",
+                 "kokoro": "Kokoro", "elevenlabs": "ElevenLabs"}
+
+
+def available_engines() -> list[str]:
+    """Engines this copy can offer in the voice picker."""
+    eleven = not KOKORO_ONLY and bool(os.getenv("ELEVENLABS_API_KEY", "").strip())
+    return [e for e in ENGINES if e != "elevenlabs" or eleven]
+
+
+def voice_choices(current: str = "") -> tuple[list[dict], str]:
+    """Picker entries [{"id", "label"}] and the current entry's id. Every voice saved in VoiceStudio
+    appears as its own choice ("voicestudio:<profile id>"), so a new voice needs no code or restart."""
+    import voicestudio_voice
+    found = voicestudio_voice.profiles()
+    choices = [{"id": f"voicestudio:{p['id']}", "label": f"{p['name']} (VoiceStudio)"} for p in found]
+    if current.startswith("voicestudio:"):  # the voice may be remembered by name rather than id
+        wanted = current.partition(":")[2].casefold()
+        current = next((f"voicestudio:{p['id']}" for p in found
+                        if wanted in (p["id"].casefold(), p["name"].casefold())), current)
+    if not choices:  # app closed: keep the current choice listed so the picker still makes sense
+        choices = [{"id": current if current.startswith("voicestudio") else "voicestudio",
+                    "label": "VoiceStudio voice (app closed)"}]
+    elif current.startswith("voicestudio") and current not in {c["id"] for c in choices}:
+        choices.insert(0, {"id": current, "label": "Current VoiceStudio voice (not found in the app)"})
+    choices += [{"id": e, "label": ENGINE_LABELS[e]} for e in available_engines() if e != "voicestudio"]
+    return choices, current
+
+
+def is_choice(choice: str, current: str = "") -> bool:
+    return choice in {c["id"] for c in voice_choices(current)[0]}
 MAX_CHUNK_CHARS = 250  # merge queued sentences up to about this length
 PAUSE_SECONDS = 0.18   # breath between chunks
 FADE_SECONDS = 0.008   # tiny fade in/out so chunk edges never click
@@ -247,6 +282,7 @@ def _chime() -> np.ndarray:
 
 class Voice:
     def __init__(self, voice: str = "bm_george", speed: float = 1.0, engine: str = "kokoro"):
+        engine, _, profile = engine.partition(":")  # "voicestudio:<profile id>" picks a VoiceStudio voice
         self.kokoro = Kokoro(
             os.path.join(MODELS_DIR, "kokoro-v1.0.onnx"),
             os.path.join(MODELS_DIR, "voices-v1.0.bin"),
@@ -256,6 +292,10 @@ class Voice:
         self.speed = speed
         self.eleven = None
         self.local = None
+        self.studio = None
+        self._studio_failures = 0
+        if engine == "voicestudio":
+            self._start_voicestudio(profile)
         if engine == 'qwen':
             import qwen_voice
             self.local = qwen_voice.create()
@@ -282,6 +322,30 @@ class Voice:
         threading.Thread(target=self._synth_worker, daemon=True).start()
         if self.local is not None:
             threading.Thread(target=self._warm_local, daemon=True).start()
+        if self.studio is not None:
+            threading.Thread(target=self._warm_studio, daemon=True).start()
+
+    def _warm_studio(self):
+        """Load VoiceStudio's model before the first reply (and start the app if it's closed)."""
+        studio = self.studio
+        hud.info['voice_warming'] = True
+        try:
+            if studio.launch():
+                print("(Starting VoiceStudio...)", flush=True)
+            for _ in range(90):  # the app can take a minute to start
+                if self.studio is not studio:
+                    return
+                if studio.running():
+                    started = time.monotonic()
+                    studio.render("Ready.")
+                    print(f"(VoiceStudio warmed in {time.monotonic() - started:.1f}s)", flush=True)
+                    return
+                time.sleep(1)
+            hud.emit("error", text="VoiceStudio isn't running - using Kokoro until it is.")
+        except Exception as e:
+            print(f"(VoiceStudio warm-up failed: {e})", flush=True)
+        finally:
+            hud.info['voice_warming'] = False
 
     def _warm_local(self):
         local = self.local
@@ -327,7 +391,9 @@ class Voice:
 
     @property
     def engine(self) -> str:
-        if self.local is not None:
+        if getattr(self, "studio", None) is not None:
+            return "voicestudio"
+        if getattr(self, "local", None) is not None:
             return 'qwen'
         return "elevenlabs" if self.eleven else "kokoro"
 
@@ -346,23 +412,46 @@ class Voice:
         self._eleven_failures = 0
         return True
 
+    def _start_voicestudio(self, profile: str = ""):
+        from voicestudio_voice import VoiceStudioEngine
+        self.studio = VoiceStudioEngine(self.speed, profile)
+        self._studio_failures = 0
+
+    @property
+    def choice(self) -> str:
+        """The picker id of the current voice, e.g. "voicestudio:27c8e8a9" or "kokoro"."""
+        studio = getattr(self, "studio", None)
+        return f"voicestudio:{studio.profile}" if studio is not None else self.engine
+
     def switch_engine(self, engine: str) -> str:
-        """Switch between 'elevenlabs' and 'kokoro' while running. Returns the engine now in use."""
-        if engine not in ('qwen', 'kokoro', 'elevenlabs'):
+        """Switch voice engine while running (see ENGINES, or "voicestudio:<profile id>").
+        Returns the engine now in use."""
+        engine, _, profile = engine.partition(":")
+        if engine not in ENGINES:
             raise ValueError('Unknown voice engine.')
+        studio = getattr(self, "studio", None)
+        if engine == "voicestudio" and studio is not None and profile and profile != studio.profile:
+            studio.profile = profile  # another VoiceStudio voice: same engine, takes effect next sentence
+            self._studio_failures = 0
+            threading.Thread(target=self._warm_studio, daemon=True).start()
+            return engine
+        if engine == self.engine:
+            return engine
         local = getattr(self, 'local', None)
-        if engine == 'qwen':
-            if local is None:
-                import qwen_voice
-                self.local = qwen_voice.create()
-            self.eleven = None
-            return self.engine
-        if local is not None:
+        if engine != 'qwen' and local is not None:
             local.cancel()
-        self.local = None
-        if engine == "kokoro":
+            self.local = None
+        if engine != 'voicestudio':
+            self.studio = None
+        if engine != 'elevenlabs':
             self.eleven = None
-        elif not self.eleven:
+        if engine == 'qwen':
+            import qwen_voice
+            self.local = qwen_voice.create()
+        elif engine == 'voicestudio':
+            self._start_voicestudio(profile)
+            threading.Thread(target=self._warm_studio, daemon=True).start()
+        elif engine == 'elevenlabs':
             self._start_elevenlabs()
         return self.engine
 
@@ -380,7 +469,23 @@ class Voice:
             print(f"(ElevenLabs: {reason} - using Kokoro for this sentence)", flush=True)
 
     def _render(self, text: str):
-        """Yield audio pieces for `text`, from ElevenLabs if possible, else Kokoro."""
+        """Yield audio pieces for `text` from the chosen engine, falling back to Kokoro."""
+        studio = getattr(self, "studio", None)
+        if studio is not None:
+            from voicestudio_voice import VoiceStudioError
+            try:
+                started = time.monotonic()
+                samples = studio.render(SOUND_TAGS.sub(' ', text).strip())
+                print(f'(VoiceStudio generated {len(samples) / RATE:.1f}s audio in {time.monotonic() - started:.1f}s)', flush=True)
+                self._studio_failures = 0
+                if len(samples):
+                    yield samples
+                return
+            except VoiceStudioError as e:
+                self._studio_failures += 1
+                print(f"(VoiceStudio: {e} - using Kokoro for this sentence)", flush=True)
+                if self._studio_failures == 1:
+                    hud.emit("error", text=f"VoiceStudio voice unavailable: {e}. Using Kokoro.")
         if self.local is not None:
             started = time.monotonic()
             samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())

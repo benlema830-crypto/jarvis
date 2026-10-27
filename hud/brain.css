@@ -102,6 +102,9 @@ body[data-online=true] #online{color:#9ff5dd;border-color:#1f5a4d}
 body[data-online=true] #online i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .pill.model{color:#bdf7ea;border-color:#235a50;max-width:210px}
 .pill.model b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
+.voice-pick select{background:transparent;border:0;padding:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:uppercase;max-width:180px;cursor:pointer;outline:none}
+.voice-pick:focus-within{border-color:#3ddc97}
+.voice-pick select option{background:#071012;color:#cfe;text-transform:none}
 .appearance{display:flex;gap:4px}
 .appearance button{padding:2px 8px;border-radius:6px;font:600 12px var(--mono);letter-spacing:.1em;background:transparent;color:var(--muted)}
 .appearance button.on{border-color:var(--accent);color:var(--accent)}

@@ -47,6 +47,7 @@ LIVE_ONLY = {"level", "usage", "settings", "ui"}  # not replayed to pages that c
 # Read by jarvis.py: typed commands (str) and background events (dict)
 commands: queue.Queue = queue.Queue()
 on_stop = None  # set by jarvis.py
+on_voice = None  # set by jarvis.py: switches the speaking voice
 info: dict = {}  # shown on the HUD: voice engine, speech recognition device, model
 
 _subscribers: list[queue.Queue] = []
@@ -146,10 +147,32 @@ def intel(refresh=False) -> dict:
 def settings():
     return {"listening_mode": preferences.listening_mode(),
             "microphone_enabled": info.get("ears") != "keyboard",
-            "calendar_connected": bool(context.calendar_urls())}
+            "calendar_connected": bool(context.calendar_urls()),
+            **voice_settings()}
+
+
+def voice_settings():
+    import voice
+    choices, current = voice.voice_choices(info.get("voice_choice") or info.get("voice", ""))
+    return {"voice_engine": current, "voice_engines": choices}
 
 
 def update_settings(payload):
+    if set(payload) == {"open_voice_studio"}:
+        import voicestudio_voice
+        if not voicestudio_voice.open_app():
+            raise ValueError("VoiceStudio isn't installed.")
+        return settings()
+    if set(payload) == {"voice_engine"}:
+        import voice
+        if not isinstance(payload["voice_engine"], str) or not on_voice or \
+                not voice.is_choice(payload["voice_engine"], info.get("voice_choice", "")):
+            raise ValueError("Choose a listed voice.")
+        try:
+            on_voice(payload["voice_engine"])  # emits the new settings itself
+        except RuntimeError as e:
+            raise ValueError(str(e)) from e
+        return settings()
     if set(payload) != {"listening_mode"}:
         raise ValueError("Supply a listening mode.")
     preferences.set_listening_mode(payload["listening_mode"])
@@ -302,7 +325,7 @@ class _Handler(BaseHTTPRequestHandler):
                     raise ValueError("Expected an object.")
                 result = (update_settings if self.path == "/settings" else update_calendar)(payload)
             except (ValueError, TypeError):
-                self._json({"error": "Could not save. Check the listening mode or use a valid, reachable ICS calendar link."}, 400)
+                self._json({"error": "Could not save. Check the listening mode or voice, or use a valid, reachable ICS calendar link."}, 400)
                 return
             except OSError:
                 self._json({"error": "Could not save settings on this computer. Please try again."}, 500)

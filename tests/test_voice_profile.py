@@ -38,3 +38,71 @@ class CustomVoiceTest(unittest.TestCase):
              mock.patch.object(voice, "ElevenLabsEngine") as engine:
             self.assertEqual(instance.switch_engine("elevenlabs"), "elevenlabs")
             engine.assert_called_once()
+
+
+class VoiceStudioTest(unittest.TestCase):
+    def test_render_decodes_pcm_and_sends_profile(self):
+        import voicestudio_voice
+        engine = voicestudio_voice.VoiceStudioEngine()
+        reply = mock.Mock(ok=True, content=np.array([0, 16384, -32768], dtype="<i2").tobytes())
+        with mock.patch.object(engine.session, "post", return_value=reply) as post:
+            samples = engine.render("Good evening, sir.")
+        self.assertEqual(post.call_args.kwargs["json"]["voice"], voicestudio_voice.DEFAULT_PROFILE)
+        self.assertEqual(post.call_args.kwargs["json"]["response_format"], "pcm")
+        np.testing.assert_allclose(samples, [0, 0.5, -1])
+
+    def test_closed_app_falls_back_to_kokoro(self):
+        import voicestudio_voice
+        instance = voice.Voice.__new__(voice.Voice)
+        instance.studio = mock.Mock()
+        instance.studio.render.side_effect = voicestudio_voice.VoiceStudioError("VoiceStudio isn't running")
+        instance._studio_failures = 0
+        instance.local = instance.eleven = None
+        instance.voice, instance.speed = "bm_george", 1.0
+        instance.kokoro = mock.Mock()
+        instance.kokoro.create.return_value = (np.ones(10), 24000)
+        with mock.patch.object(voice.hud, "emit"):
+            pieces = list(instance._render("Hello."))
+        self.assertEqual(len(pieces), 1)
+        instance.kokoro.create.assert_called_once()
+        self.assertEqual(instance.engine, "voicestudio")  # stays chosen; the next sentence retries it
+
+    def test_switching_between_voicestudio_and_kokoro(self):
+        instance = voice.Voice.__new__(voice.Voice)
+        instance.eleven = instance.local = instance.studio = None
+        instance.speed = 1.0
+        with mock.patch.object(voice.threading, "Thread"):
+            self.assertEqual(instance.switch_engine("voicestudio"), "voicestudio")
+        self.assertEqual(instance.switch_engine("kokoro"), "kokoro")
+        self.assertIsNone(instance.studio)
+
+
+class VoiceStudioProfilesTest(unittest.TestCase):
+    PROFILES = [{"id": "9e78e6cd", "name": "J.A.R.V.I.S"}, {"id": "27c8e8a9", "name": "JARVIS 2.0"}]
+
+    def test_every_saved_voice_is_a_choice_and_names_resolve_to_ids(self):
+        import voicestudio_voice
+        with mock.patch.object(voicestudio_voice, "profiles", return_value=self.PROFILES):
+            choices, current = voice.voice_choices("voicestudio:J.A.R.V.I.S")
+        ids = [c["id"] for c in choices]
+        self.assertEqual(ids[:2], ["voicestudio:9e78e6cd", "voicestudio:27c8e8a9"])
+        self.assertIn("kokoro", ids)
+        self.assertEqual(current, "voicestudio:9e78e6cd")
+
+    def test_closed_app_still_lists_the_current_voice(self):
+        import voicestudio_voice
+        with mock.patch.object(voicestudio_voice, "profiles", return_value=[]):
+            choices, current = voice.voice_choices("voicestudio:27c8e8a9")
+        self.assertEqual(choices[0]["id"], "voicestudio:27c8e8a9")
+        self.assertEqual(current, "voicestudio:27c8e8a9")
+
+    def test_switching_between_voicestudio_voices_keeps_the_engine(self):
+        instance = voice.Voice.__new__(voice.Voice)
+        instance.eleven = instance.local = instance.studio = None
+        instance.speed = 1.0
+        with mock.patch.object(voice.threading, "Thread"):
+            instance.switch_engine("voicestudio:9e78e6cd")
+            engine = instance.studio
+            self.assertEqual(instance.switch_engine("voicestudio:27c8e8a9"), "voicestudio")
+        self.assertIs(instance.studio, engine)  # no reload, the next sentence uses the new voice
+        self.assertEqual(instance.choice, "voicestudio:27c8e8a9")

@@ -819,7 +819,8 @@ def main():
         hud.open_window()  # shows the boot sequence while everything loads
     apps.refresh()
     turns = Turns()
-    engine = os.getenv("JARVIS_TTS") or ("elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else "kokoro")
+    engine = (preferences.read().get("voice_engine") or os.getenv("JARVIS_TTS")  # the UI's choice wins
+              or ("elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else "kokoro"))
 
     # Load the voice and ears while the briefing info is fetched in the background
     with ThreadPoolExecutor() as ex:
@@ -838,7 +839,7 @@ def main():
         voice_health.phase("briefing")
         briefing_prompt = briefing.result()
     print(f"Voice engine: {voice.engine}", flush=True)
-    hud.info.update(voice=voice.engine, model=MODEL, ears=ears.transcribe.device if ears else "keyboard",
+    hud.info.update(voice=voice.engine, voice_choice=voice.choice, model=MODEL, ears=ears.transcribe.device if ears else "keyboard",
                     output=voice.output or "Windows default", mic=ears.mic if ears else "")
     hud.emit("settings", **hud.settings())
 
@@ -890,6 +891,7 @@ def main():
             hud.commands.put(command)  # "Jarvis, actually what about tomorrow?" - answer that next
 
     hud.on_stop = stop
+    hud.on_voice = tools.set_voice_engine
     if ears:
         ears.on_wake = attention
         ears.on_barge_in = barge_in

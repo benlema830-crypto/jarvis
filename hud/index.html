@@ -173,6 +173,7 @@
   .listen-control { margin: 0 0 12px; text-align: center; }
   .listen-control button { font: 600 14px var(--body); color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); padding: 8px 14px; cursor: pointer; }
   .listen-control button[aria-checked="true"] { border-color: var(--amber); color: var(--amber); }
+  .listen-control select { font: 600 14px var(--body); color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); padding: 7px 10px; margin-left: 6px; cursor: pointer; }
   .listen-control small { display: block; color: var(--muted); margin-top: 5px; max-width: 560px; }
   .calendar-settings { margin-top: 12px; font-size: 14px; }
   .calendar-settings summary { color: var(--accent); cursor: pointer; }
@@ -310,6 +311,7 @@
       <div class="caption" id="caption"></div>
       <div class="listen-control">
         <button type="button" role="switch" aria-checked="false" aria-label="Listen without a wake word" id="listenToggle" disabled>Wake word required</button>
+        <select id="voicePick" aria-label="Jarvis's voice" title="Jarvis's voice" disabled><option>Voice…</option></select>
         <small id="listenHelp" aria-live="polite">Loading listening preference...</small>
       </div>
       <div class="chips">
@@ -389,6 +391,11 @@ function showSettings(s) {
     : continuous ? "No wake word while Jarvis is ready. Voice lock stays on if enrolled. Accepted speech goes to the AI service."
     : 'Say "Jarvis" or "Hey Jarvis" first. Short follow-ups still work without repeating his name.';
   if (!document.body.classList.contains("agent")) $("hint").textContent = listeningHint();
+  if (Array.isArray(s.voice_engines)) {
+    const pick = $("voicePick");
+    pick.replaceChildren(...s.voice_engines.map(v => { const o = document.createElement("option"); o.value = String(v.id); o.textContent = "Voice: " + v.label; return o; }));
+    pick.value = s.voice_engine; pick.disabled = settingsBusy;
+  }
   $("calendarDisconnect").hidden = !s.calendar_connected;
   $("calendarSettings").querySelector("summary").textContent = s.calendar_connected ? "Calendar connected · settings" : "Connect calendar";
 }
@@ -399,6 +406,12 @@ async function settingsRequest(path, payload) {
   if (!response.ok) throw new Error(data.error || "Request failed.");
   return data;
 }
+
+$("voicePick").addEventListener("change", async e => {
+  settingsBusy = true; e.target.disabled = true;
+  try { const s = await settingsRequest("/settings", {voice_engine: e.target.value}); settingsBusy = false; showSettings(s); }
+  catch (err) { settingsBusy = false; $("listenHelp").textContent = "Voice was not changed. " + err.message; settingsRequest("/settings").then(showSettings).catch(() => {}); }
+});
 
 $("listenToggle").addEventListener("click", async () => {
   settingsBusy = true; $("listenToggle").disabled = true;

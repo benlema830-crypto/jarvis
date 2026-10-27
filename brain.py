@@ -307,6 +307,14 @@ def serve():
                                                  headers={"Content-Type": "application/json"}, method=self.command)
                 upstream = urllib.request.urlopen(request, timeout=25)
             except urllib.error.HTTPError as exc:
+                if exc.code == 400:  # the assistant's own explanation (e.g. a rejected setting)
+                    detail = exc.read()[:2000]
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(detail)))
+                    self.end_headers()
+                    self.wfile.write(detail)
+                    return
                 # An older running assistant has no diagnostics endpoint yet.
                 return self.send_error(502 if self.path == "/voice-health" and exc.code == 404 else 503,
                                        "Assistant diagnostics unavailable" if self.path == "/voice-health" else "Assistant unavailable")

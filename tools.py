@@ -20,6 +20,7 @@ import apps
 import context
 import hud
 import memory
+import preferences
 import reminders
 import worksafe
 import desktop
@@ -397,22 +398,44 @@ def cancel_reminder(which: str) -> str:
 
 # ---------- Voice ----------
 
+def set_voice_engine(engine: str) -> str:
+    """Switch the live voice and remember it for next launch. Returns the engine now in use."""
+    now = VOICE.switch_engine(engine)
+    hud.info.update(voice=now, voice_choice=VOICE.choice)
+    preferences.update(voice_engine=VOICE.choice)
+    hud.emit("settings", **hud.settings())
+    return now
+
+
 @beta_tool(eager_input_streaming=True)
 def switch_voice(engine: str) -> str:
-    """Switch speaking voice. 'qwen' is the owner's local voice clone. 'kokoro' is
-    the lightweight local alternative. 'elevenlabs' requires separate paid API access.
+    """Switch speaking voice. 'voicestudio' is the owner's Jarvis-like VoiceStudio clone
+    (the default). 'qwen' is the owner's older local Qwen clone. 'kokoro' is the
+    lightweight local alternative. 'elevenlabs' requires separate paid API access.
+
+    Any voice the owner saved in VoiceStudio can be chosen by its name, e.g. 'JARVIS 2.0'.
 
     Args:
-        engine: 'qwen', 'kokoro', or 'elevenlabs'.
+        engine: 'voicestudio', 'qwen', 'kokoro', 'elevenlabs', or a VoiceStudio voice name.
     """
-    engine = engine.lower().strip()
-    if engine not in ("elevenlabs", "kokoro", "qwen"):
-        return "Engine must be 'qwen', 'kokoro', or 'elevenlabs'."
+    import voicestudio_voice
+    wanted = engine.strip()
+    named = next((p for p in voicestudio_voice.profiles()
+                  if wanted.casefold() in (p["name"].casefold(), p["id"].casefold())), None)
+    if named:
+        set_voice_engine(f"voicestudio:{named['id']}")
+        return f"Now speaking with the {named['name']} voice."
+    engine = wanted.lower()
+    if engine not in ("voicestudio", "elevenlabs", "kokoro", "qwen"):
+        names = ", ".join(p["name"] for p in voicestudio_voice.profiles()) or "none found; is VoiceStudio open?"
+        return f"Choose voicestudio, qwen, kokoro, elevenlabs, or a VoiceStudio voice ({names})."
     from voice import KOKORO_ONLY
     if KOKORO_ONLY and engine == "elevenlabs":
         return "This installation uses local speech only. ElevenLabs is disabled."
-    now = VOICE.switch_engine(engine)
-    hud.info["voice"] = now
+    try:
+        now = set_voice_engine(engine)
+    except RuntimeError as e:
+        return f"Couldn't switch voice: {e}"
     if engine == "elevenlabs" and now != "elevenlabs":
         return "ElevenLabs isn't set up - ELEVENLABS_API_KEY is missing from .env. Still using Kokoro."
     return f"Now speaking with the {now} voice."
