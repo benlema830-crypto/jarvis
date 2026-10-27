@@ -164,7 +164,19 @@ addEventListener('load', async () => {
     assert($('prompt').value === '', 'prompt cleared');
     $('micBtn').click(); await wait(() => window.posts.some(p => p.path === '/settings'), 'mic toggle');
 
-    stage('look'); document.querySelector('[data-look=face]').click(); assert(document.querySelector('[data-look=face]').classList.contains('on'), 'face look');
+    stage('look'); assert(document.querySelector('[data-look=sphere]').classList.contains('on'), 'sphere is the default look');
+    document.querySelector('[data-look=face]').click(); assert(document.querySelector('[data-look=face]').classList.contains('on'), 'face look');
+    document.querySelector('[data-look=sphere]').click();
+
+    stage('stage swap'); $('stageSlot').click();
+    await wait(() => document.body.classList.contains('jarvis-main'), 'JARVIS becomes the main view');
+    const slot = $('stageSlot').getBoundingClientRect(), mini = $('graph').getBoundingClientRect(), big = $('reactor').getBoundingClientRect();
+    assert(Math.abs(mini.left - slot.left) < 2 && Math.abs(mini.width - slot.width) < 2, 'graph shrinks into the hologram slot');
+    assert(big.width === innerWidth && big.height === innerHeight, 'hologram fills the screen');
+    assert($('reactor').width === Math.round(innerWidth * Math.min(devicePixelRatio || 1, 2)), 'hologram redrawn at full size');
+    $('stageSlot').click();
+    await wait(() => !document.body.classList.contains('jarvis-main') && $('stageSlot').contains($('reactor')), 'graph is the main view again');
+    assert($('graph').getBoundingClientRect().width === innerWidth, 'graph fills the screen again');
 
     stage('armory'); $('armoryBtn').click(); assert($('armoryDialog').open, 'armory open');
     await wait(() => document.querySelectorAll('#armoryDialog .tile').length > 16, 'armory tiles');

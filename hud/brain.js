@@ -141,13 +141,26 @@ function reheat(value = .4) { G.alpha = Math.max(G.alpha, value); }
 
 /* ---------- Camera and projection ---------- */
 const canvas = $('graph'), ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = 1, graphCenterX = 0;
+let W = 0, H = 0, DPR = 1, graphCenterX = 0, stageX = 0, stageWidth = 0;
+// Jarvis can be the main view; the graph then shrinks into the round slot where his hologram sits.
+let graphMini = false;
 const FOCAL = 620;
 function resize() {
-  W = innerWidth; H = innerHeight; DPR = Math.min(devicePixelRatio || 1, 2);
-  canvas.width = W * DPR; canvas.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  DPR = Math.min(devicePixelRatio || 1, 2);
   const left = $('left').getBoundingClientRect(), right = document.querySelector('.right').getBoundingClientRect();
-  graphCenterX = ((W > 900 && left.width ? left.right + 16 : 0) + right.left - 16) / 2;
+  const stageLeft = innerWidth > 900 && left.width ? left.right + 16 : 0;
+  stageX = (stageLeft + right.left - 16) / 2; stageWidth = right.left - 16 - stageLeft;
+  if (graphMini) {
+    const slot = $('stageSlot').getBoundingClientRect();
+    Object.assign(canvas.style, { left: slot.left + 'px', top: slot.top + 'px', width: slot.width + 'px', height: slot.height + 'px' });
+    W = slot.width; H = slot.height; graphCenterX = W / 2;
+  } else {
+    for (const p of ['left', 'top', 'width', 'height']) canvas.style.removeProperty(p);
+    W = innerWidth; H = innerHeight; graphCenterX = stageX;
+  }
+  canvas.width = W * DPR; canvas.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const holo = $('reactor'), box = holo.getBoundingClientRect();
+  holo.width = Math.round(box.width * DPR) || 380; holo.height = Math.round(box.height * DPR) || 380;
 }
 addEventListener('resize', resize); resize();
 function centerX() { return graphCenterX; }
@@ -163,7 +176,7 @@ function project(n) {
   // Stronger perspective than before (was 900) so near nodes read as near; clamped so nothing explodes past the lens.
   const scale = Math.min(W, H) / 820 * c.zoom, persp = G.is3d ? FOCAL / (FOCAL + Math.max(z, -FOCAL * .6)) : 1;
   n.sx = centerX() + c.panX + x * scale * persp;
-  n.sy = H * .46 + c.panY + y * scale * persp;  // a little above centre: the dock covers the bottom
+  n.sy = H * (graphMini ? .5 : .46) + c.panY + y * scale * persp;  // a little above centre: the dock covers the bottom
   n.sz = z; n.sr = Math.max(1.2, n.r * scale * persp * 1.15); n.persp = persp;
 }
 let settling = 0;  // keep re-fitting while the first layout settles, until the user takes over
@@ -263,7 +276,8 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const stars = Array.from({ length: 220 }, (_, i) => ({ x: ((i * 127.31 + 17) % 997) / 997, y: ((i * 213.73 + 31) % 991) / 991, r: i % 11 === 0 ? 1.1 : .5, p: i * 1.7 }));
 function hex(color, alpha) { const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0'); return color + a; }
 let lastFrame = 0;
-function draw(now) {
+function draw(now) { frame(now); requestAnimationFrame(draw); }
+function frame(now) {
   const elapsed = Math.max(0, (now - (lastFrame || now - 16.667)) / 1000);
   const dt = Math.max(.001, Math.min(.05, elapsed)); lastFrame = now;
   const t = reduced.matches ? 0 : now / 1000;
@@ -328,7 +342,7 @@ function draw(now) {
     if (n === G.selected || n === G.hover) { ctx.shadowBlur = 18; ctx.shadowColor = n.color; }
     ctx.beginPath(); ctx.arc(n.sx, n.sy, r, 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
     if (n === G.selected) { ctx.strokeStyle = hex(n.color, .8); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.sx, n.sy, r + 4 + Math.sin(t * 3) * 1.5, 0, 6.283); ctx.stroke(); }
-    const showLabel = $('showLabels').checked && alpha > .3 && (labelled.has(n.id) || n === G.selected || n === G.hover ||
+    const showLabel = !graphMini && $('showLabels').checked && alpha > .3 && (labelled.has(n.id) || n === G.selected || n === G.hover ||
       (lit && lit.has(n.id)) || (onPath && onPath.has(n.id)) || (G.matches && G.matches.has(n.id)) || G.cam.zoom > 1.7 || G.nodes.length < 60);
     if (showLabel) {
       const rank = n === G.selected ? 0 : n === G.hover ? 1 : onPath?.has(n.id) ? 2 : labelled.has(n.id) ? 3 : 4;
@@ -350,7 +364,6 @@ function draw(now) {
   }
   ctx.globalAlpha = 1;
   drawReactor(t);
-  requestAnimationFrame(draw);
 }
 
 /* ---------- Pointer interaction ---------- */
@@ -606,22 +619,143 @@ for (const id of ['showLabels', 'showFlow', 'showStars']) {
   $(id).checked = store.get(id, true); $(id).addEventListener('change', () => store.set(id, $(id).checked));
 }
 
-/* ---------- Reactor: ring / cube / face ---------- */
+/* ---------- Reactor: sphere / ring / cube / face ---------- */
 const rc = $('reactor'), rx = rc.getContext('2d');
-let look = store.get('look', 'ring'), level = 0, levelAt = 0, uiState = 'connecting';
+// Stored under a new key so the sphere replaces the old ring default.
+let look = store.get('hologram', 'sphere'), level = 0, levelAt = 0, uiState = 'connecting';
 const STATE_COLORS = { listening: '#22d3ee', standby: '#5eead4', thinking: '#f5b83d', speaking: '#7dd3fc', offline: '#64748b', connecting: '#64748b', booting: '#64748b' };
 document.querySelectorAll('[data-look]').forEach(b => {
   b.classList.toggle('on', b.dataset.look === look);
-  b.onclick = () => { look = b.dataset.look; store.set('look', look); document.querySelectorAll('[data-look]').forEach(x => x.classList.toggle('on', x === b)); };
+  b.onclick = () => { look = b.dataset.look; store.set('hologram', look); document.querySelectorAll('[data-look]').forEach(x => x.classList.toggle('on', x === b)); };
 });
 J.on('level', v => { level = Math.max(level, Math.min(1, v * 4)); levelAt = performance.now(); });
+
+// Clicking the hologram swaps it with the graph; the view morphs where the browser supports view transitions.
+function setStage(jarvisMain, animate = true) {
+  const apply = () => {
+    graphMini = jarvisMain;
+    document.body.classList.toggle('jarvis-main', jarvisMain);
+    if (jarvisMain) document.body.prepend(rc); else $('stageSlot').prepend(rc);
+    $('tooltip').hidden = true;
+    const label = jarvisMain ? 'Show the knowledge graph' : 'Make JARVIS the main view';
+    $('stageSlot').title = label; $('stageSlot').setAttribute('aria-label', label);
+    store.set('stage', jarvisMain ? 'jarvis' : 'graph');
+    resize(); frame(performance.now());
+  };
+  if (!animate || !document.startViewTransition || reduced.matches) { apply(); return; }
+  // The morph waits for a rendered frame; if none comes (a hidden or throttled window), swap anyway.
+  let done = false;
+  const once = () => { if (!done) { done = true; apply(); } };
+  document.startViewTransition(once); setTimeout(once, 400);
+}
+$('stageSlot').onclick = () => setStage(!graphMini);
+document.querySelector('.right').addEventListener('scroll', () => { if (graphMini) resize(); });
+
+// Points spread evenly over a unit sphere (Fibonacci lattice), cached per detail level.
+const spherePoints = {};
+function unitSphere(count) {
+  if (!spherePoints[count]) {
+    spherePoints[count] = Array.from({ length: count }, (_, i) => {
+      const y = 1 - (i + .5) / count * 2, r = Math.sqrt(1 - y * y), a = i * 2.39996;
+      return [Math.cos(a) * r, y, Math.sin(a) * r];
+    });
+  }
+  return spherePoints[count];
+}
+function drawSphere(S, t, col, pulse, spin, big) {
+  const R = S * .27 * (1 + pulse * .06), yaw = t * .35 * spin, tilt = .38 + Math.sin(t * .21) * .08;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
+  const turn = (x, y, z) => {  // spin about the vertical axis, then tilt toward the viewer
+    const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
+    return [x1, y * ct - z1 * st, y * st + z1 * ct];
+  };
+  const lens = z => 3.2 / (3.2 - z);
+  // halo and core
+  let g = rx.createRadialGradient(0, 0, R * .2, 0, 0, R * 1.7);
+  g.addColorStop(0, hex(col, .16 + pulse * .2)); g.addColorStop(.55, hex(col, .05)); g.addColorStop(1, hex(col, 0));
+  rx.fillStyle = g; rx.beginPath(); rx.arc(0, 0, R * 1.7, 0, 6.283); rx.fill();
+  rx.globalCompositeOperation = 'lighter';
+  const core = R * (.32 + pulse * .2 + Math.sin(t * 2.2) * .02);
+  g = rx.createRadialGradient(0, 0, 0, 0, 0, core);
+  g.addColorStop(0, hex('#ffffff', .9)); g.addColorStop(.25, hex(col, .7)); g.addColorStop(1, hex(col, 0));
+  rx.fillStyle = g; rx.beginPath(); rx.arc(0, 0, core, 0, 6.283); rx.fill();
+  // wireframe: meridians and parallels, the far side fainter
+  const back = new Path2D(), front = new Path2D(), steps = 48;
+  const line = point => {
+    let prev = null;
+    for (let k = 0; k <= steps; k++) {
+      const [x, y, z] = turn(...point(k / steps * 6.283)), p = lens(z), cur = [x * R * p, y * R * p, z];
+      if (prev) { const path = prev[2] + cur[2] > 0 ? front : back; path.moveTo(prev[0], prev[1]); path.lineTo(cur[0], cur[1]); }
+      prev = cur;
+    }
+  };
+  for (let m = 0; m < 8; m++) { const a = m / 8 * Math.PI; line(u => [Math.cos(u) * Math.cos(a), Math.sin(u), Math.cos(u) * Math.sin(a)]); }
+  for (const lat of [-.66, -.33, 0, .33, .66]) { const r = Math.sqrt(1 - lat * lat); line(u => [Math.cos(u) * r, lat, Math.sin(u) * r]); }
+  rx.lineWidth = Math.max(1, S * .0025);
+  rx.strokeStyle = hex(col, .07); rx.stroke(back);
+  rx.strokeStyle = hex(col, .26); rx.stroke(front);
+  // the dotted shell; a scanning band sweeps up and down, speech ripples the surface
+  const scan = Math.sin(t * .8 * spin), dot = S * (big ? .0032 : .0062);
+  rx.fillStyle = col;
+  unitSphere(big ? 1400 : 420).forEach(([ux, uy, uz], i) => {
+    const ripple = 1 + pulse * .13 * Math.sin(uy * 9 + t * 10) + .012 * Math.sin(t * 1.7 + i);
+    const [x, y, z] = turn(ux * ripple, uy * ripple, uz * ripple), p = lens(z), near = (z + 1) / 2;
+    const band = Math.max(0, 1 - Math.abs(uy - scan) / .09);
+    rx.globalAlpha = Math.min(1, .12 + near * .6 + band * .6);
+    const r = dot * (.55 + near * .7 + band * .6);
+    rx.fillRect(x * R * p - r / 2, y * R * p - r / 2, r, r);
+  });
+  rx.globalAlpha = 1;
+  // two tilted orbit rings, each with a satellite
+  for (const [radius, inc, rate, phase] of [[1.42, .9, .6, 0], [1.6, -1.1, -.42, 2]]) {
+    const ci = Math.cos(inc), si = Math.sin(inc), orbit = new Path2D(), far = new Path2D();
+    let prev = null, sat = null;
+    for (let k = 0; k <= 72; k++) {
+      const u = k / 72 * 6.283, [x, y, z] = turn(Math.cos(u) * radius, Math.sin(u) * radius * si, Math.sin(u) * radius * ci);
+      const p = lens(z / radius), cur = [x * R * p, y * R * p, z];
+      if (prev) { const path = cur[2] > 0 ? orbit : far; path.moveTo(prev[0], prev[1]); path.lineTo(cur[0], cur[1]); }
+      prev = cur;
+    }
+    const u = t * rate * spin + phase, [x, y, z] = turn(Math.cos(u) * radius, Math.sin(u) * radius * si, Math.sin(u) * radius * ci);
+    sat = [x * R * lens(z / radius), y * R * lens(z / radius), z];
+    rx.lineWidth = Math.max(1, S * .003);
+    rx.strokeStyle = hex(col, .1); rx.stroke(far);
+    rx.strokeStyle = hex(col, .4); rx.stroke(orbit);
+    const sr = S * .009 * (sat[2] > 0 ? 1.2 : .7);
+    g = rx.createRadialGradient(sat[0], sat[1], 0, sat[0], sat[1], sr * 4);
+    g.addColorStop(0, hex('#ffffff', sat[2] > 0 ? .95 : .4)); g.addColorStop(.3, hex(col, .6)); g.addColorStop(1, hex(col, 0));
+    rx.fillStyle = g; rx.beginPath(); rx.arc(sat[0], sat[1], sr * 4, 0, 6.283); rx.fill();
+  }
+  rx.globalCompositeOperation = 'source-over';
+  // a slowly turning tick ring frames it
+  for (let i = 0; i < 96; i++) {
+    const a = i / 96 * 6.283 + t * .05, long = i % 8 === 0;
+    rx.strokeStyle = hex(col, long ? .7 : .28); rx.lineWidth = long ? Math.max(1.5, S * .006) : Math.max(1, S * .003);
+    const r1 = S * .455, r2 = S * (long ? .425 : .44);
+    rx.beginPath(); rx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); rx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); rx.stroke();
+  }
+  if (big) {
+    rx.fillStyle = '#e8fffb'; rx.font = `700 ${S * .032}px Consolas, monospace`; rx.textAlign = 'center'; rx.textBaseline = 'middle';
+    rx.fillText('J.A.R.V.I.S.', 0, S * .52);
+    rx.fillStyle = hex(col, .85); rx.font = `600 ${S * .019}px Consolas, monospace`;
+    rx.fillText(String(uiState).toUpperCase(), 0, S * .56);
+  }
+}
 function drawReactor(t) {
-  const S = rc.width, c = S / 2, col = STATE_COLORS[uiState] || '#5eead4';
-  rx.clearRect(0, 0, S, S);
+  const w = rc.width, h = rc.height, col = STATE_COLORS[uiState] || '#5eead4';
+  rx.clearRect(0, 0, w, h);
   if (performance.now() - levelAt > 200) level *= .9;  // decays to rest when no real audio level arrives
   const pulse = level, spin = uiState === 'thinking' ? 2.4 : 1;
-  rx.save(); rx.translate(c, c); rx.lineCap = 'round';
-  if (look === 'ring') {
+  // As the main view he is centred between the side panels, above the dock.
+  const S = graphMini ? Math.min(stageWidth * DPR, h * .78) : Math.min(w, h);
+  const cx = graphMini ? stageX * DPR : w / 2, cy = graphMini ? h * .44 : h / 2;
+  if (graphMini && $('showStars').checked) {
+    for (const s of stars) { rx.fillStyle = `rgba(150,200,205,${.25 + Math.sin(t * .4 + s.p) * .15})`; rx.fillRect(s.x * w, s.y * h, s.r * 1.6 * DPR, s.r * 1.6 * DPR); }
+  }
+  rx.save(); rx.translate(cx, cy); rx.lineCap = 'round';
+  if (look === 'sphere') {
+    drawSphere(S, t, col, pulse, spin, graphMini);
+  } else if (look === 'ring') {
     for (let i = 0; i < 72; i++) {
       const a = i / 72 * 6.283, long = i % 6 === 0;
       rx.strokeStyle = hex(col, long ? .9 : .45); rx.lineWidth = long ? 3 : 2;
@@ -804,4 +938,5 @@ $('clearSources').onclick = () => { $('sourcesBox').hidden = true; $('sourcesLis
 setInterval(pollHealth, 2000); setInterval(pollModel, 15000);
 pollHealth(); pollModel();
 load(false);
+if (store.get('stage', 'graph') === 'jarvis') setStage(true, false);
 requestAnimationFrame(draw);

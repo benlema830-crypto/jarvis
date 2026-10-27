@@ -94,7 +94,16 @@ h4{font:600 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;col
 #filters button.off{opacity:.35}
 #filters button:hover{background:none;color:#fff}
 .reactor-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:auto}
-#reactor{width:210px;height:210px}
+.stage-slot{display:block;width:210px;height:210px;padding:0;border:0;border-radius:50%;background:none;transition:filter .2s}
+.stage-slot:hover{background:none;filter:brightness(1.18) drop-shadow(0 0 10px #5eead455)}
+.stage-slot:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.stage-slot #reactor{display:block;width:100%;height:100%}
+/* JARVIS as the main view: his hologram fills the background, the graph shrinks into his slot */
+body.jarvis-main #reactor{position:fixed;inset:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 44%,#0c2a2a 0%,#030608 62%)}
+body.jarvis-main #graph{inset:auto;z-index:6;border-radius:50%;pointer-events:none;box-shadow:0 0 0 1px #5eead455,0 0 22px #5eead433}
+#graph{view-transition-name:graph}#reactor{view-transition-name:jarvis}
+::view-transition-group(graph),::view-transition-group(jarvis){animation-duration:.6s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+::view-transition-old(graph),::view-transition-new(graph),::view-transition-old(jarvis),::view-transition-new(jarvis){width:100%;height:100%;object-fit:cover}
 .pills{display:flex;gap:5px;justify-content:center;flex-wrap:wrap}
 .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:#071012;font:600 12px var(--mono);letter-spacing:.12em;color:var(--muted)}
 .pill i{width:6px;height:6px;border-radius:50%;background:var(--faint)}
@@ -105,7 +114,7 @@ body[data-online=true] #online i{background:var(--ok);box-shadow:0 0 8px var(--o
 .voice-pick select{background:transparent;border:0;padding:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:uppercase;max-width:180px;cursor:pointer;outline:none}
 .voice-pick:focus-within{border-color:#3ddc97}
 .voice-pick select option{background:#071012;color:#cfe;text-transform:none}
-.appearance{display:flex;gap:4px}
+.appearance{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;max-width:100%}
 .appearance button{padding:2px 8px;border-radius:6px;font:600 12px var(--mono);letter-spacing:.1em;background:transparent;color:var(--muted)}
 .appearance button.on{border-color:var(--accent);color:var(--accent)}
 .state-text{font:12px var(--mono);letter-spacing:.08em;color:var(--muted);text-transform:uppercase;text-align:center;min-height:13px}
@@ -228,20 +237,20 @@ pre.plan{white-space:pre-wrap;font:13.57px/1.7 var(--mono);max-height:46vh;overf
 .right{overflow-y:auto;scrollbar-width:thin;padding-bottom:4px}
 .reactor-wrap{margin-top:20px}.modes{margin-top:14px;gap:9px}
 .pill{padding:5px 9px;letter-spacing:.06em}
-.appearance button{padding:5px 9px}
+.appearance button{padding:5px 7px;letter-spacing:.06em}
 .dialog-head h2{font-family:var(--sans);font-weight:600}
 button:active:not(:disabled){filter:brightness(1.16)}
 body.panel-collapsed{--left-width:0px}
 @media (max-width:1200px){
  :root{--left-width:250px;--right-width:200px;--edge:12px}
- #reactor{width:180px;height:180px}
+ .stage-slot{width:180px;height:180px}
  .left{padding:15px 12px;gap:14px}
  .dock{width:calc(100vw - var(--left-width) - var(--right-width) - 68px)}
 }
 @media (max-width:900px){
  :root{--left-width:0px;--right-width:180px}
  .left{display:none}.expand{display:block!important;top:16px;left:14px}
- #reactor{width:160px;height:160px}
+ .stage-slot{width:160px;height:160px}
  .dock{left:14px;right:calc(var(--right-width) + 28px);transform:none;width:auto}
  .toolbar{left:calc((100% - var(--right-width)) / 2)}
  .mode-panel{width:min(340px,calc(100vw - var(--right-width) - 40px))}
@@ -249,7 +258,7 @@ body.panel-collapsed{--left-width:0px}
 }
 @media (max-width:600px){
  :root{--right-width:144px;--edge:8px}
- .right{gap:8px}.filter{padding:10px}#reactor{width:132px;height:132px}
+ .right{gap:8px}.filter{padding:10px}.stage-slot{width:132px;height:132px}
  .toolbar{top:12px;gap:0;padding:3px}.toolbar button{padding:4px 7px}
  .mode{padding:10px 8px;letter-spacing:.04em}.appearance{gap:2px}.appearance button{padding:4px;font-size:10px}
  .dock{left:8px;right:calc(var(--right-width) + 18px);bottom:12px}

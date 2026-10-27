@@ -71,14 +71,16 @@
     <div id="filters"></div>
   </div>
   <div class="reactor-wrap">
-    <canvas id="reactor" width="380" height="380" aria-label="JARVIS status"></canvas>
+    <button type="button" class="stage-slot" id="stageSlot" title="Make JARVIS the main view" aria-label="Make JARVIS the main view">
+      <canvas id="reactor" width="380" height="380" aria-label="JARVIS status"></canvas>
+    </button>
     <div class="pills">
       <span class="pill" id="online"><i></i><b>OFFLINE</b></span>
       <button class="pill model" id="modelPill" type="button" title="Change JARVIS's brain">◆ <b id="modelName">—</b></button>
       <label class="pill model voice-pick" title="Change JARVIS's voice">♪ <select id="voicePick" aria-label="JARVIS's voice" disabled><option>—</option></select></label>
     </div>
     <div class="appearance" role="group" aria-label="Appearance">
-      <button type="button" data-look="ring" class="on">RING</button><button type="button" data-look="cube">CUBE</button><button type="button" data-look="face">FACE</button>
+      <button type="button" data-look="sphere" class="on">SPHERE</button><button type="button" data-look="ring">RING</button><button type="button" data-look="cube">CUBE</button><button type="button" data-look="face">FACE</button>
     </div>
     <div class="state-text" id="stateText" role="status">Connecting…</div>
   </div>
