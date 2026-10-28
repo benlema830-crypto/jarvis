@@ -64,6 +64,60 @@ def show_search_results(query: str) -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def amazon_cart(product: str = "", asin: str = "", quantity: int = 1) -> str:
+    """Put an item in the user's Amazon cart. Opens Amazon's own add-to-cart page in Chrome,
+    where the user clicks Add to Cart; it never checks out or buys anything.
+    Pass asin only when you have the real one (from a product link or search result) - never
+    guess it. Without one, this opens an Amazon search for the user to pick the item.
+
+    Args:
+        product: What the user wants, e.g. "Third Reality Zigbee smart plug".
+        asin: The product's 10-character Amazon ID (ASIN), e.g. B08RRQ8DMW, if known.
+        quantity: How many, 1-10.
+    """
+    asin = asin.strip().upper()
+    if asin:
+        if not re.fullmatch(r"[A-Z0-9]{10}", asin):
+            raise ValueError(f"'{asin}' is not an ASIN (10 letters/digits). Search by product instead.")
+        quantity = max(1, min(int(quantity), 10))
+        webbrowser.open(f"https://www.amazon.com/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1={quantity}")
+        return f"Opened Amazon's add-to-cart page for {asin} x{quantity}. The user confirms it there; nothing was bought."
+    if not product.strip():
+        raise ValueError("Give a product or an ASIN.")
+    webbrowser.open("https://www.amazon.com/s?k=" + urllib.parse.quote(product.strip()))
+    return f"Opened Amazon search for '{product.strip()}' so the user can pick the item and add it to the cart."
+
+
+@beta_tool(eager_input_streaming=True)
+def home_control(device: str, action: str, value: str = "") -> str:
+    """Control a smart-home device through Home Assistant: lights, plugs, fans, TVs, Apple TV, scenes.
+
+    Args:
+        device: The device as the user said it, e.g. "TV", "Apple TV", "bedroom lights", "desk lamp".
+            "lights" alone means all the lights.
+        action: One of turn_on, turn_off, toggle, set_brightness, set_color, play, pause, play_pause,
+            next, previous, volume_up, volume_down, set_volume, mute, unmute, open_app.
+        value: Brightness or volume percent (e.g. "40"), a color name (e.g. "blue"), or for open_app
+            the app (e.g. "Netflix"); otherwise empty.
+
+    Tell the user only what the result says was done. If it reports an error, say so plainly.
+    """
+    import home_assistant
+    return home_assistant.control(device, action, value)
+
+
+@beta_tool(eager_input_streaming=True)
+def home_status(device: str = "") -> str:
+    """What smart-home devices there are and their state (on/off, brightness, what's playing).
+
+    Args:
+        device: One device to check, e.g. "TV"; leave empty to list them all.
+    """
+    import home_assistant
+    return home_assistant.status(device)
+
+
+@beta_tool(eager_input_streaming=True)
 def youtube(query: str) -> str:
     """Search YouTube and open the results.
 
@@ -1196,7 +1250,7 @@ def response_style(settings: str = '{}') -> str:
     return json.dumps(response_settings.update(changes) if changes else response_settings.read())
 
 
-TOOLS = [open_website, show_search_results, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
+TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, correct_memory, forget, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,

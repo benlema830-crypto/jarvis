@@ -56,6 +56,7 @@ from tools import TOOL_DEFS, run_tool, web_search_def  # noqa: E402
 from voice import BRITISH_VOICES, RATE, SentenceBuffer, Voice, spoken_report  # noqa: E402
 import voice_health
 import model_provider
+import router
 from types import SimpleNamespace
 from instance_config import MUTEX_NAME  # noqa: E402
 
@@ -236,6 +237,7 @@ class Brain:
         self._codex_brain = None
         self._claude_code_brain = None
         self._limit_notice = 0.0  # when Jarvis last said the Claude plan limit was reached
+        self._local = None  # this turn's local model, when the router sent it there
         self.cancel = threading.Event()
         self._speech_lock = threading.Lock()
         saved = preferences.read().get('conversation_model')
@@ -254,9 +256,9 @@ class Brain:
         self.selection.ready = True
         hud.info.update(model=self.selection.active['model'], provider=self.selection.active['provider'])
 
-    def _compose(self):
+    def _compose(self, recent=True):
         return (SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.blocked_apps())
-                + self._recent_context + response_settings.prompt(self._response_settings))
+                + (self._recent_context if recent else '') + response_settings.prompt(self._response_settings))
 
     def _restart_adapters(self, text_only):
         """Codex threads fix their base prompt at start; OpenAI turns may hold tool pairs."""
@@ -322,7 +324,8 @@ class Brain:
             self._openai_turns = []
             self._openai_message_count = 0
             self.config = config
-        hud.info.update(model=config['model'], provider=config['provider'])
+        self._local = local = router.choose(text, config)
+        hud.info.update(model=(local or config)['model'], provider=(local or config)['provider'])
         self.cancel.clear()
         start = len(self.messages)
         stamp = datetime.datetime.now().strftime("%A %Y-%m-%d %H:%M")
@@ -350,9 +353,12 @@ class Brain:
         else:
             self._save_turn(text, " ".join(spoken), self._turn_privacy)
         finally:
+            self._local = None
             self.selection.end()
 
     def _run(self, speak):
+        if self._local:
+            return self._run_local(speak)
         if self.config['provider'] == 'ollama':
             return self._run_ollama(speak)
         if self.config['provider'] == 'codex':
@@ -431,7 +437,40 @@ class Brain:
             self.messages.append({"role": "user", "content": results})
         raise RuntimeError("too many tool rounds")
 
-    def _run_ollama(self, speak):
+    def _run_local(self, speak):
+        """A quick request on the free local model with only the quick tools. Its answer is held
+        until it finishes (well under a second); if Ollama fails, claims an action without a tool
+        behind it, or any tool it tried failed, the answer is dropped and the selected brain answers:
+        a small model tends to cover a failed step with a cheerful "done"."""
+        said, used, failed = [], [], []
+        def tool(block):
+            used.append(block.name)
+            result = run_tool(block)
+            if result.get('is_error'):
+                failed.append(block.name)
+            return result
+        local, self._local = self._local, None
+        selected, self.config = self.config, {'provider': local['provider'], 'model': local['model']}
+        # Past-session excerpts teach a small model to say "done" without the tool.
+        system, self.system = self.system, self._compose(recent=False)
+        try:
+            self._run_ollama(said.append, router.tool_defs(local['tools']), tool, self.messages[-router.RECENT:],
+                             router.KEEP_ALIVE)
+        except model_provider.ProviderError:
+            if len(failed) < len(used):  # something was done; don't do it twice
+                raise
+        else:
+            if (used and not failed) or not (used or local['action']):
+                for sentence in said:
+                    speak(sentence)
+                return
+            self.messages.pop()  # the unbacked local answer
+        finally:
+            self.config, self.system = selected, system  # the selected brain's thread stays open
+        hud.info.update(model=selected['model'], provider=selected['provider'])
+        self._run(speak)
+
+    def _run_ollama(self, speak, tools=None, run=None, history=None, keep_alive='2m'):
         import ollama_brain
         buf = SentenceBuffer()
         def delta(text):
@@ -439,8 +478,8 @@ class Brain:
                 speak(sentence)
         voice_health.api_state('requesting')
         try:
-            answer = ollama_brain.ask(self.config['model'], self.system, self.messages,
-                                      TOOL_DEFS, run_tool, delta, self.cancel)
+            answer = ollama_brain.ask(self.config['model'], self.system, self.messages if history is None else history,
+                                      tools or TOOL_DEFS, run or run_tool, delta, self.cancel, keep_alive)
         except InterruptedError:
             raise Interrupted()
         except ollama_brain.OllamaError as error:

@@ -164,13 +164,13 @@ def validate(model):
         raise OllamaError('Local model validation returned no text.')
 
 
-def ask(model, system, history, definitions, run_tool, delta, cancel):
+def ask(model, system, history, definitions, run_tool, delta, cancel, keep_alive='2m'):
     import model_provider
     caps = capabilities(model)  # recheck local weights before sending any history
     tools = [{'type': 'function', 'function': {'name': t['name'],
               'description': t.get('description', ''), 'parameters': t['input_schema']}} for t in definitions]
     allowed = {t['name'] for t in definitions}
-    messages = [{'role': 'system', 'content': system + '\nYou are running locally. No built-in live web search is available. Never claim to have searched or seen images unless a tool supplies that evidence. Once a tool supplies a result, use it to answer. Do not repeat the same tool request.'}]
+    messages = [{'role': 'system', 'content': system + '\nYou are running locally. No built-in live web search is available. Never claim to have searched or seen images unless a tool supplies that evidence. To do anything (play, pause, open, set, add, remind), call the tool every time, even if you did it earlier; never say it is done without a tool result from this turn. Once a tool supplies a result, use it to answer. Do not repeat the same tool request.'}]
     messages += model_provider.text_history(history)
     answer, executed = [], {}
     for round_ in range(10):
@@ -179,7 +179,7 @@ def ask(model, system, history, definitions, run_tool, delta, cancel):
         message = {'role': 'assistant', 'content': '', 'tool_calls': []}
         for item in events({'model': model, 'messages': messages, 'tools': tools,
                             **({'think': False} if 'thinking' in caps else {}),
-                            'options': {'num_predict': 4096}, 'keep_alive': '2m'}, cancel):
+                            'options': {'num_predict': 4096}, 'keep_alive': keep_alive}, cancel):
             block = item.get('message', {})
             if not isinstance(block, dict) or not isinstance(block.get('content', ''), str):
                 raise OllamaError('Local model returned an invalid message.')

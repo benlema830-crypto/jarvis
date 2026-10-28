@@ -33,13 +33,14 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
 | Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Local-only conversation models; idle until a model is requested |
+| Home Assistant OS (Raspberry Pi 5, separate device) | 80 at `HA_URL` (Wi-Fi 192.168.1.118) | always on | Smart-home devices and automations; runs even when the PC is off |
 
 ## Source components
 
 | Area | Files |
 | --- | --- |
 | Main loop, prompt, turn handling | jarvis.py |
-| Conversation providers | codex_brain.py (Codex + live web search), ollama_brain.py (optional local models), model_provider.py, model_credentials.py |
+| Conversation providers | codex_brain.py (Codex + live web search), ollama_brain.py (optional local models), router.py (quick requests -> local qwen3:4b-instruct, else the selected brain), model_provider.py, model_credentials.py |
 | Tools the AI can call | tools.py (registry), plus tasks.py, documents.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
 | Voice and hearing | voice.py, voicestudio_voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
@@ -50,6 +51,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Brain server | brain.py, eyes.py, visual_modes.py, integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
+| Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
 | Proactive | reminders.py, nudges.py, activity.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
 | Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py, task_effort.py (learned per-task effort) |
