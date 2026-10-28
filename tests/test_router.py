@@ -39,6 +39,8 @@ class RouterTest(unittest.TestCase):
                      'What is the best Zigbee plug on Amazon?', 'Open Spotify and then play my liked songs',
                      'Look at my screen', 'Tell me a story about dragons', 'Turn off focus mode',
                      'Turn on the hologram', 'Switch the voice to Kokoro',
+                     'Make an Amazon cart with the products in my shopping list',
+                     'Add everything from my notes to my Amazon cart',
                      'Remind me ' + 'about the thing ' * 6]:
             self.assertIsNone(router.choose(text, CODEX), text)
 

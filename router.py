@@ -56,7 +56,8 @@ HARD = re.compile(r"""
         |agent|session|codex|claude|terminal|research|search\ for|look\ up|latest|news|price|cost|compare|best
         |explain|why|plan|write|draft|email|document|summar\w*|analy\w*|remember|forget|memory|screen|camera
         |meeting|appointment|book|schedule\ (a|an|my)|and\ then|after\ that
-        |mode|focus|holo\w*|hologram|listening|voice|window|monitor|wake\ word)\b
+        |mode|focus|holo\w*|hologram|listening|voice|window|monitor|wake\ word
+        |shopping\ list|notes?|vault|products|items|everything|conversation)\b
     | \?.*\?
 """, re.I | re.X)
 
