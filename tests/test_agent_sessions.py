@@ -251,6 +251,25 @@ class SessionTest(unittest.TestCase):
             self.assertEqual(self.manager._approval(event), {"permissions": {}, "scope": "turn"})
             self.assertEqual(ask.call_count, 2)
 
+    def test_codex_changes_to_guard_files_are_undone(self):
+        import os
+        rules, records = self.root / "cc_guard.py", self.root / "cc_approvals.json"
+        rules.write_text("RULES", encoding="utf-8")
+        records.write_text("{}", encoding="utf-8")
+        protected = {os.path.normcase(os.path.realpath(p)) for p in (rules, records)}
+        with mock.patch.object(sessions.cc_guard, "PROTECTED", protected):
+            self.prepare_approval()
+            self.manager._protected, self.manager._tampered = sessions.protected_snapshot(self.root), set()
+            records.write_text('{"claude": "approved by the user"}', encoding="utf-8")  # a Claude task's own write
+            rules.write_text("weakened", encoding="utf-8")
+            self.manager._guard_protected({"changes": []})
+            self.assertEqual(rules.read_text(encoding="utf-8"), "RULES")
+            self.assertIn("claude", records.read_text(encoding="utf-8"))
+            records.write_text('{"self": "granted"}', encoding="utf-8")
+            self.manager._guard_protected({"changes": [{"path": str(records)}]})
+            self.assertEqual(records.read_text(encoding="utf-8"), "{}")
+            self.assertEqual(self.manager._tampered, {"cc_guard.py", "cc_approvals.json"})
+
     def test_cancelled_approval_cannot_proceed(self):
         self.prepare_approval()
         self.manager.cancelled.set()

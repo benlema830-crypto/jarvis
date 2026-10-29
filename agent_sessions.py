@@ -106,6 +106,43 @@ def safe_permissions(permissions: dict) -> bool:
                and cc_guard.decide("Edit", {"file_path": p})[0] == "allow" for p in writes)
 
 
+def protected_snapshot(cwd) -> dict:
+    """Contents of Jarvis's guard rules and approval records that lie inside a Codex workspace.
+
+    Codex applies edits inside its writable root without asking, so when the project is Jarvis
+    itself these files are snapshotted at the start of a task and put back if Codex changes them."""
+    root = os.path.normcase(os.path.realpath(cwd))
+    snapshot = {}
+    for path in cc_guard.PROTECTED:
+        if path == root or path.startswith(root.rstrip("\\/") + os.sep):
+            try:
+                snapshot[path] = Path(path).read_bytes()
+            except OSError:
+                snapshot[path] = None
+    return snapshot
+
+
+def restore_protected(snapshot: dict, touched=()) -> list:
+    """Put back changed guard files; returns their names. Approval records change legitimately
+    (Claude tasks write them), so those are restored only when Codex's own edit touched them."""
+    restored = []
+    for path, before in snapshot.items():
+        if not (path.endswith(".py") or path in touched):
+            continue
+        try:
+            now = Path(path).read_bytes()
+        except OSError:
+            now = None
+        if now == before:
+            continue
+        if before is None:
+            Path(path).unlink(missing_ok=True)
+        else:
+            Path(path).write_bytes(before)
+        restored.append(os.path.basename(path))
+    return restored
+
+
 def isolate_for_mode(mode):
     """Research only inspects and reports, so it gets no MCP tools; work keeps the user's setup."""
     return mode != "work"
@@ -454,6 +491,19 @@ class SessionManager:
             return {"permissions": params.get("permissions", {}) if allowed else {}, "scope": "turn"}
         return {"decision": "accept" if allowed else "decline"}
 
+    def _guard_protected(self, item=None):
+        """Undo any change Codex made to Jarvis's guard rules or approval records."""
+        if not getattr(self, "_protected", None):
+            return
+        touched = {os.path.normcase(os.path.realpath(c["path"])) for c in (item or {}).get("changes") or []
+                   if isinstance(c, dict) and c.get("path")}
+        restored = restore_protected(self._protected, touched)
+        if restored:
+            self._tampered.update(restored)
+            entry = self.entries[self.active]
+            self.milestone(entry, "Safety rules protected", "blocked", detail="Undid a change to " + ", ".join(restored))
+            self.publish()
+
     def _event(self, event):
         method, params = event.get("method", ""), event.get("params", {})
         if not self.active:
@@ -490,6 +540,8 @@ class SessionManager:
                     label='Running checks / build'
                 state='running' if method=='item/started' else 'failed' if item.get('exitCode') not in (None,0) else 'finished'
                 self.milestone(entry,label,state,item.get('id'),entry['progress'])
+                if method == "item/completed" and kind in ("commandExecution", "fileChange"):
+                    self._guard_protected(item)
                 if kind=='fileChange':
                     entry['changed_files']=list(dict.fromkeys(entry.get('changed_files',[])+[c['path'] for c in item.get('changes',[]) if isinstance(c,dict) and isinstance(c.get('path'),str)]))[-30:]
             self.publish()
@@ -500,6 +552,7 @@ class SessionManager:
         entry = self.entries[key]
         ok, report = False, "Codex stopped before returning a result."
         self._items, self._report, self._complete, self.turn_id = {}, "", None, None
+        self._protected, self._tampered = protected_snapshot(entry["cwd"]), set()
         started = time.monotonic()
         effort = None
         task_prompt = ('Continue the paused task below. First inspect prior tool results and current files; preserve completed work and do not repeat external actions.\n'+task) if entry.get('resume_requested') else task
@@ -550,6 +603,10 @@ class SessionManager:
             report = self._report if ok else "Stopped, as you asked." if self.cancelled.is_set() \
                 else error.get("message", "Codex was interrupted or failed.")
             report = report or "Codex finished without a written report."
+            self._guard_protected()
+            if self._tampered:
+                ok = False
+                report += f" It tried to change Jarvis's safety rules ({', '.join(sorted(self._tampered))}); that change was undone."
         except InterruptedError:
             report = "Stopped."
         except Exception as exc:
