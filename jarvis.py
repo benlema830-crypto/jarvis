@@ -59,6 +59,7 @@ import runtime_metrics
 import conversation_settings
 import model_provider
 import router
+import working_memory
 from types import SimpleNamespace
 from instance_config import MUTEX_NAME  # noqa: E402
 
@@ -193,10 +194,14 @@ Using your tools:
 - send_telegram sends something to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
 - {off_limits} may hold the user's work data and are off-limits: never open, read, or operate them.
 
-Messages in square brackets such as [REMINDER DUE], [TASK FINISHED], [FOCUS DRIFT], [EYES CHECK] or [HOLO] come from your own systems, not the user. [Via Telegram] messages are the user's own words.
+Messages in square brackets such as [REMINDER DUE], [TASK FINISHED], [FOCUS DRIFT], [EYES CHECK] or [HOLO] come from your own systems, not the user.
+A [WORKING STATE] block before the user's words is your own record of where things stand: agent work, to-dos, open threads, recent decisions and project handoffs. Use it to know where you left off and to connect requests to ongoing work. Don't read it out, don't act on it unasked, and treat its AI summaries as leads to confirm, not facts. [Via Telegram] messages are the user's own words.
 
 What you know about the user from earlier sessions:
 {memory}"""
+
+
+STATE_MARK = "[WORKING STATE - your own records, not the user's words]"
 
 
 class Refused(Exception):
@@ -234,6 +239,7 @@ class Brain:
         self._privacy_revision = memory.privacy_revision()
         self._facts_revision = memory.facts_revision()
         self._turn_privacy = None
+        self._state = ''  # the working-memory brief last added to this conversation
         self._response_settings = response_settings.read()
         self.system = self._compose()  # stable between memory/style changes, so it caches
         self.tools = TOOL_DEFS + [web_search_def()]
@@ -317,6 +323,22 @@ class Brain:
         self.messages.append({"role": "assistant", "content": said})
         self._save_turn(event, said)
 
+    def _working_state(self) -> str:
+        """The working-memory brief, when it changed or this conversation no longer holds it.
+
+        Sent inside the user turn rather than the system prompt, so the Codex thread and the
+        prompt cache stay intact when work progresses."""
+        try:
+            brief = working_memory.brief()
+        except Exception as error:
+            print(f"(working memory unavailable: {type(error).__name__})", flush=True)
+            return ''
+        held = any(m.get('role') == 'user' and STATE_MARK in str(m.get('content')) for m in self.messages)
+        if not brief or (brief == self._state and held):
+            return ''
+        self._state = brief
+        return f"{STATE_MARK}\n{brief}\n[/WORKING STATE]\n"
+
     def ask(self, text: str, speak):
         """Stream sentences using a provider fixed for the entire tool turn."""
         self._refresh_context()
@@ -335,7 +357,9 @@ class Brain:
         self.cancel.clear()
         start = len(self.messages)
         stamp = datetime.datetime.now().strftime("%A %Y-%m-%d %H:%M")
-        self.messages.append({"role": "user", "content": f"[{stamp}] {text}"})
+        # A small local model answering a quick request doesn't need the brief; the main brain gets it next.
+        state = '' if local else self._working_state()
+        self.messages.append({"role": "user", "content": f"[{stamp}] {state}{text}"})
         spoken = []
         def deliver(sentence):
             with self._speech_lock:
@@ -741,7 +765,7 @@ What the user was doing last session:
 Recently opened files:
 {files.result()}
 
-Rules: keep this briefing to a few useful sentences. Prioritize imminent calendar events and reminders; mention weather or recent work only when useful. If nothing needs attention, a short greeting and status is enough. Don't add a joke, filler, or a closing question. Skip anything unavailable or not connected; don't invent details. The CPU reading was taken while you were loading, so don't mention CPU."""
+Rules: keep this briefing to a few useful sentences. Prioritize imminent calendar events and reminders; mention weather or recent work only when useful. If the working state shows unfinished agent work, a result the user hasn't heard or an open thread worth picking up, mention the one or two most important in a sentence. If nothing needs attention, a short greeting and status is enough. Don't add a joke, filler, or a closing question. Skip anything unavailable or not connected; don't invent details. The CPU reading was taken while you were loading, so don't mention CPU."""
 
 
 # ---------- Helpers ----------
