@@ -7,11 +7,13 @@ from pathlib import Path
 from unittest import mock
 
 import daily_review
+import gmail
 import knowledge
 import memory
 import memory_proposals
 import performance
 import privacy
+import research
 import task_effort
 import working_memory
 
@@ -41,6 +43,8 @@ class Isolated(unittest.TestCase):
                                      (working_memory, "HANDOFFS", self.root / "handoffs"),
                                      (working_memory, "PROJECT_LOG", self.root / "log.jsonl"),
                                      (memory_proposals, "STORE", self.root / "proposals.json"),
+                                     (research, "STORE", self.root / "research.json"),
+                                     (gmail, "STORE", self.root / "gmail.enc"),
                                      (performance, "TURNS", self.root / "turns.jsonl"),
                                      (task_effort, "PATH", self.root / "effort.jsonl"),
                                      (privacy, "STORE", self.root / "privacy.json"),

@@ -10,6 +10,7 @@ import knowledge
 import memory
 import memory_proposals
 import privacy
+import research
 import working_memory
 
 
@@ -24,6 +25,7 @@ class WorkingMemoryTest(unittest.TestCase):
                                      (working_memory, "SESSIONS", self.root / "sessions.json"),
                                      (working_memory, "HANDOFFS", self.root / "handoffs"),
                                      (memory_proposals, "STORE", self.root / "proposals.json"),
+                                     (research, "STORE", self.root / "research.json"),
                                      (privacy, "STORE", self.root / "privacy.json"),
                                      (memory, "PATH", str(self.root / "memory.json")),
                                      (memory, "RECENT_PATH", str(self.root / "recent.json"))]:

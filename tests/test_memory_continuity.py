@@ -12,6 +12,7 @@ import memory
 import memory_proposals
 import model_provider
 import privacy
+import research
 import response_settings
 import working_memory
 
@@ -30,7 +31,8 @@ class IsolatedMemory(unittest.TestCase):
                                      (knowledge, 'VAULT', root / 'vault'),
                                      (working_memory, 'SESSIONS', root / 'sessions.json'),
                                      (working_memory, 'HANDOFFS', root / 'handoffs'),
-                                     (memory_proposals, 'STORE', root / 'proposals.json')]:
+                                     (memory_proposals, 'STORE', root / 'proposals.json'),
+                                     (research, 'STORE', root / 'research.json')]:
             patcher = mock.patch.object(module, field, value)
             patcher.start()
             self.addCleanup(patcher.stop)

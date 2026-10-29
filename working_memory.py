@@ -225,7 +225,9 @@ def brief(now=None, today=None) -> str:
     journal threads and decisions are dropped first, so the short, current parts always fit."""
     import daily_review
     import memory_proposals
+    import research
     work, todo, projects, fresh = agent_work(now), open_tasks(), handoffs(now), recent_facts(now)
+    studies = research.recent_lines(now)
     threads, decisions = journal(today)
     day, review = daily_review.latest(today)
     review_line = ""
@@ -239,6 +241,8 @@ def brief(now=None, today=None) -> str:
         parts = []
         if work:
             parts.append("Agent work (from agent session records):\n" + "\n".join(work))
+        if studies:
+            parts.append("Research (start_research; reports are vault notes):\n" + "\n".join(studies))
         if review_line:
             parts.append(review_line)
         if fresh:

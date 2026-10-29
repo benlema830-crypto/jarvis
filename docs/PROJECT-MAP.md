@@ -54,6 +54,8 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
 | Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex) |
+| Research | research.py (start_research: background Codex web research -> Research/ in the vault), digests.py (scheduled) |
+| Email | gmail.py (read-only Gmail API, DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), memory_proposals.py (journal proposes, owner approves; Decisions/Decision log.md) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
