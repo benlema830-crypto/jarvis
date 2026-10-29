@@ -11,10 +11,11 @@ encrypted with Windows DPAPI in `data/gmail.enc` (only your Windows account can 
 2. **APIs & Services → Library**: search "Gmail API" and click **Enable**.
 3. **Google Auth Platform → Branding** (or "OAuth consent screen"): app name "Jarvis", your email as
    support and developer contact. Audience: **External**.
-4. **Audience**: add your Gmail address as a **test user**, then click **Publish app** (status
-   "In production"). Google won't review a personal app; you'll just see an "unverified app" warning
-   at sign-in, which you can pass with *Advanced → Go to Jarvis*. Publishing matters: in "Testing"
-   status Google expires the sign-in after 7 days.
+4. **Audience**: add your Gmail address as a **test user** (wait for the save to finish).
+   The app stays in "Testing": publishing needs a public home page and privacy policy. In
+   Testing, Google expires the sign-in after 7 days. Jarvis says "Google sign-in for Gmail expired"
+   when it's time; then run `.venv\Scripts\python.exe scripts\setup_gmail.py --renew` and approve
+   in the browser (no JSON file needed).
 5. **Clients → Create client**: type **Desktop app**, name "Jarvis". Download the JSON.
 6. Run, with the path to that file:
 

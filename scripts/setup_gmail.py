@@ -1,4 +1,5 @@
 """Connect Jarvis to Gmail, read-only. Run: .venv\\Scripts\\python.exe scripts\\setup_gmail.py <client_secret.json>
+Sign in again later (Google expires Testing-mode sign-ins weekly): setup_gmail.py --renew
 
 The JSON is the "Desktop app" OAuth client downloaded from your own Google Cloud project with the
 Gmail API enabled (see docs/GMAIL.md). Your browser opens Google's sign-in; you approve read-only
@@ -96,7 +97,11 @@ def main(argv):
         print(__doc__)
         return 2
     try:
-        value = authorize(*client(argv[0]))
+        if argv[0] == "--renew":  # weekly re-sign-in: reuse the client saved (encrypted) at setup
+            saved = gmail.load_credentials()
+            value = authorize(saved["client_id"], saved["client_secret"])
+        else:
+            value = authorize(*client(argv[0]))
         gmail.save_credentials(value)
         profile = gmail.api("/profile")
         print(f"Connected read-only to {profile.get('emailAddress', 'your Gmail')} "

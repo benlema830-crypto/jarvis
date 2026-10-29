@@ -64,7 +64,8 @@ def access_token(force=False):
                     "grant_type": "refresh_token", "refresh_token": value["refresh_token"],
                     "client_id": value["client_id"], "client_secret": value["client_secret"]})
             except mcp_oauth.OAuthError:
-                raise GmailError("Google sign-in for Gmail expired or was revoked. Run scripts/setup_gmail.py again.") from None
+                raise GmailError("Google sign-in for Gmail expired (it does weekly). Tell the owner to rerun "
+                                 "scripts\\setup_gmail.py --renew and approve in the browser.") from None
             value.update(mcp_oauth.token_result(result, value))
             save_credentials(value)
         return value["access_token"]
@@ -93,6 +94,11 @@ def api(path, params=None):
     raise GmailError("Gmail sign-in failed. Run scripts/setup_gmail.py again.")
 
 
+def _clean(text):
+    """Drop the invisible padding characters marketing mail stuffs into previews."""
+    return re.sub(r"[­͏​-‏⁠-⁤﻿]", "", text)
+
+
 def _headers(message):
     return {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
 
@@ -106,7 +112,7 @@ def _line(n, message):
     head = _headers(message)
     unread = "UNREAD " if "UNREAD" in message.get("labelIds", []) else ""
     date = time.strftime("%b %d %H:%M", time.localtime(int(message.get("internalDate", 0)) / 1000))
-    snippet = html.unescape(message.get("snippet", ""))[:160]
+    snippet = " ".join(_clean(html.unescape(message.get("snippet", ""))).split())[:160]
     return (f"{n}. {unread}[{message['id']}] {date} from {_sender(head.get('from'))}: "
             f"\"{head.get('subject') or '(no subject)'}\" - {snippet}")
 
@@ -148,7 +154,7 @@ def read(message_id: str) -> str:
     message = api(f"/messages/{message_id}", {"format": "full"})
     head = _headers(message)
     _, body = _text(message.get("payload", {}))
-    body = re.sub(r"[ \t\r\f\v]+", " ", body)
+    body = re.sub(r"[ \t\r\f\v]+", " ", _clean(body))
     body = re.sub(r"\n\s*\n+", "\n\n", body).strip()
     if len(body) > MAX_BODY:
         body = body[:MAX_BODY].rstrip() + "\n[... rest of the email cut off]"

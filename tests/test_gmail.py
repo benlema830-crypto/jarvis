@@ -19,7 +19,7 @@ def b64(text):
 
 
 MESSAGE = {"id": "18abc123def", "labelIds": ["INBOX", "UNREAD"], "internalDate": str(int(time.time() * 1000)),
-           "snippet": "Can you send the drawings &amp; quote?",
+           "snippet": "Can you send the drawings &amp; quote? ‌ ‌ ͏",
            "payload": {"mimeType": "multipart/alternative",
                        "headers": [{"name": "From", "value": "Sam Lee <sam@example.com>"},
                                    {"name": "To", "value": "ben@example.com"},
