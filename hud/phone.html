@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<meta name="theme-color" content="#030608">
+<title>JARVIS</title>
+<style>
+:root{color-scheme:dark;--bg:#030608;--panel:#0a1115;--raise:#101a1f;--line:rgba(130,200,190,.13);--line-strong:rgba(130,220,200,.28);
+ --ink:#dfe9e6;--muted:#9bafad;--accent:#5eead4;--accent-ink:#04201b;--danger:#f87171;
+ --mono:ui-monospace,"SF Mono",Menlo,monospace;--sans:-apple-system,system-ui,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 var(--sans);display:flex;flex-direction:column;
+ padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font:600 14px/1 var(--mono);letter-spacing:.22em}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.dot.think{background:#f5b83d;animation:pulse 1s infinite alternate}
+@keyframes pulse{to{opacity:.3}}
+header label{margin-left:auto;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
+#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:85%;padding:10px 13px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+.you{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+.jarvis{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:4px}
+.err{align-self:center;color:var(--danger);font-size:14px}
+form{display:flex;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--line)}
+#text,#key{flex:1;min-width:0;background:#060b0e;border:1px solid var(--line);border-radius:22px;padding:11px 15px;color:var(--ink);font:inherit;outline:none}
+#text:focus,#key:focus{border-color:var(--line-strong)}
+#speak{accent-color:var(--accent)}
+button{border:1px solid var(--line);background:var(--raise);color:var(--ink);border-radius:22px;padding:0 16px;font:inherit;min-height:44px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+#mic.live{background:var(--danger);border-color:var(--danger)}
+#setup{padding:24px 16px;display:flex;flex-direction:column;gap:12px}
+#setup p{margin:0;color:var(--muted)}
+</style>
+</head>
+<body>
+<header><span class="dot" id="dot"></span><h1>JARVIS</h1>
+ <label><input type="checkbox" id="speak"> Jarvis voice</label></header>
+<section id="setup" hidden>
+ <p>Paste the phone key that <code>setup_phone.py</code> showed on your PC. It stays on this phone only.</p>
+ <input id="key" type="password" autocomplete="off" placeholder="Phone key">
+ <button class="primary" id="save">Connect</button>
+</section>
+<main id="log" aria-live="polite"></main>
+<form id="form" hidden>
+ <button type="button" id="mic" aria-label="Speak" hidden>🎙</button>
+ <input id="text" autocomplete="off" placeholder="Message JARVIS">
+ <button class="primary" type="submit">Send</button>
+</form>
+<script>
+const $ = id => document.getElementById(id);
+const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}, del(k){try{localStorage.removeItem(k)}catch{}}};
+let key = store.get('jarvis-key');
+$('speak').checked = store.get('jarvis-speak') === '1';
+$('speak').onchange = () => store.set('jarvis-speak', $('speak').checked ? '1' : '0');
+
+function show(){ $('setup').hidden = !!key; $('form').hidden = !key; $('log').hidden = !key; }
+function add(cls, text){ const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').append(d); d.scrollIntoView({block:'end'}); }
+$('save').onclick = () => { key = $('key').value.trim(); if (key) { store.set('jarvis-key', key); show(); ping(); } };
+
+async function ping(){
+  try { const r = await fetch('/health'); $('dot').className = 'dot' + (r.ok ? ' on' : ''); } catch { $('dot').className = 'dot'; }
+}
+// iOS only lets a page play sound it started during a tap, so the tap "unlocks" this player.
+const player = new Audio();
+const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+function unlock(){ if ($('speak').checked && !player.src) { player.src = SILENCE; player.play().catch(() => {}); } }
+async function send(text){
+  add('you', text); $('dot').className = 'dot think';
+  const voice = $('speak').checked;
+  try {
+    const r = await fetch(voice ? '/voice' : '/ask', {method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + key}, body: JSON.stringify({text})});
+    if (r.status === 401) { add('err', 'That key was refused. Enter it again.'); key = null; store.del('jarvis-key'); show(); return; }
+    if ((r.headers.get('Content-Type') || '').startsWith('audio/')) {
+      add('jarvis', decodeURIComponent(r.headers.get('X-Jarvis-Reply') || ''));
+      player.src = URL.createObjectURL(await r.blob());
+      player.play().catch(() => add('err', 'Tap anywhere, then Send again to hear the voice.'));
+    } else {
+      const data = await r.json();
+      add('jarvis', data.reply || data.error || '(no reply)');
+    }
+  } catch { add('err', "Can't reach JARVIS. Is Tailscale on and the PC awake?"); }
+  ping();
+}
+document.addEventListener('click', unlock);
+$('form').onsubmit = e => { e.preventDefault(); const t = $('text').value.trim(); if (t) { $('text').value = ''; send(t); } };
+
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (Rec) {
+  $('mic').hidden = false;
+  $('mic').onclick = () => {
+    const rec = new Rec(); rec.lang = 'en-US'; rec.interimResults = false;
+    $('mic').classList.add('live');
+    rec.onresult = e => { const t = e.results[0][0].transcript.trim(); if (t) send(t); };
+    rec.onend = () => $('mic').classList.remove('live');
+    rec.start();
+  };
+}
+show(); if (key) ping();
+</script>
+</body>
+</html>

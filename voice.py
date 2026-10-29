@@ -660,6 +660,14 @@ class Voice:
         pieces = list(self._timed_render(text)) if text else []
         return np.concatenate(pieces).astype(np.float32) if pieces else np.zeros(0, np.float32)
 
+    def synthesize_kokoro(self, text: str, voice: str) -> np.ndarray:
+        """Render text in a named Kokoro voice (e.g. the phone's FRIDAY), whatever the main engine is."""
+        text = SOUND_TAGS.sub(" ", clean_for_speech(text)).strip()
+        if not text:
+            return np.zeros(0, np.float32)
+        samples, _ = self.kokoro.create(text, voice=voice, speed=self.speed, lang="en-gb")
+        return samples.astype(np.float32)
+
     def chime(self):
         """Play the "listening" chime right away."""
         self._play(self._chime)

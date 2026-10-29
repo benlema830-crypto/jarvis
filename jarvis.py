@@ -193,6 +193,7 @@ Using your tools:
 - focus_mode starts a timed focus lock on one app. [FOCUS DRIFT] means they wandered: reply with one short, dry, witty nudge, varied each time. [FOCUS COMPLETE]: one line.
 - switch_model changes your own conversation model when the user asks you to switch brains.
 - send_telegram sends something to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
+- A message starting [Via Phone] is the user on their iPhone (the phone page or Siri): your reply is shown or read aloud there, not spoken at the PC, so keep it short and plain. Anything needing approval still waits for their "yes" at the PC; say so. [Via Phone as NAME] means that on the phone you are NAME (for example FRIDAY, Tony Stark's other assistant): use that name if you refer to yourself, with a warmer, quicker, more casual manner than JARVIS and no "sir". You are still the same assistant underneath, with the same memory, tools, rules and judgment.
 - {off_limits} may hold the user's work data and are off-limits: never open, read, or operate them.
 
 Messages in square brackets such as [REMINDER DUE], [TASK FINISHED], [FOCUS DRIFT], [EYES CHECK] or [HOLO] come from your own systems, not the user.
@@ -739,6 +740,46 @@ def respond_telegram(brain: Brain, voice: Voice, item: dict):
         hud.emit("error", text=f"Telegram reply failed: {type(e).__name__}")
 
 
+PHONE_PERSONA, PHONE_VOICE = "FRIDAY", "kokoro:bf_emma"
+
+
+def phone_persona() -> tuple[str, str]:
+    """(name, voice) for the phone. Preferences phone_persona / phone_voice override; an empty
+    name keeps JARVIS, and voice "jarvis" uses the PC voice instead of a Kokoro one."""
+    prefs = preferences.read()
+    name, spoken = prefs.get("phone_persona", PHONE_PERSONA), prefs.get("phone_voice", PHONE_VOICE)
+    return (name.strip() if isinstance(name, str) else PHONE_PERSONA,
+            spoken.strip() if isinstance(spoken, str) else PHONE_VOICE)
+
+
+def phone_voice_wav(voice: Voice, text: str) -> bytes | None:
+    """The text as a WAV in the phone persona's voice (Kokoro by default, else the PC voice)."""
+    import phone_bridge
+    engine, _, kokoro_voice = phone_persona()[1].partition(":")
+    try:
+        samples = voice.synthesize_kokoro(text, kokoro_voice) if engine == "kokoro" else voice.synthesize(text)
+    except Exception as e:  # an unknown voice name must not cost the reply
+        hud.emit("error", text=f"Phone voice failed: {type(e).__name__}")
+        samples = voice.synthesize(text)
+    return phone_bridge.to_wav(samples, RATE) if samples.size else None
+
+
+def respond_phone(brain: Brain, voice: Voice, item: dict):
+    """A request from the owner's iPhone over Tailscale: the reply goes back to the phone, from the
+    phone persona (FRIDAY by default) and in its voice when the phone asked for audio."""
+    said, wav = [], None
+    name = phone_persona()[0]
+    prompt = item["prompt"].replace("[Via Phone]", f"[Via Phone as {name}]", 1) if name else item["prompt"]
+    try:
+        respond(brain, voice, prompt, said.append)
+        if item.get("voice_reply"):
+            wav = phone_voice_wav(voice, " ".join(said).strip() or "Done.")
+    finally:  # never leave the phone waiting, even if the turn blew up
+        reply = " ".join(said).strip() or "Done."
+        hud.emit("jarvis", text=f"(to phone{', as ' + name if name else ''}) " + reply)
+        item["phone"](reply, wav)
+
+
 BRIEFING_WORDS = re.compile(r"(?:good morning|morning|brief me|daily briefing|my briefing|what'?s (?:on )?my day"
                             r"(?: look like)?)(?:,? jarvis)?[\s.!?]*", re.I)
 
@@ -972,6 +1013,17 @@ def start_bridges(ears):
     bridge.on_message = on_message
     if bridge.start():
         print("Telegram bridge online.", flush=True)
+    import phone_bridge
+
+    def on_phone(text, reply, wants_voice):
+        hud.emit("you", text="(Phone) " + text)
+        hud.commands.put({"label": "Phone message", "phone": reply, "voice_reply": wants_voice,
+                          "prompt": f"[Via Phone] {text}"})
+    phone_bridge.BRIDGE.on_message = on_phone
+    if phone_bridge.BRIDGE.start():
+        print(f"Phone bridge online on 127.0.0.1:{phone_bridge.PORT}.", flush=True)
+    elif phone_bridge.BRIDGE.error:
+        print(f"(Phone bridge not started: {phone_bridge.BRIDGE.error})", flush=True)
     holo_bridge.watch()
     import nudges
     nudges.start(hud.commands.put)
@@ -1155,6 +1207,8 @@ def main():
                 "or changes from it only when relevant; start them only when the user says so."}))
     threading.Thread(target=start_local_embeddings, daemon=True).start()
     start_bridges(ears)
+    import phone_bridge
+    phone_bridge.BRIDGE.speak = lambda text: phone_voice_wav(voice, text)
     if text_mode:
         listener = threading.Thread(target=console_loop, args=(turns,), daemon=True)
     else:
@@ -1186,9 +1240,12 @@ def main():
                     hud.emit("state", state="listening")
                     turns.idle.set()
                     continue
-                if "telegram" in item:  # the owner's phone: answer there, not out loud
+                if "telegram" in item or "phone" in item:  # the owner's phone: answer there, not out loud
                     hud.emit("state", state="thinking")
-                    respond_telegram(brain, voice, item)
+                    if "phone" in item:
+                        respond_phone(brain, voice, item)
+                    else:
+                        respond_telegram(brain, voice, item)
                     hud.emit("state", state="standby")
                     turns.idle.set()
                     continue
