@@ -35,15 +35,23 @@ def snapshot():
     add("vault", "Obsidian vault", "Core", f"{knowledge.VAULT.name}: your Obsidian vault: editable Markdown notes. Bright links are "
         "real [[wikilinks]] or Markdown links between notes; dim links show which folder a note lives in.",
         group="JARVIS")
-    folders = {}
+    folders, archived = {}, 0
     for note in vault["notes"]:
         top = note["path"].split("/")[0] if "/" in note["path"] else "Notes"
+        if top == "Archive":  # imported chat history: searchable, but one node instead of hundreds
+            archived += 1
+            continue
         if top not in folders:
             folders[top] = add("folder:" + top, top, "Folder", f"Vault folder {top}.", "vault", group=top)
         node = add("note:" + note["path"], note["title"], "Note", note["content"], "folder:" + top, group=top)
         node.update(source=note["path"], uri=note["uri"], modified=note.get("modified"))
     links.extend({"source": "note:" + link["source"], "target": "note:" + link["target"], "kind": "note-link"}
-                 for link in vault["links"])
+                 for link in vault["links"] if not (link["source"] + "/" + link["target"]).startswith("Archive/")
+                 and not link["target"].startswith("Archive/"))
+    if archived:
+        add("folder:Archive", f"Chat archive ({archived} notes)", "Folder",
+            "Imported ChatGPT and Claude conversations, one note per week. Searchable by Jarvis; not drawn note by note.",
+            "vault", group="Archive")
 
     facts = [f for f in read("memory.json")[:200] if isinstance(f, dict) and isinstance(f.get("fact"), str)]
     if facts:

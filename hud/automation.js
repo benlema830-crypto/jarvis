@@ -47,7 +47,7 @@
   async function renderProposals(data) {
     proposals.replaceChildren();
     if(!data.pending.length)return;
-    proposals.append(make('h3','Waiting for your approval'),make('p','Found by the nightly journal (an AI summary). Nothing is remembered until you keep it. Facts join memory; decisions join the vault\'s Decision log.'));
+    proposals.append(make('h3','Waiting for your approval'),make('p','Found by the nightly journal or imported from other assistants (AI-written). Nothing is remembered until you keep it. Facts join memory; decisions join the vault\'s Decision log.'));
     for(const item of data.pending) {
       const row=make('div'), input=field(row,`Proposed ${item.kind} (from ${item.source})`,'textarea',item.text);input.maxLength=2000;
       row.append(button('Keep',async()=>{renderProposals(await post('/memory-proposals',{id:item.id,approve:true,text:input.value===item.text?'':input.value}));state=await J.api('/memory');renderMemory();},mem.status),

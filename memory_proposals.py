@@ -89,6 +89,34 @@ def harvest(today=None) -> int:
     return added
 
 
+def import_lines(text: str, source: str) -> int:
+    """Propose each line of an exported memory list (e.g. ChatGPT's or Claude's saved memories).
+
+    Those lists are another assistant's notes about the owner, so they wait for approval like
+    journal proposals. Bullets, numbering and blank lines are ignored; known facts are skipped."""
+    source = " ".join(str(source).split())[:80] or "Imported memory"
+    added = 0
+    with LOCK:
+        data = _load()
+        known = {memory._norm(i["text"]) for i in data["items"]}
+        saved = memory.facts()
+        for line in str(text).splitlines():
+            line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip()
+            if len(line) < 8:
+                continue
+            line = privacy.redact(" ".join(line.split()))[:600]
+            key = memory._norm(line)
+            if key in known or any(memory._same(f, line) for f in saved):
+                continue
+            known.add(key)
+            ident = hashlib.sha256(f"{source}|{line}".encode()).hexdigest()[:10]
+            data["items"].append({"id": ident, "text": line, "kind": "fact", "source": source,
+                                  "status": "pending", "t": time.time()})
+            added += 1
+        _save(data)
+    return added
+
+
 def pending():
     with LOCK:
         return [i for i in _load()["items"] if i["status"] == "pending"]
@@ -99,7 +127,7 @@ def count_line() -> str:
     n = len(pending())
     if not n:
         return ""
-    return (f"{n} memory proposal{'s' if n != 1 else ''} from the nightly journal await the owner's approval. "
+    return (f"{n} memory proposal{'s' if n != 1 else ''} (from the nightly journal or imports) await the owner's approval. "
             "Offer to go through them (review_memory_proposals) when there's a natural moment, not mid-task.")
 
 
@@ -108,7 +136,7 @@ def listing() -> str:
     if not items:
         return "No memory proposals are waiting."
     lines = [f"{n}. [{i['kind']}] {i['text']} (from {i['source']})" for n, i in enumerate(items, 1)]
-    return ("Proposals from the nightly journal (AI summaries of past conversations; not facts until the owner "
+    return ("Memory proposals from the nightly journal or imported from other assistants (AI-written; not facts until the owner "
             "approves). Read them to the owner briefly and ask which to keep:\n" + "\n".join(lines))
 
 
@@ -160,7 +188,8 @@ def decide(which: str, approve: bool, reword: str = "") -> str:
                 if item["kind"] == "decision":
                     _log_decision(text, item["source"])
                 else:
-                    memory.remember(text, source=f"{item['source']} (journal proposal, approved by the owner)")
+                    origin = "journal proposal" if item["source"].startswith(JOURNAL + "/") else "imported"
+                    memory.remember(text, source=f"{item['source']} ({origin}, approved by the owner)")
             item.update(status="approved" if approve else "rejected", decided=time.time(),
                         **({"text": text} if reword else {}))
             done.append(text)
