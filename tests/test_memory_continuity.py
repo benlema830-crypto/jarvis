@@ -53,8 +53,11 @@ class BenignMemoryKeepsContext(IsolatedMemory):
         # Working history itself (not only the restart excerpt) still holds the project turn.
         self.assertIn('Orion launch tower', brain.history[-1])
         self.assertIn('prefers tea', brain.system)
-        # Persistent Codex threads keep their base prompt, so they must restart with the new one.
-        codex.close.assert_called_once()
+        # Persistent Codex threads keep running (a restart made the next reply slow); the new
+        # fact reaches them through the working-memory brief in the turn instead.
+        codex.close.assert_not_called()
+        latest = [m['content'] for m in brain.messages if m['role'] == 'user'][-1]
+        self.assertIn('prefers tea', latest)
 
     def test_duplicate_remember_causes_no_disruption(self):
         memory.remember('The user likes orange.')

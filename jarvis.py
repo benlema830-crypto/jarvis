@@ -295,13 +295,16 @@ class Brain:
             self.system = self._compose()
             self._restart_adapters(text_only=True)
             self.messages = []
-        elif facts_revision != self._facts_revision or style != self._response_settings:
-            # A harmless new fact or a style change only refreshes the system prompt;
-            # the working conversation stays. Style changes keep the earlier text-only rule.
-            restyled = style != self._response_settings
+        elif style != self._response_settings:
+            # A style change refreshes the system prompt and restarts the threads (text-only history).
             self._response_settings = style
             self.system = self._compose()
-            self._restart_adapters(text_only=restyled)
+            self._restart_adapters(text_only=True)
+        elif facts_revision != self._facts_revision:
+            # A harmless new fact refreshes the system prompt for per-request providers but keeps
+            # the Codex/Claude Code thread: restarting it made the next reply slow. Those threads
+            # learn the fact from the working-memory brief, which lists recently saved facts.
+            self.system = self._compose()
         self._privacy_revision = privacy_revision
         self._facts_revision = facts_revision
         self._turn_privacy = privacy_revision

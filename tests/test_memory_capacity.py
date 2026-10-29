@@ -17,7 +17,8 @@ class MemoryCapacityTest(unittest.TestCase):
         root = Path(self.temp.name)
         for module, field, value in [(memory, 'PATH', str(root / 'memory.json')),
                                      (memory, 'RECENT_PATH', str(root / 'recent.json')),
-                                     (privacy, 'STORE', root / 'privacy.json')]:
+                                     (privacy, 'STORE', root / 'privacy.json'),
+                                     (memory, 'MAX_FACTS', 200)]:  # the cap's behaviour, not its size; keeps the test fast
             patcher = mock.patch.object(module, field, value)
             patcher.start()
             self.addCleanup(patcher.stop)

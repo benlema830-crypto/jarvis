@@ -126,6 +126,15 @@ def handoffs(now=None):
     return lines
 
 
+def recent_facts(now=None):
+    """Facts saved or changed in the last day. A running Codex thread fixed its prompt earlier,
+    so this is how it hears about them without a slow restart."""
+    import memory
+    now = now or time.time()
+    items = [i for i in memory._load() if now - memory._when(i) < 86400]
+    return [f"- {_clip(i['fact'], 300)}" for i in sorted(items, key=memory._when)[-8:]]
+
+
 PROJECT_LOG = HERE / "data" / "project_log.jsonl"
 PROJECT_BRIEF_CHARS = 2500
 
@@ -226,6 +235,9 @@ def brief(now=None, today=None) -> str:
     projects = handoffs(now)
     if projects:
         parts.append("Project handoffs:\n" + "\n".join(projects))
+    fresh = recent_facts(now)
+    if fresh:
+        parts.append("Saved to memory in the last day (current wording):\n" + "\n".join(fresh))
     import memory_proposals
     if waiting := memory_proposals.count_line():
         parts.append(waiting)
