@@ -124,7 +124,8 @@ def memory_report(fixture):
         root = Path(temp)
         patches = [mock.patch.object(memory, 'PATH', str(root / 'memory.json')),
                    mock.patch.object(memory, 'RECENT_PATH', str(root / 'recent.json')),
-                   mock.patch.object(privacy, 'STORE', root / 'privacy.json')]
+                   mock.patch.object(privacy, 'STORE', root / 'privacy.json'),
+                   mock.patch.object(memory, 'MAX_FACTS', 200)]  # the overflow check runs at a fixed cap
         for patcher in patches:
             patcher.start()
         try:

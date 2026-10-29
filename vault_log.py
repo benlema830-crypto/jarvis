@@ -97,8 +97,14 @@ Write a concise Markdown journal entry with exactly these sections, omitting a s
 Two to four sentences: what the owner worked on and how the day went.
 ## Done
 Bullets of things that were actually completed.
-## Decisions and preferences
-Bullets of choices the owner made or preferences they stated.
+## Decisions
+Bullets of choices the owner made. Where the log says why, or which alternatives were rejected, add it in
+the same bullet ("... because ...; rejected: ..."). Don't invent reasons.
+## Facts to remember
+Bullets of lasting facts the owner stated about themselves, their people, work, projects, goals, routines
+or preferences that would still matter next month. One standalone sentence each, e.g. "The owner's game
+project is Rocket Frontier." Only what the owner said, never guesses, test chatter or one-off commands.
+These are proposals the owner will approve, so leave out anything uncertain.
 ## Open threads
 Bullets of things left unfinished or to follow up.
 
@@ -184,6 +190,9 @@ def start_journal(stop: threading.Event | None = None) -> threading.Event:
             try:
                 for path in catch_up():
                     print(f"(journal: wrote {path})", flush=True)
+                import memory_proposals
+                if added := memory_proposals.harvest():
+                    print(f"(journal: {added} memory proposals waiting for approval)", flush=True)
             except Exception as e:  # never stop journaling for good over one bad day
                 print(f"(journal: {e!r})", flush=True)
             if stop.wait(CHECK_SECONDS):

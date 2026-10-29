@@ -5,6 +5,7 @@ Assembled on demand from what is already recorded, with no AI call and no store 
   - open to-dos (the vault's Tasks.md)
   - open threads and decisions from recent days (the vault's Journal/, summarized nightly by Codex)
   - each project's latest handoff (data/handoffs/)
+  - how many memory proposals wait for the owner's approval (memory_proposals.py)
 
 jarvis.py adds the brief to the conversation whenever it changes, and the startup briefing uses it.
 Everything here is a record or an AI summary, so the brief says where each part came from.
@@ -96,7 +97,7 @@ def journal(today=None):
             content = knowledge.read(f"{JOURNAL}/{day}.md")["content"]
         except (ValueError, OSError):
             continue
-        for heading, out in (("Open threads", threads), ("Decisions and preferences", decisions)):
+        for heading, out in (("Open threads", threads), ("Decisions", decisions), ("Decisions and preferences", decisions)):
             for item in _section(content, heading):
                 key = item.casefold()
                 if key not in seen:
@@ -144,6 +145,9 @@ def brief(now=None, today=None) -> str:
     projects = handoffs(now)
     if projects:
         parts.append("Project handoffs:\n" + "\n".join(projects))
+    import memory_proposals
+    if waiting := memory_proposals.count_line():
+        parts.append(waiting)
     text = "\n\n".join(parts)
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS - 1].rstrip() + "…"

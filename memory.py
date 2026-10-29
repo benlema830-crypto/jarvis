@@ -18,7 +18,7 @@ import privacy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(HERE, "data", "memory.json")
-MAX_FACTS = 200
+MAX_FACTS = 1000          # the prompt shows a budgeted selection; recall() searches them all
 PROMPT_BUDGET = 4000      # characters of saved facts placed in every system prompt (~1k tokens)
 PROMPT_FACT_CHARS = 400   # longer facts are shortened in the prompt; recall() returns them in full
 RECENT_PATH = os.path.join(HERE, "data", "recent_conversation.json")
@@ -114,7 +114,9 @@ def _load() -> list[dict]:
 
 
 def _save(facts: list[dict]):
-    facts = [dict(f, fact=privacy.redact(f['fact'])) for f in facts]
+    facts = [dict(f, fact=privacy.redact(f['fact']),
+                  **({'history': [dict(h, fact=privacy.redact(h['fact'])) for h in f['history']]} if f.get('history') else {}))
+             for f in facts]
     os.makedirs(os.path.dirname(PATH), exist_ok=True)
     tmp = PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -131,7 +133,8 @@ def facts() -> list[str]:
     return [f["fact"] for f in _load()]
 
 
-def remember(fact: str, core: bool = False) -> str:
+def remember(fact: str, core: bool = False, source: str = "") -> str:
+    """`source` says where the fact came from, e.g. an approved journal proposal."""
     fact = privacy.redact(fact.strip())
     if len(fact) > 2000:
         raise ValueError('Keep each remembered fact under 2000 characters.')
@@ -150,7 +153,8 @@ def remember(fact: str, core: bool = False) -> str:
             return (f"Memory is full ({MAX_FACTS} saved facts); nothing was removed and this fact was not saved. "
                     "Ask the user which saved fact to forget or combine, then try again.")
         similar = _similar(items, fact)
-        items.append({"fact": fact, "t": time.time(), **({"core": True} if core else {})})
+        items.append({"fact": fact, "t": time.time(), **({"core": True} if core else {}),
+                      **({"source": source[:200]} if source else {})})
         _save(items)
     if similar:
         # Never overwrite on similarity alone: "sister likes tea" and "brother likes tea" are both true.
@@ -230,6 +234,28 @@ def correct(old: str, new: str) -> str:
     return f"Corrected: {new}"
 
 
+def update(old: str, new: str) -> str:
+    """Circumstances changed (a new job, a new priority): replace the fact, keeping the old
+    wording as dated history. For a fact that was simply wrong, correct() erases it instead."""
+    new = privacy.redact((new or "").strip())
+    if not new or len(new) > 2000:
+        raise ValueError('Give the updated fact in 1–2000 characters.')
+    with transaction():
+        items = _load()
+        index, problem = _find(items, old)
+        if index is None:
+            return problem
+        item = items[index]
+        if _same(item["fact"], new):
+            return "Already saved that way."
+        history = list(item.get("history") or [])
+        history.append({"fact": item["fact"], "from": _when(item), "until": time.time()})
+        items[index] = dict(item, fact=new, updated=time.time(), history=history[-10:])
+        items = [x for i, x in enumerate(items) if i == index or not _same(x["fact"], new)]
+        _save(items)
+    return f"Updated: {new} (the earlier version is kept as history)"
+
+
 def _when(item) -> float:
     value = item.get("updated", item.get("t", 0))
     return value if isinstance(value, (int, float)) else 0
@@ -297,7 +323,10 @@ def recall(query: str, limit: int = 8) -> str:
         item = items[i]
         day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t))
         when = f"saved {day(item.get('t', 0))}" + (f", corrected {day(item['updated'])}" if item.get("updated") else "")
-        lines.append(f"- {item['fact']} ({when})")
+        if item.get("source"):
+            when += f", source: {item['source']}"
+        earlier = "; ".join(f"until {day(h.get('until', 0))}: {h['fact']}" for h in (item.get("history") or [])[::-1][:3])
+        lines.append(f"- {item['fact']} ({when})" + (f" Earlier versions: {earlier}" if earlier else ""))
     return privacy.redact(f"Saved facts matching '{query}' (user-provided memory, newest wording is current):\n"
                           + "\n".join(lines))
 

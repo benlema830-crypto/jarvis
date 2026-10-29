@@ -152,6 +152,12 @@ def serve():
                 if get: return memory.snapshot(), 200
                 p=self.payload(16000)
                 return memory.edit(p.get('action'),p.get('revision'),p.get('id',''),p.get('fact','')),200
+            if route == '/memory-proposals' and (get or post):
+                import memory_proposals
+                if post:
+                    p = self.payload(4000)
+                    memory_proposals.decide(str(p.get('id', '')), bool(p.get('approve')), str(p.get('text', '')))
+                return memory_proposals.snapshot(), 200
             if route == '/privacy' and post:
                 import privacy, memory
                 p=self.payload(30000)
