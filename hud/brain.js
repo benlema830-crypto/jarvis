@@ -33,13 +33,35 @@ const J = window.J = {
   online: false, health: null, mode: 'wake',
 };
 
+// Rendering yields to speech workloads and returns to the saved quality afterwards.
+J.resources = { active: [] };
+J.graphics = { quality: store.get('graphicsQuality', 'auto'), busyUntil: 0,
+  setQuality(value) {
+    this.quality = ['auto','cinematic','balanced','economy'].includes(value) ? value : 'auto';
+    store.set('graphicsQuality', this.quality);
+  },
+  budget() {
+    const busy = J.resources.active?.length > 0;
+    if (busy) this.busyUntil = performance.now() + 1500;
+    if (document.hidden) return {fps:0,scale:.6,max:480,reason:'Hidden'};
+    if (busy || performance.now() < this.busyUntil) return {fps:24,scale:.7,max:512,reason:'Prioritizing voice'};
+    return ({cinematic:{fps:60,scale:1.5,max:1440,reason:'Cinematic'}, balanced:{fps:45,scale:1.1,max:960,reason:'Balanced'},
+      economy:{fps:30,scale:.8,max:640,reason:'Economy'},auto:{fps:60,scale:1.35,max:1280,reason:'Automatic'}})[this.quality]
+      || {fps:60,scale:1.35,max:1280,reason:'Automatic'};
+  }
+};
+J.on('resources', event => { J.resources = {active: Array.isArray(event.active) ? event.active : []}; });
+
 /* ---------- Graph data ---------- */
 const FIXED_COLORS = { JARVIS: '#e8f4ef', Memory: '#3ddc97', Conversation: '#5b8def', Tool: '#a78bfa' };
 const PALETTE = ['#f5b83d', '#2dd4bf', '#f472b6', '#fb923c', '#a3e635', '#38bdf8', '#e879f9', '#facc15', '#f87171', '#c084fc'];
 const groupColors = new Map();
+const groupLabel=g=>({JARVIS:'System',Memory:'Memories',Conversation:'Conversations',Tool:'Tools'})[g]||g;
 const G = {
   nodes: [], links: [], byId: new Map(), adj: new Map(), groups: [],
-  hidden: new Set(store.get('hiddenGroups', ['Tool'])),
+  hidden: new Set(store.get('graphFiltersV2', [])),
+  scope: ['projects','all','vault'].includes(store.get('graphScope','projects')) ? store.get('graphScope','projects') : 'projects',
+  expanded: new Set(store.get('graphExpanded',[])), shown: new Set(), children: new Map(), centers: new Map(),
   selected: null, focus: new Set(), depth: 1, path: null, hover: null, matches: null,
   alpha: 1, is3d: true, orbit: false,
   cam: { yaw: .35, pitch: .22, zoom: 1, panX: 0, panY: 0, target: { x: 0, y: 0, z: 0 }, goal: null,
@@ -51,8 +73,43 @@ function colorOf(group) {
   if (!groupColors.has(group)) groupColors.set(group, PALETTE[groupColors.size % PALETTE.length]);
   return groupColors.get(group);
 }
-function radiusOf(n) { return n.id === 'root' ? 9 : 2.6 + Math.sqrt(n.degree || 0) * 1.9; }
-function visible(n) { return !G.hidden.has(n.group); }
+function radiusOf(n) { return n.id === 'root' ? 14 : n.role==='project' ? 11 : n.hub ? Math.min(13,8+Math.log2(1+n.child_count)) : 2.6 + Math.sqrt(n.degree || 0) * 1.9; }
+function visible(n) { return !!n && G.shown.has(n.id); }
+J.isNodeVisible=visible;
+function saveGraphView(){
+  store.set('graphScope',G.scope);store.set('graphFiltersV2',[...G.hidden]);store.set('graphExpanded',[...G.expanded]);
+}
+function rebuildVisibility(){
+  const memo=new Map(),visiting=new Set();
+  function shown(n){
+    if(!n || G.hidden.has(n.group))return false;
+    if(memo.has(n.id))return memo.get(n.id);
+    if(visiting.has(n.id))return false;
+    visiting.add(n.id);
+    const value=G.scope==='all' || (G.scope==='vault' ? ['Note','Folder'].includes(n.kind)||n.id==='vault' :
+      n.overview || n.id==='root' || (n.parents||[]).some(id=>G.expanded.has(id)&&shown(G.byId.get(id))));
+    visiting.delete(n.id);memo.set(n.id,!!value);return !!value;
+  }
+  G.shown=new Set(G.nodes.filter(shown).map(n=>n.id));
+  $('counts').textContent=`${G.shown.size} of ${G.nodes.length} nodes · ${G.nodes.filter(n=>n.kind==='Note').length} notes`;
+}
+function revealNode(n,seen=new Set()){
+  if(!n || seen.has(n.id))return;
+  seen.add(n.id);G.hidden.delete(n.group);
+  if(G.scope==='vault' && !['Note','Folder'].includes(n.kind) && n.id!=='vault')G.scope='projects';
+  const parent=G.byId.get((n.parents||[])[0]);
+  if(parent){G.expanded.add(parent.id);revealNode(parent,seen);}
+}
+function refreshGraphView(){
+  saveGraphView();rebuildVisibility();
+  if(G.selected && !visible(G.selected))clearSelection();
+  if(G.selected)G.focus=neighborhood(G.selected.id,G.depth);
+  renderFilters();renderHubs();renderInspector();reheat(.5);
+}
+function setGraphScope(scope){
+  G.scope=scope;G.hidden.clear();clearSelection();refreshGraphView();fit();
+}
+J.setGraphScope=setGraphScope;
 
 async function load(keepView) {
   try {
@@ -60,14 +117,19 @@ async function load(keepView) {
     const old = new Map(G.nodes.map(n => [n.id, n]));
     G.nodes = data.nodes; G.links = data.links.filter(l => l.source !== l.target);
     G.byId = new Map(G.nodes.map(n => [n.id, n]));
+    G.children=new Map(G.nodes.map(n=>[n.id,new Set()]));
+    for(const n of G.nodes)for(const parent of n.parents||[])G.children.get(parent)?.add(n.id);
     G.adj = new Map(G.nodes.map(n => [n.id, new Set()]));
     for (const l of G.links) { G.adj.get(l.source)?.add(l.target); G.adj.get(l.target)?.add(l.source); }
     const groups = [...new Set(G.nodes.map(n => n.group))];
     G.groups = groups;
     groups.filter(g => !FIXED_COLORS[g]).sort().forEach(colorOf);  // stable folder colors
-    groups.forEach((g, i) => {  // seed each group around a sphere so clusters form quickly
-      const phi = Math.acos(1 - 2 * (i + .5) / groups.length), theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      G.nodes.filter(n => n.group === g).forEach((n, j) => {
+    const clusters=[...new Set(G.nodes.map(n=>n.cluster||n.group))].sort();
+    G.centers.clear();
+    clusters.forEach((g, i) => {  // Project-linked knowledge starts in the same neighborhood.
+      const phi = Math.acos(1 - 2 * (i + .5) / clusters.length), theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      G.centers.set(g,{x:Math.sin(phi)*Math.cos(theta)*140,y:Math.cos(phi)*140,z:Math.sin(phi)*Math.sin(theta)*140});
+      G.nodes.filter(n => (n.cluster||n.group) === g).forEach((n, j) => {
         const prev = old.get(n.id);
         if (prev) { Object.assign(n, { x: prev.x, y: prev.y, z: prev.z, vx: 0, vy: 0, vz: 0 }); return; }
         const r = 140 + (j % 7) * 6, jitter = () => (Math.random() - .5) * 60;
@@ -81,8 +143,7 @@ async function load(keepView) {
     G.alpha = keepView ? .5 : 1;
     const v = data.vault || {};
     $('vaultName').textContent = (v.name || 'Second brain');
-    $('counts').textContent = `${v.notes ?? 0} notes · ${G.links.filter(l => l.kind === 'note-link').length} note links · ${G.nodes.length} nodes` +
-      (v.unresolved ? ` · ${v.unresolved} unresolved` : '');
+    rebuildVisibility();
     renderFilters(); renderHubs(); search();
     if (G.selected) { const again = G.byId.get(G.selected.id); again ? select(again, { keepCamera: true }) : clearSelection(); }
     else renderInspector();
@@ -129,6 +190,10 @@ function simulate() {
     if (p === held) { p.vx = p.vy = p.vz = 0; continue; }
     p.vx -= p.x * .004 * a; p.vy -= p.y * .004 * a; p.vz -= p.z * .004 * a;
     if (p.id === 'root') { p.x *= .9; p.y *= .9; p.z *= .9; }
+    else if(G.scope==='projects'){
+      const center=G.centers.get(p.cluster||p.group);
+      if(center){p.vx+=(center.x-p.x)*.002*a;p.vy+=(center.y-p.y)*.002*a;if(G.is3d)p.vz+=(center.z-p.z)*.002*a;}
+    }
     const damping = held && !reduced.matches ? .78 : .62;
     p.vx *= damping; p.vy *= damping; p.vz *= damping;
     p.x += p.vx; p.y += p.vy; p.z = G.is3d ? p.z + p.vz : p.z * .85;
@@ -150,6 +215,7 @@ function resize() {
   const left = $('left').getBoundingClientRect(), right = document.querySelector('.right').getBoundingClientRect();
   const stageLeft = innerWidth > 900 && left.width ? left.right + 16 : 0;
   stageX = (stageLeft + right.left - 16) / 2; stageWidth = right.left - 16 - stageLeft;
+  if(document.body.classList.contains('compact-orb')){stageX=innerWidth/2;stageWidth=innerWidth;}
   if (graphMini) {
     const slot = $('stageSlot').getBoundingClientRect();
     Object.assign(canvas.style, { left: slot.left + 'px', top: slot.top + 'px', width: slot.width + 'px', height: slot.height + 'px' });
@@ -281,7 +347,12 @@ const stars = Array.from({ length: 220 }, (_, i) => ({ x: ((i * 127.31 + 17) % 9
 function hex(color, alpha) { const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0'); return color + a; }
 const LINKS = J.linkColors = { note: '#5eead4', folder: '#6fb3a6', noteSpark: '#a7f3e4', folderSpark: '#7fd8c8' };  // themed by holo.js
 let lastFrame = 0;
-function draw(now) { frame(now); requestAnimationFrame(draw); }
+let lastPaint = 0;
+function draw(now) {
+  const budget = J.graphics.budget();
+  if (budget.fps && now-lastPaint >= 1000/budget.fps-.5) { lastPaint=now; frame(now); }
+  requestAnimationFrame(draw);
+}
 function frame(now) {
   const elapsed = Math.max(0, (now - (lastFrame || now - 16.667)) / 1000);
   const dt = Math.max(.001, Math.min(.05, elapsed)); lastFrame = now;
@@ -303,13 +374,16 @@ function frame(now) {
     const a = G.byId.get(l.source), b = G.byId.get(l.target);
     if (!a || !b || !visible(a) || !visible(b)) return;
     const isPath = pathEdge(a.id, b.id), isLit = lit ? lit.has(a.id) && lit.has(b.id) : false, note = l.kind === 'note-link';
-    let alpha = note ? .55 : .16;
+    const projectLink=l.kind.startsWith('project-');
+    let alpha = note ? .55 : projectLink ? .4 : .16;
     if (lit || onPath) alpha = isPath ? 1 : isLit ? (note ? .85 : .45) : .03;
     if (G.matches && !(G.matches.has(a.id) || G.matches.has(b.id))) alpha *= .3;
     const depth = G.is3d ? Math.max(.3, Math.min(1, (a.persp + b.persp) / 2)) : 1;
     ctx.strokeStyle = isPath ? hex('#f5b83d', alpha * depth) : note ? hex(LINKS.note, alpha * depth) : hex(LINKS.folder, alpha * depth);
-    ctx.lineWidth = (isPath ? 2.2 : note ? 1.2 : .6) * Math.min(1.5, depth + .2);
+    ctx.lineWidth = (isPath ? 2.2 : note || projectLink ? 1.2 : .6) * Math.min(1.5, depth + .2);
+    ctx.setLineDash(l.kind==='collection'?[3,5]:[]);
     ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke();
+    ctx.setLineDash([]);
     if (!flow || ((lit || onPath) && !isPath && !isLit)) return;
     // Phase seeded by link index (not screen position) so electrons glide smoothly while the camera orbits.
     const count = isPath ? 3 : note ? 2 : 1, rate = (isPath ? .55 : note ? .32 : .2) * speed;
@@ -333,7 +407,7 @@ function frame(now) {
   ctx.globalCompositeOperation = 'source-over';
   // nodes, far to near
   const order = G.nodes.filter(visible).sort((a, b) => b.sz - a.sz);
-  const labelled = new Set(hubIds.slice(0, 10)), labels = [];
+  const labelled = new Set(['root',...hubIds.slice(0, 10)]), labels = [];
   for (const n of order) {
     let alpha = 1;
     if (lit || onPath) alpha = (onPath && onPath.has(n.id)) || (lit && lit.has(n.id)) ? 1 : .07;
@@ -346,6 +420,12 @@ function frame(now) {
     ctx.fillStyle = grad;
     if (n === G.selected || n === G.hover) { ctx.shadowBlur = 18; ctx.shadowColor = n.color; }
     ctx.beginPath(); ctx.arc(n.sx, n.sy, r, 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
+    if(n.hub && G.scope==='projects'){
+      ctx.strokeStyle=hex(n.color,.75);ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(n.sx,n.sy,r+3,0,6.283);ctx.stroke();
+      if(!graphMini){ctx.font='600 11px Segoe UI';ctx.textAlign='left';ctx.fillStyle='#eef6f4';
+        ctx.fillText((G.expanded.has(n.id)?'−':'+')+n.child_count,n.sx+r+6,n.sy+4);}
+    }
     if (n === G.selected) { ctx.strokeStyle = hex(n.color, .8); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.sx, n.sy, r + 4 + Math.sin(t * 3) * 1.5, 0, 6.283); ctx.stroke(); }
     const showLabel = !graphMini && $('showLabels').checked && alpha > .3 && (labelled.has(n.id) || n === G.selected || n === G.hover ||
       (lit && lit.has(n.id)) || (onPath && onPath.has(n.id)) || (G.matches && G.matches.has(n.id)) || G.cam.zoom > 1.7 || G.nodes.length < 60);
@@ -360,12 +440,17 @@ function frame(now) {
   for (const { n, r, alpha, rank } of labels.sort((a, b) => a.rank - b.rank || (b.n.degree || 0) - (a.n.degree || 0))) {
     const big = rank <= 3;
     ctx.font = `${big ? 600 : 400} ${big ? 14 : 12}px "Segoe UI", sans-serif`;
-    const text = n.label.length > 34 ? n.label.slice(0, 32) + '…' : n.label, w = ctx.measureText(text).width;
-    const box = { x: n.sx - w / 2 - 2, y: n.sy + r + 2, w: w + 4, h: big ? 17 : 15 };
-    if (rank > 1 && placed.some(b => box.x < b.x + b.w && b.x < box.x + box.w && box.y < b.y + b.h && b.y < box.y + box.h)) continue;
+    const label=n.display_label||n.label;
+    const text = label.length > 38 ? label.slice(0, 36) + '…' : label, w = Math.max(ctx.measureText(text).width,n.date_label?105:0);
+    const height=(big ? 17 : 15)+(n.date_label?14:0);
+    const candidates=[{x:n.sx-w/2-2,y:n.sy+r+2},{x:n.sx-w/2-2,y:n.sy-r-height-4},
+      {x:n.sx+r+8,y:n.sy-height/2},{x:n.sx-r-w-8,y:n.sy-height/2}].map(p=>({...p,w:w+4,h:height}));
+    const box=candidates.find(c=>!placed.some(b=>c.x<b.x+b.w&&b.x<c.x+c.w&&c.y<b.y+b.h&&b.y<c.y+c.h)) || (rank<=1?candidates[0]:null);
+    if(!box)continue;
     placed.push(box);
     ctx.globalAlpha = alpha; ctx.fillStyle = big ? '#eef6f4' : '#a8bbb7';
-    ctx.fillText(text, n.sx, n.sy + r + 15);
+    ctx.fillText(text, box.x+box.w/2, box.y+13);
+    if(n.date_label){ctx.font='10px Segoe UI';ctx.fillStyle='#a8bbb7';ctx.fillText(n.date_label,box.x+box.w/2,box.y+26);}
   }
   ctx.globalAlpha = 1;
   drawReactor(t);
@@ -451,7 +536,7 @@ canvas.addEventListener('pointerup', e => {
   if (drag && !drag.moved && e.button === 0) {
     const n = hit(e.clientX, e.clientY);
     if (n && e.shiftKey && G.selected && n !== G.selected) tracePath(G.selected, n);
-    else if (n) select(n);
+    else if (n) select(n,{toggleGroup:true});
     else clearSelection();
   }
   drag = null;
@@ -484,8 +569,11 @@ function neighborhood(id, depth) {
 }
 function select(n, options = {}) {
   stopMomentum();
+  const collapse=options.toggleGroup && G.selected===n && G.expanded.has(n.id);
   G.selected = n; G.path = null; settling = 0;
-  if (!visible(n)) { G.hidden.delete(n.group); store.set('hiddenGroups', [...G.hidden]); renderFilters(); }
+  if (!visible(n)) revealNode(n);
+  if(n.hub && G.scope==='projects' && !options.keepCamera){collapse?G.expanded.delete(n.id):G.expanded.add(n.id);}
+  saveGraphView();rebuildVisibility();renderFilters();reheat(.4);
   G.focus = neighborhood(n.id, G.depth);
   if (!options.keepCamera) { G.cam.follow = n; G.cam.goal = { x: n.x, y: n.y, z: G.is3d ? n.z : 0, panX: 0, panY: 0, zoom: Math.max(G.cam.zoom, 1.25) }; }
   renderInspector(); renderHubs();
@@ -504,6 +592,8 @@ function tracePath(from, to) {
   }
   if (!prev.has(to.id)) { J.notice('No connection between those two.'); return; }
   const path = []; for (let v = to.id; v; v = prev.get(v)) path.unshift(v);
+  for(const id of path)revealNode(G.byId.get(id));
+  saveGraphView();rebuildVisibility();renderFilters();renderHubs();
   G.path = path; G.focus = new Set(path);
   fit(path.map(id => G.byId.get(id)));
   renderInspector();
@@ -520,12 +610,23 @@ function renderInspector() {
   }
   const title = make('div', null, 'title'); const dot = make('i', null, 'dot'); dot.style.background = n.color;
   title.append(dot, make('span', n.label)); box.append(title);
-  box.append(make('div', `${n.group} · ${n.degree || 0} connections`, 'meta'));
+  box.append(make('div', `${n.role||n.kind} · ${groupLabel(n.group)} · ${n.degree || 0} connections`, 'meta'));
+  if(n.hub){
+    const expanded=G.scope!=='projects'||G.expanded.has(n.id);
+    const toggle=make('button',(expanded?'Collapse':'Expand')+' group ('+n.child_count+')','group-toggle');toggle.type='button';
+    toggle.setAttribute('aria-expanded',String(expanded));
+    toggle.onclick=()=>{
+      if(G.scope!=='projects'){G.scope='projects';revealNode(n);}
+      expanded?G.expanded.delete(n.id):G.expanded.add(n.id);
+      refreshGraphView();fit();
+    };
+    box.append(toggle);
+  }
   if (G.path) {
     box.append(make('div', 'Path (' + (G.path.length - 1) + ' hops): ' + G.path.map(id => G.byId.get(id)?.label || id).join(' → '), 'path'));
   }
   // A plain-text preview: drop the title line and Markdown heading/link punctuation.
-  const plain = (n.body || '').replace(/^#.*\n+/, '').replace(/^#{1,6}\s+/gm, '').replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, b) => b || a).trim();
+  const plain = (n.body || '').replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '').replace(/^#.*\n+/, '').replace(/^#{1,6}\s+/gm, '').replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, b) => b || a).trim();
   const excerpt = make('div', plain.slice(0, 420), 'excerpt'); box.append(excerpt);
   const row = make('div', null, 'row');
   if (plain.length > 420) {
@@ -545,23 +646,33 @@ function renderInspector() {
   }
   box.append(depth);
   const list = make('div', null, 'list neighbors');
-  [...(G.adj.get(n.id) || [])].map(id => G.byId.get(id)).filter(m => m && visible(m))
+  [...(G.adj.get(n.id) || [])].map(id => G.byId.get(id)).filter(Boolean)
     .sort((a, b) => (b.degree || 0) - (a.degree || 0)).slice(0, 40)
-    .forEach(m => list.append(nodeButton(m)));
+    .forEach(m => {
+      const edges=G.links.filter(l=>(l.source===n.id&&l.target===m.id)||(l.source===m.id&&l.target===n.id));
+      const reverse={'collection':'In group','note-link':'Referenced by','project-root':'Project of','project-member':'Part of project','project-report':'Report from'};
+      const relationship=[...new Set(edges.map(l=>l.source===n.id?(l.label||'Contains'):(reverse[l.kind]||'Related')))].join(' / ');
+      const b=nodeButton(m,relationship+(visible(m)?'':' · collapsed'));
+      const evidence=edges.map(l=>l.evidence).filter(Boolean).join('\n');if(evidence)b.title+='\n'+evidence;
+      list.append(b);
+    });
   box.append(list);
 }
-function nodeButton(n) {
+function nodeButton(n,relationship='') {
   const b = make('button'); b.type = 'button';
   const dot = make('i', null, 'dot'); dot.style.background = n.color;
-  b.append(dot, make('span', n.label), make('em', String(n.degree || 0)));
-  b.onclick = () => select(n); b.title = n.group;
+  const title=make('span',n.label);
+  if(relationship)title.append(make('small',relationship,'relation-label'));
+  b.append(dot, title, make('em', n.hub && G.scope==='projects' ? (G.expanded.has(n.id)?'−':'+')+n.child_count : String(n.degree || 0)));
+  b.onclick = () => select(n,{toggleGroup:true}); b.title = n.label+' · '+(n.role||n.kind)+(n.source?' · '+n.source:'');
   return b;
 }
 let hubIds = [];
 function renderHubs() {
-  const hubs = G.nodes.filter(n => visible(n) && n.id !== 'root').sort((a, b) => (b.degree || 0) - (a.degree || 0)).slice(0, 8);
+  const hubs = G.nodes.filter(n => visible(n) && n.id !== 'root').sort((a, b) =>
+    Number(b.role==='project')-Number(a.role==='project') || Number(!!b.hub)-Number(!!a.hub) || (b.degree || 0)-(a.degree || 0)).slice(0, 10);
   hubIds = hubs.map(n => n.id);
-  $('hubs').replaceChildren(...hubs.map(nodeButton));
+  $('hubs').replaceChildren(...hubs.map(n=>nodeButton(n)));
   if (!hubs.length) $('hubs').append(make('p', 'Nothing visible. Turn a group on in Filter.', 'muted'));
 }
 function renderFilters() {
@@ -569,23 +680,30 @@ function renderFilters() {
   for (const g of G.groups) {
     const count = G.nodes.filter(n => n.group === g).length;
     const b = make('button'); b.type = 'button'; b.classList.toggle('off', G.hidden.has(g));
+    b.dataset.group=g;
     const dot = make('i', null, 'dot'); dot.style.background = colorOf(g);
-    b.append(dot, make('span', g), make('em', String(count)));
+    const shown=G.nodes.filter(n=>n.group===g&&visible(n)).length;
+    b.append(dot, make('span', groupLabel(g)), make('em', shown===count?String(count):`${shown}/${count}`));
+    b.title=`${shown} visible of ${count}. Toggle this category; expand its groups to see individual nodes.`;
     b.setAttribute('aria-pressed', String(!G.hidden.has(g)));
-    b.onclick = () => { G.hidden.has(g) ? G.hidden.delete(g) : G.hidden.add(g); store.set('hiddenGroups', [...G.hidden]); renderFilters(); renderHubs(); if (G.selected && !visible(G.selected)) clearSelection(); reheat(.3); };
+    b.onclick = () => { G.hidden.has(g) ? G.hidden.delete(g) : G.hidden.add(g); refreshGraphView(); };
     box.append(b);
   }
-  const vaultOnly = G.groups.every(g => G.hidden.has(g) === ['Memory', 'Conversation', 'Tool', 'JARVIS'].includes(g));
-  $('scopeVault').classList.toggle('on', vaultOnly); $('scopeAll').classList.toggle('on', G.hidden.size === 0);
+  for(const [id,scope] of [['scopeProjects','projects'],['scopeAll','all'],['scopeVault','vault']]){
+    const on=G.scope===scope;$(id).classList.toggle('on',on);$(id).setAttribute('aria-pressed',String(on));
+  }
+  $('scopeHint').textContent=G.scope==='projects'?'Click a project or group to expand it.':G.scope==='all'?'All groups expanded. Filters can narrow the view.':'Vault notes and folders. Search still finds everything.';
 }
-$('scopeVault').onclick = () => { G.hidden = new Set(['Memory', 'Conversation', 'Tool', 'JARVIS']); store.set('hiddenGroups', [...G.hidden]); clearSelection(); renderFilters(); renderHubs(); fit(); };
-$('scopeAll').onclick = () => { G.hidden = new Set(); store.set('hiddenGroups', []); renderFilters(); renderHubs(); fit(); };
+$('scopeProjects').onclick=()=>setGraphScope('projects');
+$('scopeVault').onclick=()=>setGraphScope('vault');
+$('scopeAll').onclick=()=>setGraphScope('all');
+$('collapseGroups').onclick=()=>{G.expanded.clear();setGraphScope('projects');};
 
 function search() {
   const q = $('search').value.toLowerCase().trim(), box = $('searchResults');
   box.replaceChildren();
   if (!q) { G.matches = null; return; }
-  const found = G.nodes.filter(n => (n.label + ' ' + (n.body || '')).toLowerCase().includes(q))
+  const found = G.nodes.filter(n => (n.label + ' ' + (n.original_label||'')+' '+(n.source||'')+' '+(n.body || '')).toLowerCase().includes(q))
     .sort((a, b) => (b.label.toLowerCase().includes(q) - a.label.toLowerCase().includes(q)) || (b.degree || 0) - (a.degree || 0));
   G.matches = new Set(found.map(n => n.id));
   found.slice(0, 25).forEach(n => box.append(nodeButton(n)));
@@ -637,7 +755,12 @@ document.querySelectorAll('[data-look]').forEach(b => {
   b.classList.toggle('on', b.dataset.look === look);
   b.onclick = () => { look = b.dataset.look; store.set('hologram', look); document.querySelectorAll('[data-look]').forEach(x => x.classList.toggle('on', x === b)); };
 });
-J.on('level', v => { level = Math.max(level, Math.min(1, v * 4)); levelAt = performance.now(); });
+J.audio = {input:0,output:0,at:0,separated:false};
+J.on('audio', ev => {
+  const clean=v=>Number.isFinite(v)?Math.max(0,Math.min(1,v)):0;
+  J.audio={input:clean(ev.input),output:clean(ev.output),at:performance.now(),separated:true};
+});
+J.on('level', v => { level = Math.min(1, Math.max(0, v * 4)); levelAt = performance.now(); });
 
 // Clicking the hologram swaps it with the graph; the view morphs where the browser supports view transitions.
 function setStage(jarvisMain, animate = true) {
@@ -658,6 +781,7 @@ function setStage(jarvisMain, animate = true) {
   document.startViewTransition(once); setTimeout(once, 400);
 }
 $('stageSlot').onclick = () => setStage(!graphMini);
+J.setCompact = enabled => { document.body.classList.toggle('compact-orb',!!enabled);setStage(true,false); };
 document.querySelector('.right').addEventListener('scroll', () => { if (graphMini) resize(); });
 
 function drawReactor(t) {
@@ -666,8 +790,9 @@ function drawReactor(t) {
   if (performance.now() - levelAt > 200) level *= .9;  // decays to rest when no real audio level arrives
   const pulse = level, spin = uiState === 'thinking' ? 2.4 : 1;
   // As the main view he is centred between the side panels, high enough to leave room for his reply text.
-  const S = graphMini ? Math.min(stageWidth * DPR, h * .7) : Math.min(w, h);
-  const cx = graphMini ? stageX * DPR : w / 2, cy = graphMini ? h * .4 : h / 2;
+  const compact=document.body.classList.contains('compact-orb');
+  const S = compact ? Math.min(w*.96,h*.78) : graphMini ? Math.min(stageWidth * DPR, h * .7) : Math.min(w, h);
+  const cx = graphMini ? stageX * DPR : w / 2, cy = compact ? h*.43 : graphMini ? h * .4 : h / 2;
   const box = rc.getBoundingClientRect();  // page position, for beams and clicks drawn outside this canvas
   J.view.sphere = { x: box.left + cx / DPR, y: box.top + cy / DPR, size: S / DPR };
   if (graphMini && $('showStars').checked) {
@@ -792,7 +917,7 @@ function renderStatus() {
 }
 J.renderStatus = renderStatus;
 async function pollHealth() {
-  try { const h = await J.api('/voice-health', undefined, { timeout: 3000 }); J.health = h?.startup ? h : null; if (J.health) J.mode = J.health.listening_mode || J.mode; J.online = true; }
+  try { const h = await J.api('/voice-health', undefined, { timeout: 3000 }); J.health = h?.startup ? h : null; if (J.health) { J.mode = J.health.listening_mode || J.mode; J.resources = h.resources || {active:[]}; } J.online = true; }
   catch { J.health = null; }
   renderStatus();
 }
@@ -819,7 +944,10 @@ stream.onmessage = e => {
     J.emit('hello', ev);
   } else if (ev.type === 'state') { uiState = ev.state; renderStatus(); }
   else if (ev.type === 'settings') settings(ev);
-  else if (ev.type === 'level') J.emit('level', ev.v || 0);
+  else if (ev.type === 'level') {
+    if ('input' in ev && 'output' in ev) J.emit('audio',ev);
+    J.emit('level', ev.v || 0);
+  }
   else { addMessage(ev); J.emit('event', ev); J.emit(ev.type, ev); }
 };
 

@@ -19,8 +19,11 @@
     <h1 id="vaultName">SECOND BRAIN</h1>
     <small id="counts">Loading…</small>
     <div class="scope" role="group" aria-label="Graph scope">
-      <button id="scopeVault" type="button">Vault only</button><button id="scopeAll" type="button" class="on">All layers</button>
+      <button id="scopeProjects" type="button" class="on">Projects</button><button id="scopeAll" type="button" title="Show all indexed nodes, including tools and conversations">Show everything</button>
     </div>
+    <div class="graph-actions"><button id="scopeVault" type="button">Vault only</button><button id="collapseGroups" type="button">Collapse groups</button></div>
+    <small id="scopeHint">Click a project or group to expand it.</small>
+    <small class="graph-legend">Dotted links: groups. Solid links: references and projects.</small>
   </div>
   <div class="search-wrap">
     <input id="search" placeholder="Search the brain…" autocomplete="off" aria-label="Search the brain (press / )">
@@ -36,7 +39,7 @@
     <div id="sourcesList"></div>
   </section>
   <section>
-    <h4>Top hubs</h4>
+    <h4>Projects &amp; groups</h4>
     <div id="hubs" class="card list"></div>
   </section>
   <section>
@@ -130,5 +133,6 @@
 <script src="/modes.js"></script>
 <script src="/productivity.js"></script>
 <script src="/automation.js"></script>
+<script src="/experience.js"></script>
 </body>
 </html>

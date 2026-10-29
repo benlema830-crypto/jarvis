@@ -23,6 +23,8 @@ import threading
 import time
 import webbrowser
 
+import chrome_browser  # noqa: F401 - open links in Chrome
+
 HOME = Path.home()
 CANDIDATES = [HOME / "holo", HOME / "holo-gestures", HOME / "Documents" / "holo",
               HOME / "Documents" / "holo-gestures", HOME / "Documents" / "Jarvis Agent" / "holo"]

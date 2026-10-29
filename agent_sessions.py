@@ -189,6 +189,7 @@ class SessionManager:
         self.claude_worker = None
         self.turn_id = None
         self.cancelled = threading.Event()
+        self.pause_requested = threading.Event()
         self.on_done = None
         self.thread = None
         self._loaded = False
@@ -206,7 +207,7 @@ class SessionManager:
             self.selected = data.get("selected")
             for entry in self.entries.values():
                 entry.setdefault("provider", "codex")
-                if entry.get("status") in ("running", "waiting"):
+                if entry.get("status") in ("running", "waiting", "pausing"):
                     entry["status"] = "interrupted"
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             self.entries = {}
@@ -220,7 +221,19 @@ class SessionManager:
     def snapshot(self):
         with self.lock:
             self._load()
-            return {"selected": self.selected, "sessions": [dict(v) for v in self.entries.values()]}
+            return {"selected": self.selected, "sessions": [dict(v, timeline=[dict(item) for item in v.get('timeline',[])]) for v in self.entries.values()]}
+
+    def milestone(self, entry, label, status='running', ident=None, detail=''):
+        with self.lock:
+            timeline = entry.setdefault('timeline', [])
+            item = next((item for item in timeline if ident and item.get('id') == ident), None)
+            if item is None:
+                item = {'id': ident or f'event-{time.time_ns()}', 'started_at': time.time()}
+                timeline.append(item)
+            item.update(label=str(label)[:100], status=status, detail=str(detail)[:2000])
+            if status != 'running': item['ended_at'] = time.time()
+            del timeline[:-60]
+            entry['updated_at'] = time.time()
 
     def publish(self):
         hud.emit("sessions", **self.snapshot())
@@ -261,7 +274,7 @@ class SessionManager:
             self.publish()
         return f"{self.entries[key]['name']} is ready in {project_name}. Its session is shown in Jarvis. No task has started yet."
 
-    def start(self, task, name="", mode="research"):
+    def start(self, task, name="", mode="research", resume=False):
         if mode not in ("research", "work"):
             return "Mode must be research or work."
         if not task.strip():
@@ -279,7 +292,12 @@ class SessionManager:
             self.selected = self.active = key
             entry = self.entries[key]
             entry.update(task=task, mode=mode, status="running", progress=f"Connecting to {entry['provider']}…", report="")
+            if not resume:
+                entry['timeline'] = []
+            entry['resume_requested'] = resume
+            self.milestone(entry, 'Resuming saved task' if resume else 'Connecting to worker')
             self.cancelled.clear()
+            self.pause_requested.clear()
             self._save()
             self.publish()
             self.thread = threading.Thread(target=self._run, args=(key, task, mode), daemon=True)
@@ -287,7 +305,11 @@ class SessionManager:
         return f"{entry['name']} started. Jarvis will tell you when it finishes; progress is visible in the session panel."
 
     def cancel(self):
+        self.pause_requested.clear()
         self.cancelled.set()
+        self._interrupt()
+
+    def _interrupt(self):
         if self.claude_worker:
             self.claude_worker.cancel()
         if self.connection and self.turn_id and self.active:
@@ -295,6 +317,37 @@ class SessionManager:
                 self.connection.request("turn/interrupt", {"threadId": self.entries[self.active]["thread_id"], "turnId": self.turn_id})
             except (OSError, ValueError):
                 pass
+
+    def control(self, action, name=''):
+        if not isinstance(name, str) or action not in {'pause','resume','cancel'}:
+            raise ValueError('Choose a session and pause, resume or cancel.')
+        with self.lock:
+            self._load()
+            key = name.strip().casefold() if name else self.active or self.selected
+            if key not in self.entries:
+                raise ValueError('Choose a saved session.')
+            entry = self.entries[key]
+            if action == 'pause':
+                if self.active != key:
+                    raise ValueError('This session is not running.')
+                self.pause_requested.set(); self.cancelled.set()
+                entry['status'] = 'pausing'
+                self.milestone(entry, 'Pausing at the current operation', detail='The worker is being interrupted; wait for Paused before resuming.')
+                self._interrupt(); self.publish()
+                return {'status':'pausing'}
+            if action == 'resume':
+                if entry['status'] not in {'paused','interrupted','failed'} or self.active:
+                    raise ValueError('Wait until the session is paused or stopped.')
+                return {'message':self.start(entry['task'],entry['name'],entry.get('mode','research'),resume=True)}
+            if action == 'cancel':
+                if self.active == key:
+                    self.cancel()
+                else:
+                    entry['status'] = 'interrupted'
+                    self.milestone(entry,'Cancelled','interrupted')
+                    self._save();self.publish()
+                return {'status':'cancel_requested'}
+            raise ValueError('Choose pause, resume or cancel.')
 
     def shutdown(self):
         self.cancel()
@@ -311,6 +364,7 @@ class SessionManager:
         worker.on_done = result.update
         def progress(text):
             entry["progress"] = text
+            self.milestone(entry, 'Worker activity', status='observed', detail=text)
             self.publish()
         worker.on_progress = progress
         worker.session_id = entry.get("thread_id")
@@ -404,7 +458,7 @@ class SessionManager:
                 {"error": {"code": -32601, "message": "Unsupported client request"}})})
         elif method == "turn/started" and own_thread:
             self.turn_id = params["turn"]["id"]
-        elif method in ("item/started", "item/completed"):
+        elif method in ("item/started", "item/completed") and own_thread:
             item = params.get("item", {})
             self._items[item.get("id")] = item
             kind = item.get("type")
@@ -414,6 +468,14 @@ class SessionManager:
                     self._report = item.get("text", "")
             elif kind in ("commandExecution", "fileChange", "mcpToolCall", "webSearch", "collabToolCall"):
                 entry["progress"] = str(item.get("command") or item.get("tool") or kind)[:1500]
+                labels={'commandExecution':'Running command','fileChange':'Editing project files','mcpToolCall':'Calling connected tool','webSearch':'Searching the web','collabToolCall':'Worker coordination'}
+                label=labels[kind]
+                if kind=='commandExecution' and re.search(r'\b(pytest|unittest|test|check|verify|build|lint)\b',entry['progress'],re.I):
+                    label='Running checks / build'
+                state='running' if method=='item/started' else 'failed' if item.get('exitCode') not in (None,0) else 'finished'
+                self.milestone(entry,label,state,item.get('id'),entry['progress'])
+                if kind=='fileChange':
+                    entry['changed_files']=list(dict.fromkeys(entry.get('changed_files',[])+[c['path'] for c in item.get('changes',[]) if isinstance(c,dict) and isinstance(c.get('path'),str)]))[-30:]
             self.publish()
         elif method == "turn/completed" and own_thread:
             self._complete = params.get("turn", {})
@@ -424,9 +486,10 @@ class SessionManager:
         self._items, self._report, self._complete, self.turn_id = {}, "", None, None
         started = time.monotonic()
         effort = None
+        task_prompt = ('Continue the paused task below. First inspect prior tool results and current files; preserve completed work and do not repeat external actions.\n'+task) if entry.get('resume_requested') else task
         try:
             if entry.get("provider") == "claude":
-                ok, report = self._run_claude(entry, task, mode)
+                ok, report = self._run_claude(entry, task_prompt, mode)
                 return
             conn = self.connection = Connection(entry["cwd"], self._event, self.cancelled,
                                                 isolate_mcp=isolate_for_mode(mode))
@@ -452,12 +515,12 @@ class SessionManager:
             print(f"(Codex effort: {effort} - {reason})", flush=True)
             conn.call("turn/start", {"threadId": entry["thread_id"], "cwd": entry["cwd"], "effort": effort,
                 "approvalPolicy": "untrusted", "sandboxPolicy": sandbox,
-                "input": [{"type": "text", "text": f"Session: {entry['name']}. Mode: {mode}.\n{task}"}]})
+                "input": [{"type": "text", "text": f"Session: {entry['name']}. Mode: {mode}.\n{task_prompt}"}]})
             cancelled_at = None
             while self._complete is None:
                 if self.cancelled.is_set():
                     if cancelled_at is None:
-                        self.cancel()
+                        self._interrupt()
                         cancelled_at = time.monotonic()
                     if time.monotonic() - cancelled_at > 3:
                         raise InterruptedError()
@@ -482,8 +545,15 @@ class SessionManager:
                 except OSError:
                     pass
             with self.lock:
-                entry.update(status="completed" if ok else "interrupted" if self.cancelled.is_set() else "failed",
+                paused = self.pause_requested.is_set()
+                if paused:
+                    report = 'Paused. Saved worker context and existing files will be inspected when you resume.'
+                entry.update(status="paused" if paused else "completed" if ok else "interrupted" if self.cancelled.is_set() else "failed",
                              report=report, progress=report, reported_at=time.time())
+                self.milestone(entry, 'Paused' if paused else 'Task finished' if ok else 'Task stopped', entry['status'],detail=report)
+                for milestone in entry.get('timeline', []):
+                    if milestone['status'] == 'running':
+                        milestone.update(status='ended' if ok else 'interrupted', ended_at=time.time())
                 self.active, self.connection, self.turn_id, self.claude_worker = None, None, None, None
                 try:
                     self._save()
@@ -493,7 +563,7 @@ class SessionManager:
             if effort:  # Claude-provider sessions are recorded by the terminal worker
                 task_effort.record("codex", task, effort, ok, time.monotonic() - started, report,
                                    stopped_by_user=self.cancelled.is_set())
-            if self.on_done:
+            if self.on_done and not self.pause_requested.is_set():
                 self.on_done({"name": entry["name"], "task": task, "ok": ok, "report": report})
 
 

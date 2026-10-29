@@ -1,4 +1,7 @@
 import os
+import json
+import tempfile
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -28,6 +31,11 @@ INFO = ('media_player.lg_webos_tv_oled65c4pua|LGE OLED65C4PUA \n'
 
 class HomeAssistantTest(unittest.TestCase):
     def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        default_patch = mock.patch.object(ha, 'DEFAULTS_PATH', Path(temp.name) / 'defaults.json')
+        default_patch.start()
+        self.addCleanup(default_patch.stop)
         self.calls = []
         def api(method, path, payload=None):
             self.calls.append((method, path, payload))
@@ -43,6 +51,71 @@ class HomeAssistantTest(unittest.TestCase):
 
     def ids(self, query):
         return [d['id'] for d in ha.find(query)]
+
+    def tv_defaults(self):
+        target = {'domain': 'media_player', 'name': 'LG webOS TV OLED65C4PUA', 'area': 'Living Room'}
+        ha.DEFAULTS_PATH.write_text(json.dumps({'lg': target, 'lg tv': target}), encoding='utf-8')
+        original = ha.devices()[0]
+        chosen = dict(original, id='media_player.test_living_room_lg', name=target['name'])
+        return original, chosen
+
+    def test_persistent_lg_default_uses_exact_name_and_area(self):
+        bracketed, chosen = self.tv_defaults()
+        areas = bracketed['id'] + '|Living Room\n' + chosen['id'] + '|Living Room\n'
+        with mock.patch.object(ha, '_api', return_value=areas) as api:
+            for query in ('LG', 'LG TV', 'the LG TV', ' lg   tv '):
+                self.assertEqual(ha.find(query, [bracketed, chosen]), [chosen])
+            self.assertTrue(all(c.args[:2] == ('POST', '/api/template') for c in api.call_args_list))
+        # No cached defaults: a newly saved preference takes effect on the next resolution.
+        saved = json.loads(ha.DEFAULTS_PATH.read_text())
+        saved['lg']['area'] = 'Bedroom'
+        ha.DEFAULTS_PATH.write_text(json.dumps(saved))
+        with mock.patch.object(ha, '_api', return_value=areas), self.assertRaises(ha.HomeError):
+            ha.find('LG', [bracketed, chosen])
+
+    def test_full_names_and_entity_ids_distinguish_brackets(self):
+        bracketed, chosen = self.tv_defaults()
+        for query, expected in ((bracketed['name'], bracketed), (chosen['name'], chosen), (bracketed['id'], bracketed)):
+            with mock.patch.object(ha, '_api', side_effect=AssertionError('No fuzzy metadata lookup')):
+                self.assertEqual(ha.find(query, [bracketed, chosen]), [expected])
+
+    def test_default_missing_moved_or_duplicate_never_falls_back(self):
+        bracketed, chosen = self.tv_defaults()
+        duplicate = dict(chosen, id='media_player.test_duplicate')
+        for pool, areas in (([bracketed], ''), ([bracketed, chosen], chosen['id'] + '|Bedroom'),
+                            ([bracketed, chosen, duplicate], chosen['id'] + '|Living Room\n' + duplicate['id'] + '|Living Room')):
+            with mock.patch.object(ha, '_api', return_value=areas) as api, self.assertRaisesRegex(ha.HomeError, 'no device was selected'):
+                ha.find('LG TV', pool)
+            self.assertFalse(any('/api/services/' in c.args[1] for c in api.call_args_list))
+
+    def test_unavailable_default_does_not_send_a_service(self):
+        bracketed, chosen = self.tv_defaults()
+        chosen['state'] = 'unavailable'
+        with mock.patch.object(ha, 'devices', return_value=[bracketed, chosen]), \
+             mock.patch.object(ha, '_api', return_value=chosen['id'] + '|Living Room') as api:
+            with self.assertRaisesRegex(ha.HomeError, "isn't responding"):
+                ha.control('LG', 'turn_on')
+            self.assertFalse(any('/api/services/' in c.args[1] for c in api.call_args_list))
+
+    def test_control_and_status_share_the_saved_default(self):
+        bracketed, chosen = self.tv_defaults()
+        with mock.patch.object(ha, 'devices', return_value=[bracketed, chosen]), \
+             mock.patch.object(ha, '_api', return_value=chosen['id'] + '|Living Room') as api:
+            ha.control('LG TV', 'set_volume', '25')  # entirely mocked, never calls HA
+            api.assert_any_call('POST', '/api/services/media_player/volume_set',
+                                {'volume_level': .25, 'entity_id': chosen['id']})
+            self.assertTrue(ha.status('LG').startswith(chosen['name'] + ':'))
+
+    def test_exact_duplicate_name_is_not_silently_collapsed(self):
+        _, chosen = self.tv_defaults()
+        with self.assertRaisesRegex(ha.HomeError, 'Which one'):
+            ha.find(chosen['name'], [chosen, dict(chosen, id='media_player.another')])
+
+    def test_malformed_or_unsafe_default_fails_closed(self):
+        for contents in ('{', '[]', '{"lg":{"domain":"lock","name":"Front Door","area":"Hall"}}'):
+            ha.DEFAULTS_PATH.write_text(contents)
+            with self.assertRaises(ha.HomeError):
+                ha.find('LG', [])
 
     def test_names_resolve_to_the_right_device(self):
         self.assertEqual(self.ids('the TV'), ['media_player.lg_webos_tv_oled65c4pua'])

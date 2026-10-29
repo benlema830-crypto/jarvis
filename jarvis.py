@@ -55,6 +55,8 @@ import preferences  # noqa: E402
 from tools import TOOL_DEFS, run_tool, web_search_def  # noqa: E402
 from voice import BRITISH_VOICES, RATE, SentenceBuffer, Voice, spoken_report  # noqa: E402
 import voice_health
+import runtime_metrics
+import conversation_settings
 import model_provider
 import router
 from types import SimpleNamespace
@@ -106,6 +108,10 @@ def quick_reply(text):
     """Simple app launches, window and music commands can skip the AI round trip.
 
     Returns None to use the AI, "" for an action done silently, or a sentence to speak."""
+    import holo_control
+    local = holo_control.dispatch(text, hud.emit)
+    if local is not None:
+        return local
     if OPEN_SELF.fullmatch(text):  # "Jarvis, open (up)" means open Jarvis himself
         try:
             open_brain_page()
@@ -849,10 +855,11 @@ def listen_loop(ears, voice: Voice, turns: Turns):
             if not command:  # just "Jarvis" - wait for the rest
                 if not woke:
                     voice.chime()
-                turns.followup_until = time.time() + FOLLOWUP_SECONDS
+                turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
                 continue
             turns.idle.clear()
             voice_health.recognition("accepted")
+            runtime_metrics.begin_turn(getattr(ears, 'last_utterance_end', None), source='voice')
             hud.commands.put(command)
         except Exception as e:  # the only voice listener: log and keep listening, never exit
             print(f"(listener error: {e!r})", flush=True)
@@ -1001,7 +1008,7 @@ def main():
         else:
             voice.stop()  # e.g. a reminder chime still playing
         voice.chime()
-        turns.followup_until = time.time() + FOLLOWUP_SECONDS
+        turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
         hud.emit("state", state="listening")
         turns.idle.set()
 
@@ -1042,7 +1049,8 @@ def main():
 
     threading.Thread(target=hotkey_loop, args=(hotkey, dictate), daemon=True).start()
     if hud_on:
-        hud.track_voice(lambda: voice.level or (ears.level if ears and hud._state == "listening" else 0.0))
+        hud.track_voice(lambda: voice.level,
+                        lambda: ears.level if ears and hud._state in {'listening', 'standby'} else 0.0)
     activity.start_logger()
 
     def on_due(r):
@@ -1108,6 +1116,8 @@ def main():
     listener.start()
     voice_health.bind(voice=voice, ears=ears, listener=listener, text_mode=text_mode)
     voice_health.phase("ready")
+    runtime_metrics.bind(hud.emit)
+    voice_health.start_recovery()
     hud.emit("state", state="standby")
     turns.idle.set()
 
@@ -1126,7 +1136,7 @@ def main():
                     # Reports: speak the first few sentences; the full report is shown and remembered.
                     voice.say(spoken_report(item["say"]) if item.get("report") else item["say"], shown=item["say"])
                     voice.wait()
-                    turns.followup_until = time.time() + FOLLOWUP_SECONDS
+                    turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
                     hud.emit("state", state="listening")
                     turns.idle.set()
                     continue
@@ -1139,6 +1149,10 @@ def main():
                 prompt = item["prompt"]
             else:
                 prompt = item.strip()
+                # Voice requests already started their timing at the utterance endpoint.
+                recent = runtime_metrics.snapshot().get('turn')
+                if not recent or 'complete' in recent['stages']:
+                    runtime_metrics.begin_turn(source='keyboard')
                 hud.emit("you", text=prompt)
                 said = prompt.lower().strip(" .!?")
                 if approvals.waiting():  # the user's own words decide - the model can't approve for them
@@ -1186,8 +1200,9 @@ def main():
             else:
                 respond(brain, voice, prompt, speak)
             voice.wait()
+            runtime_metrics.mark('complete')
             if spoke:  # only invite a follow-up after actually saying something
-                turns.followup_until = time.time() + FOLLOWUP_SECONDS
+                turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
             hud.emit("state", state="standby")
             turns.idle.set()
         except Exception as e:  # one bad turn must never take the whole assistant down
@@ -1195,6 +1210,8 @@ def main():
             hud.emit("error", text=f"That request failed: {e!r}")
             hud.emit("state", state="standby")
             turns.idle.set()
+        finally:
+            runtime_metrics.mark('complete')
 
 
 if __name__ == "__main__":

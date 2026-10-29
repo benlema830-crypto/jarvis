@@ -1,0 +1,4 @@
+# Install only after approval, in a dedicated environment. FFmpeg is a separate prerequisite.
+faster-whisper==1.2.1
+numpy==2.5.4
+yt-dlp==2026.10.21

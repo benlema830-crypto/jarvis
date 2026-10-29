@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import webbrowser
+import chrome_browser  # noqa: F401 - open links in Chrome
 from instance_config import HUD_PORT
 
 root = Path(__file__).resolve().parent

@@ -65,13 +65,31 @@
       for (const s of sessions) {
         const details = make('details'); details.append(make('summary', 'Last report'), make('p', s.report || 'No report yet.'));
         const status = String(s.status || 'idle');
+        const progress=make('p',s.progress||'', 'job-progress'), timeline=make('ol',null,'job-timeline'), controls=make('div',null,'actions');
+        for(const event of (s.timeline||[]).slice(-12)) {
+          const row=make('li');row.append(make('strong',event.label),make('small',` ${event.status} · ${new Date(event.started_at*1000).toLocaleTimeString()}`));
+          if(event.detail){const detail=make('details');detail.append(make('summary','Details'),make('pre',event.detail));row.append(detail);}timeline.append(row);
+        }
+        for(const [action,label,allowed] of [['pause','Pause',['running','waiting']],['resume',status==='failed'?'Review & retry':'Resume',['paused','interrupted','failed']],['cancel','Cancel',['running','waiting','pausing','paused']]]) {
+          if(!allowed.includes(status))continue;
+          const b=make('button',label);b.type='button';b.onclick=async()=>{b.disabled=true;try{await J.api('/session-control',{action,name:s.name});await showAgents();}catch(e){J.notice(e.message);b.disabled=false;}};controls.append(b);
+        }
+        if(['running','waiting'].includes(status) && s.updated_at && Date.now()/1000-s.updated_at>120)progress.append(make('small',' No new activity for over two minutes. The worker may still be running; inspect before retrying.'));
+        const files=make('div',null,'actions');
+        for(const path of (s.changed_files||[]).slice(-8)){
+          const b=make('button',path.split(/[\\/]/).pop());b.type='button';b.onclick=()=>{
+            agents.close();const id='job-source:'+s.name+':'+path;
+            J.panes?.add({id,title:path,kind:'source',project:s.project,projectPath:path,source:s.name,body:'Changed project file.'},true);J.panes?.focus(id);
+          };files.append(b);
+        }
         sessionBox.append(tile({ icon: '🤖', name: s.name, text: (s.project || '') + ' · ' + (s.provider || 'codex') + (s.task ? ' — ' + s.task : ''),
-          chip: status, chipClass: status === 'running' ? 'warn' : status === 'failed' ? 'bad' : 'ok', extra: s.report ? [details] : [] }));
+          chip: status, chipClass: status === 'running' ? 'warn' : status === 'failed' ? 'bad' : 'ok', extra: [progress,controls,timeline,files,...(s.report ? [details] : [])] }));
       }
     } catch (e) { sessionBox.replaceChildren(make('p', e.message, 'muted')); }
   }
   el('agentsBtn').onclick = () => { agents.showModal(); showAgents(); };
   setInterval(() => { if (agents.open) showAgents(); }, 5000);
+  J.on('sessions',()=>{if(agents.open)showAgents();});
 
   /* ---------- Tool armory ---------- */
   const armory = dialog('armoryDialog', 'Tool armory', 'Everything JARVIS can reach. Built-in tools are always on; connect apps through MCP and he uses them mid-conversation (asking you first).');
@@ -289,6 +307,24 @@
     make('p', 'Device activity does not prove speech can be recognized. AI status reflects the last request only.', 'muted'));
   const REC = { none: 'No phrase yet', voice_not_matched: 'Voice not matched', recognized: 'Speech recognized', no_speech: 'No usable speech', recognition_error: 'Recognition failed', wake_word_required: 'Wake word required', accepted: 'Command accepted', interruption_rejected: 'Interruption not accepted' };
   const AI = { not_checked: 'Not checked', requesting: 'Request in progress', responded: 'Last request responded', interrupted: 'Last request interrupted', error: 'Last request failed' };
+  const timingList=make('dl',null,'kv'), recoveryNote=make('p',null,'muted'), pacing=make('div'), pacingFields={};
+  health.body.append(make('h3','Response timing'),timingList,make('h3','Recovery'),recoveryNote);
+  for(const [component,label] of [['microphone','Reconnect microphone'],['output','Reconnect speakers']]) {
+    const b=make('button',label);b.type='button';b.onclick=async()=>{
+      b.disabled=true;try{await J.api('/voice-recovery',{component});recoveryNote.textContent='Recovery requested. Status updates below.';}
+      catch(e){recoveryNote.textContent=e.message;}finally{b.disabled=false;}
+    };health.body.append(b);
+  }
+  health.body.append(make('h3','Conversation pacing'),pacing);
+  for(const [key,label,min,max,step] of [['pause_seconds','Pause before responding (seconds)',.6,2.5,.1],['followup_seconds','Follow-up window (seconds)',0,45,1],['first_clause_chars','First spoken clause length',40,200,5]]) {
+    const row=make('label',label),input=make('input');input.type='number';input.min=min;input.max=max;input.step=step;input.setAttribute('aria-label',label);
+    row.style.cssText='display:flex;justify-content:space-between;gap:12px;margin:8px 0';input.style.width='85px';
+    pacingFields[key]=input;row.append(input);pacing.append(row);
+  }
+  const savePacing=make('button','Save pacing'),pacingStatus=make('p',null,'muted');savePacing.type='button';
+  savePacing.onclick=async()=>{try{await J.api('/conversation-settings',Object.fromEntries(Object.entries(pacingFields).map(([key,input])=>[key,Number(input.value)])));pacingStatus.textContent='Saved. Takes effect on the next phrase.';}catch(e){pacingStatus.textContent=e.message;}};
+  pacing.append(savePacing,pacingStatus);
+  async function loadPacing(){try{const values=await J.api('/conversation-settings');for(const [key,input] of Object.entries(pacingFields))input.value=values[key];}catch(e){pacingStatus.textContent=e.message;}}
   function renderHealth() {
     const h = J.health, yes = v => v ? 'Active' : 'Inactive';
     const rows = !h ? [['Assistant', J.online ? 'Connected; diagnostics unavailable' : 'Offline']] : [
@@ -302,6 +338,12 @@
       ['Playback error this session', h.output_error ? 'Yes — playback or synthesis failed' : 'None reported']];
     healthList.replaceChildren(...rows.flatMap(([k, v]) => [make('dt', k), make('dd', String(v))]));
     meter.value = h?.input_level || 0;
+    const timings=h?.resources?.timings || {}, names={recognition:'Speech recognition',synthesis:'Voice generation',accepted:'Speech end to accepted command',first_text:'Speech end to first text',first_audio:'Speech end to audible reply'};
+    const lines=Object.entries(names).filter(([key])=>timings[key]).map(([key,label])=>[label,`${(timings[key].last_ms/1000).toFixed(2)}s last / ${(timings[key].median_ms/1000).toFixed(2)}s median`]);
+    lines.push(['Graphics',J.graphics.budget().reason]);
+    timingList.replaceChildren(...lines.flatMap(([k,v])=>[make('dt',k),make('dd',v)]));
+    const recovery=Object.entries(h?.recovery || {}).map(([key,value])=>`${key}: ${value.status}${value.message ? ' — '+value.message : ''}`);
+    recoveryNote.textContent=recovery.join('\n') || 'Audio devices reconnect automatically when disconnected. Manual recovery stops queued speech.';
   }
   J.on('status', () => { if (health.open) renderHealth(); });
 
@@ -344,7 +386,7 @@
   /* ---------- More menu ---------- */
   const menu = el('moreMenu');
   const items = [
-    ['Voice health', () => { health.showModal(); renderHealth(); }], ['Change model…', () => J.emit('open-model')],
+    ['Voice health', () => { health.showModal(); renderHealth(); loadPacing(); }], ['Change model…', () => J.emit('open-model')],
     ['Workspace folders', showWorkspace], ['Next steps', showPlan], null,
     ['Keyboard: / search · F fit · Esc clear', null],
   ];

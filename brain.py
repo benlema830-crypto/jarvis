@@ -9,7 +9,7 @@ PORT = int(os.getenv("JARVIS_BRAIN_PORT", "7781"))
 
 
 def snapshot():
-    """Real local data only: vault notes (grouped by top folder), memories, recent turns, tools.
+    """Real local data only: project neighborhoods, vault notes, memories, recent turns, tools.
 
     Edges are resolved note links or collection membership, never inferred relationships.
     """
@@ -54,8 +54,9 @@ def snapshot():
     if turns:
         add("recent", "Conversations", "Conversation", "Recent exchanges saved for continuity.")
         for i, turn in enumerate(turns):
-            add(f"recent-{i}", str(turn.get("user", "Conversation"))[:55], "Conversation",
+            node = add(f"recent-{i}", str(turn.get("user", "Conversation")), "Conversation",
                 f"{turn.get('time', '')}\n\nYou: {turn.get('user', '')}\n\nJarvis: {turn.get('assistant', '')}", "recent")
+            node['timestamp'] = turn.get('time')
 
     tree = ast.parse((ROOT / "tools.py").read_text(encoding="utf-8"))
     registered = set()
@@ -68,6 +69,10 @@ def snapshot():
             add("tool-" + item.name, item.name.replace("_", " ").title(), "Tool",
                 ast.get_docstring(item) or item.name, "tools")
 
+    import graph_organization
+    saved = read('agent_sessions.json')
+    sessions = saved.get('sessions', {}) if isinstance(saved, dict) else {}
+    graph_organization.organize(nodes, links, sessions.values() if isinstance(sessions, dict) else sessions if isinstance(sessions, list) else ())
     degree = {}
     for link in links:
         for end in (link["source"], link["target"]):
@@ -83,10 +88,11 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/automation.js": ("automation.js", "text/javascript"),
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
           "/holo.js": ("holo.js", "text/javascript"),
+          "/experience.js": ("experience.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
-PROXY = {"GET": {"/events", "/status", "/voice-health", "/settings", "/sessions", "/classic", "/models", "/intel"},
-         "POST": {"/command", "/stop", "/settings", "/models"}}
+PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel"},
+         "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control"}}
 
 
 def notify_assistant(event):
@@ -176,6 +182,18 @@ def serve():
                     return project_memory.handoff(payload.get('project', 'Jarvis'),
                         **{k: payload.get(k, '') for k in ('summary', 'unresolved', 'next_action', 'files')}), 200
                 raise ValueError('Unknown project memory action.')
+            if route == '/project-resume' and post:
+                import project_memory
+                p = self.payload(2000)
+                if p.get('action') == 'file':
+                    return project_memory.source_file(p.get('project','Jarvis'), p.get('path','')), 200
+                if p.get('action','resume') == 'resume':
+                    return project_memory.resume(p.get('project','Jarvis')), 200
+                raise ValueError('Unknown resume action.')
+            if route == '/desktop-orb' and post:
+                import desktop_orb
+                self.payload(1000)
+                return desktop_orb.launch(), 200
             if route == "/knowledge-search" and post:
                 import semantic_search
                 return semantic_search.search(self.payload(4000).get('query', '')), 200

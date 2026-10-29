@@ -23,6 +23,8 @@ import numpy as np
 import sounddevice as sd
 import webrtcvad
 import voice_health
+import runtime_metrics
+import conversation_settings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VOICEPRINT_PATH = os.path.join(HERE, "data", "voiceprint.npz")
@@ -112,7 +114,8 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
 
     def __call__(self, audio: np.ndarray) -> str:
-        text = self._run(audio)
+        with runtime_metrics.work('recognition'):
+            text = self._run(audio)
         return "" if text.lower().strip(" .!?") in HALLUCINATIONS else text
 
 
@@ -172,12 +175,15 @@ class Ears:
         if wanted.strip() and device is None:
             print(f"(Mic '{wanted}' not found - using the Windows default mic)", flush=True)
         self.last_input = self.last_processed = 0.0
+        self.last_utterance_end = None
+        self.pause_seconds = conversation_settings.read()['pause_seconds']
+        self._input_lock = threading.Lock()
         self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=BLOCK,
                                      device=device,
                                      callback=self._receive)
         self.mic = sd.query_devices(self.stream.device, kind="input")["name"]
         self.stream.start()
-        threading.Thread(target=self._process, daemon=True).start()
+        threading.Thread(target=self._process_guarded, daemon=True).start()
         threading.Thread(target=self._barge_in_worker, daemon=True).start()
         print(f"Ears online: mic \"{self.mic}\", wake word \"hey Jarvis\", "
               f"speech recognition on the {self.transcribe.device}", flush=True)
@@ -185,6 +191,35 @@ class Ears:
     def _receive(self, indata, *_):
         self.last_input = time.monotonic()
         self._blocks.put(indata[:, 0].copy())
+
+    def recover_input(self):
+        """Reopen audio only; preserve the enrolled voice and loaded recognition model."""
+        with self._input_lock:
+            try:
+                self.stream.close()
+            except Exception:
+                pass
+            for pending in (self._blocks, self._phrases, self._busy_phrases):
+                while True:
+                    try:
+                        pending.get_nowait()
+                    except queue.Empty:
+                        break
+            device = find_input(os.getenv('JARVIS_INPUT_DEVICE', ''))
+            self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='int16', blocksize=BLOCK,
+                                         device=device, callback=self._receive)
+            self.mic = sd.query_devices(self.stream.device, kind='input')['name']
+            self.stream.start()
+        return 'Microphone reconnected: ' + self.mic
+
+    def _process_guarded(self):
+        while True:
+            try:
+                self._process()
+            except Exception as exc:
+                voice_health.recognition('recognition_error')
+                self._log(f'Audio processing recovered after {type(exc).__name__}')
+                time.sleep(.5)
 
     def _is_speech(self, block: np.ndarray) -> bool:
         frames = (block[i:i + VAD_FRAME].tobytes() for i in range(0, BLOCK, VAD_FRAME))
@@ -238,10 +273,10 @@ class Ears:
             # Give normal requests room for natural pauses. Speech overlapping
             # playback retains a short endpoint so "stop" stays responsive.
             # Once the wake detector cuts playback, allow a full new request.
-            end_silence = BARGE_END_SILENCE if phrase_busy and not woke else END_SILENCE
+            end_silence = BARGE_END_SILENCE if phrase_busy and not woke else getattr(self, 'pause_seconds', END_SILENCE)
             if silence * BLOCK_SECONDS >= end_silence or len(phrase) * BLOCK_SECONDS >= MAX_PHRASE:
                 if voiced * BLOCK_SECONDS >= MIN_SPEECH:
-                    item = (np.concatenate(phrase), woke, wake_max)
+                    item = (np.concatenate(phrase), woke, wake_max, time.monotonic()-silence*BLOCK_SECONDS)
                     # Speech that overlapped Jarvis's reply must never become a fresh
                     # command when playback ends (especially in continuous mode).
                     busy = (phrase_busy and not woke) or not self.accepting.is_set()
@@ -272,7 +307,7 @@ class Ears:
     def _barge_in_worker(self):
         """Phrases spoken while Jarvis is busy: passed to on_barge_in(text, is_owner)."""
         while True:
-            pcm, woke, wake_max = self._busy_phrases.get()
+            pcm, woke, wake_max = self._busy_phrases.get()[:3]
             try:
                 self._handle_barge_phrase(pcm, wake_max)
             except Exception as exc:
@@ -300,7 +335,9 @@ class Ears:
     def listen(self, timeout: float | None = None) -> tuple[str, bool] | None:
         """Wait for one phrase. Returns (text, woke), or None if nothing usable was heard."""
         try:
-            pcm, woke, wake_max = self._phrases.get(timeout=timeout)
+            item = self._phrases.get(timeout=timeout)
+            pcm, woke, wake_max = item[:3]
+            self.last_utterance_end = item[3] if len(item) > 3 else time.monotonic()
         except queue.Empty:
             return None
         audio = pcm.astype(np.float32) / 32768.0

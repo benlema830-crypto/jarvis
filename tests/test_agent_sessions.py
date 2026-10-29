@@ -57,6 +57,33 @@ class SessionTest(unittest.TestCase):
             conn.assert_not_called()
         self.assertEqual(sessions.SessionManager().snapshot()["selected"], "frontier")
 
+    def test_pause_preserves_session_context_and_resume_inspects_existing_work(self):
+        self.manager.open('Frontier')
+        self.manager.active='frontier'
+        entry=self.manager.entries['frontier']
+        entry.update(status='running',thread_id='saved-thread',task='Fix the save path',mode='work')
+        self.manager.connection=mock.Mock()
+        self.manager.turn_id='turn-1'
+        self.manager.control('pause','Frontier')
+        self.assertTrue(self.manager.pause_requested.is_set())
+        self.assertEqual(entry['status'],'pausing')
+        self.manager.connection.request.assert_called_once_with('turn/interrupt',{'threadId':'saved-thread','turnId':'turn-1'})
+        self.manager.active=None;entry['status']='paused'
+        with mock.patch.object(self.manager,'start',return_value='Resuming') as start:
+            self.manager.control('resume','Frontier')
+        start.assert_called_once_with('Fix the save path','Frontier','work',resume=True)
+        self.assertEqual(entry['thread_id'],'saved-thread')
+
+    def test_milestones_are_real_bounded_and_snapshot_copies_nested_entries(self):
+        self.manager.open('Frontier');self.manager.active='frontier'
+        entry=self.manager.entries['frontier'];entry['thread_id']='ours'
+        self.manager._event({'method':'item/started','params':{'threadId':'other','item':{'id':'wrong','type':'commandExecution','command':'private'}}})
+        self.assertFalse(entry.get('timeline'))
+        for i in range(70):self.manager.milestone(entry,'Running checks','finished',str(i),'python -m unittest')
+        self.assertEqual(len(entry['timeline']),60)
+        snap=self.manager.snapshot();snap['sessions'][0]['timeline'][0]['label']='changed'
+        self.assertNotEqual(entry['timeline'][0]['label'],'changed')
+
     def test_names_are_reused_case_insensitively_and_unknown_projects_rejected(self):
         self.manager.open("Frontier")
         self.manager.open("FRONTIER")

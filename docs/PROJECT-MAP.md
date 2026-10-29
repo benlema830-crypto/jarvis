@@ -29,6 +29,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | --- | --- | --- | --- |
 | `jarvis.py` (the assistant) | 7778 (classic HUD + event stream) | `open_brain.py`, `run.bat` | Ears, voice, brain, tools, Telegram bridge, HOLO watcher, calendar heads-ups |
 | `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Brain page, the graph data, Eyes frames and Watch/Focus sessions; proxies chat/status to 7778 |
+| `desktop_orb.py` | Uses 7781 | Jarvis Orb desktop shortcut / More menu | Native WebView2 orb; always on top when compact, expands to full Brain workspace |
 | VoiceStudio app | 3900 | the user / Jarvis on voice warm-up | Default voices (VoiceStudio profiles), GPU synthesis |
 | `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
@@ -48,7 +49,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Digests, privacy and file tools | digests.py, privacy.py, artifacts.py, hud/automation.js |
 | Response preferences | response_settings.py, jarvis.py next-turn refresh, tools.py response_style, hud/automation.js |
 | Brain page | hud/brain.html, hud/brain.css, hud/brain.js (graph, inspector, reactor, chat), hud/panels.js (dialogs), hud/modes.js (Eyes/Watch/Holo/Focus) |
-| Brain server | brain.py, eyes.py, visual_modes.py, integration_status.py, workspace.py |
+| Brain server | brain.py, graph_organization.py (project neighborhoods, display labels and relationship evidence), eyes.py, visual_modes.py, integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |

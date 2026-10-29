@@ -45,6 +45,11 @@ h4{font:600 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;col
 .scope{display:flex;gap:4px;margin-top:8px}
 .scope button{flex:1;font-size:12.39px;padding:4px 6px;background:transparent}
 .scope button.on{border-color:var(--line-strong);background:color-mix(in srgb,var(--accent) 18%,#071116);color:color-mix(in srgb,var(--accent) 30%,#ffffff)}
+.graph-actions{display:flex;gap:6px;margin:8px 0}.graph-actions button{flex:1;font-size:12px;padding:5px}
+#scopeHint{display:block;margin:8px 0 0;line-height:1.45;color:var(--muted)}
+.graph-legend{display:block;margin-top:5px;line-height:1.4;color:var(--faint);font-size:11px}
+.group-toggle{margin:4px 0 10px;width:100%;font-size:13px}
+.relation-label{display:block;font-size:11px;line-height:1.5;color:var(--muted);font-weight:400}
 .search-wrap{position:relative}
 .search-wrap input{width:100%;font-size:14.16px;padding:7px 9px}
 .results{display:flex;flex-direction:column;gap:2px;margin-top:4px;max-height:220px;overflow:auto}
@@ -267,6 +272,7 @@ body.panel-collapsed{--left-width:0px}
  .pill{font-size:10px;padding:4px 6px;max-width:136px}
 }
 /* Colour themes (holo.js); the default cyan is the :root palette */
+body[data-theme=violet]{--accent:#b18aff;--accent-ink:#180b30;--line:rgba(177,138,255,.14);--line-strong:rgba(196,165,255,.32)}
 body[data-theme=mark42]{--accent:#f59e0b;--accent-ink:#2a1700;--line:rgba(245,170,80,.14);--line-strong:rgba(250,190,90,.32)}
 body[data-theme=stealth]{--accent:#e2e8f0;--accent-ink:#0f172a;--line:rgba(210,220,235,.12);--line-strong:rgba(225,232,245,.3)}
 body[data-theme=emerald]{--accent:#34d399;--accent-ink:#022c1d;--line:rgba(100,220,160,.13);--line-strong:rgba(110,231,183,.3)}
@@ -274,6 +280,19 @@ body[data-theme=emerald]{--accent:#34d399;--accent-ink:#022c1d;--line:rgba(100,2
 .themes button{width:15px;height:15px;padding:0;border-radius:50%;border:1px solid #ffffff30;background:var(--swatch)}
 .themes button:hover{background:var(--swatch);filter:brightness(1.2)}
 .themes button.on{outline:2px solid var(--swatch);outline-offset:2px}
+.graphics-quality{display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:var(--muted)}
+.graphics-quality select{max-width:130px;padding:4px;font:inherit;color:var(--accent);background:var(--panel-solid);border:1px solid var(--line-strong)}
+.holo-viewer{width:min(760px,90vw);border-color:var(--accent);box-shadow:0 0 70px #7c3aed30;background:#0e1020f5}
+.holo-viewer>button:first-child{float:right}.holo-viewer pre,#resumeDialog pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:55vh;overflow:auto;font:13px/1.65 var(--mono)}
+.holo-viewer .actions{display:flex;gap:12px;flex-wrap:wrap}.pane-library-row{display:flex;align-items:center;gap:10px;margin:10px 0}.pane-library-row>button:first-child{flex:1;text-align:left}
+.job-progress{color:var(--accent);white-space:pre-wrap;overflow-wrap:anywhere}.job-timeline{padding-left:18px;max-height:280px;overflow:auto;font-size:12px}.job-timeline li{margin:10px 0}.job-timeline small{display:block;color:var(--muted)}.job-timeline pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.orb-chrome{position:fixed;top:8px;left:14px;right:14px;z-index:30;display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--accent)}
+.orb-chrome>span{flex:1;padding:8px;cursor:move}.orb-chrome button{padding:5px 8px;font-size:10px}
+body.native-orb:not(.compact-orb) .orb-chrome{left:auto;background:var(--panel-solid);border:1px solid var(--line-strong);border-radius:10px}
+body.compact-orb .left,body.compact-orb .right,body.compact-orb .toolbar,body.compact-orb .dock,body.compact-orb #graph,body.compact-orb #fx,body.compact-orb .holo-reply,body.compact-orb .expand{display:none!important}
+body.compact-orb{background:#050610;overflow:hidden}body.compact-orb #reactor{background:radial-gradient(ellipse,#160a2d 0%,#050610 68%)}
+.orb-command{display:none}body.compact-orb .orb-command{position:fixed;bottom:10px;left:14px;right:14px;z-index:20;display:flex;gap:5px;background:var(--panel-solid);border:1px solid var(--line-strong);border-radius:18px;padding:5px}
+.orb-command input{min-width:0;width:100%;background:transparent;border:0;color:var(--text);padding:4px 8px;font-size:12px}.orb-command button{border-radius:50%;padding:4px 9px}
 /* Thought beams: above the graph, below the panels; above the mini graph when JARVIS is the main view */
 #fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
 body.jarvis-main #fx{z-index:7}

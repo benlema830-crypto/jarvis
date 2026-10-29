@@ -4,6 +4,7 @@ Engines:
   voicestudio - The owner's VoiceStudio clone, generated on the GPU by the local
                VoiceStudio app. Falls back to Kokoro if the app is closed.
   qwen       - The owner's local Qwen clone.
+  piper      - Downloaded Piper voices (models/piper/*.onnx) on the CPU. Fast and offline.
   elevenlabs - ElevenLabs over the network (most human). Audio streams in, so
                playback starts before the whole sentence is generated.
   kokoro     - Kokoro on the CPU. Instant, offline, and the automatic fallback
@@ -30,6 +31,7 @@ from kokoro_onnx import Kokoro
 
 import hud
 import voice_health
+import runtime_metrics
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(HERE, "models")
@@ -59,8 +61,8 @@ RATE = 24000  # Kokoro's rate, and the PCM format we ask ElevenLabs for
 SOUND_TAGS = re.compile(r"\s*\[(chuckle|laugh|sigh|clear throat|cough|gasp|groan|sniff)\]\s*", re.I)
 ELEVEN_TAGS = {"chuckle": "[soft chuckle]", "laugh": "[laughing]", "sigh": "[sigh]", "clear throat": "[clears throat]"}
 BRITISH_VOICES = ["bm_george", "bm_fable", "bm_lewis", "bm_daniel"]
-ENGINES = ("voicestudio", "qwen", "kokoro", "elevenlabs")
-ENGINE_LABELS = {"voicestudio": "Jarvis (VoiceStudio)", "qwen": "Qwen clone",
+ENGINES = ("voicestudio", "qwen", "piper", "kokoro", "elevenlabs")
+ENGINE_LABELS = {"voicestudio": "Jarvis (VoiceStudio)", "qwen": "Qwen clone", "piper": "Piper",
                  "kokoro": "Kokoro", "elevenlabs": "ElevenLabs"}
 
 
@@ -85,7 +87,12 @@ def voice_choices(current: str = "") -> tuple[list[dict], str]:
                     "label": "VoiceStudio voice (app closed)"}]
     elif current.startswith("voicestudio") and current not in {c["id"] for c in choices}:
         choices.insert(0, {"id": current, "label": "Current VoiceStudio voice (not found in the app)"})
-    choices += [{"id": e, "label": ENGINE_LABELS[e]} for e in available_engines() if e != "voicestudio"]
+    import piper_voice
+    for e in available_engines():
+        if e == "piper":  # one entry per downloaded Piper voice
+            choices += [{"id": f"piper:{n}", "label": f"{n} (Piper)"} for n in piper_voice.voices()]
+        elif e != "voicestudio":
+            choices.append({"id": e, "label": ENGINE_LABELS[e]})
     return choices, current
 
 
@@ -160,6 +167,9 @@ class SentenceBuffer:
 
     def __init__(self):
         self.buf = ""
+        import conversation_settings
+        self.first_clause_chars = conversation_settings.read()['first_clause_chars']
+        self.released = False
 
     def feed(self, text: str) -> list[str]:
         self.buf += text
@@ -169,9 +179,11 @@ class SentenceBuffer:
             if m:
                 out.append(self.buf[: m.end()].strip())
                 self.buf = self.buf[m.end():]
-            elif len(self.buf) > 220 and (cut := max(self.buf.rfind(", "), self.buf.rfind("; "))) > 40:
+                self.released = True
+            elif len(self.buf) > (220 if self.released else self.first_clause_chars) and (cut := max(self.buf.rfind(", "), self.buf.rfind("; "))) > 40:
                 out.append(self.buf[: cut + 1].strip())
                 self.buf = self.buf[cut + 2:]
+                self.released = True
             else:
                 return [s for s in out if s]
 
@@ -204,6 +216,7 @@ class _Player:
         self._pos = 0
         self._on_done = None
         self.level = 0.0  # loudness of what's playing right now, for the HUD
+        self.last_callback = time.monotonic()
         self._lock = threading.Lock()
         self._stream = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._fill,
                                        device=device)
@@ -231,6 +244,7 @@ class _Player:
         return left
 
     def _fill(self, outdata, frames, time_info, status):
+        self.last_callback = time.monotonic()
         out = outdata[:, 0]
         filled = 0
         callbacks = []
@@ -251,6 +265,8 @@ class _Player:
                     self._cur = None
         out[filled:] = 0
         self.level = float(np.sqrt(np.mean(out * out))) if filled else 0.0
+        if self.level > .0001:
+            runtime_metrics.mark('first_audio')
         # Never call into Voice while holding the player lock: stop() takes
         # these locks in the opposite order and could otherwise deadlock.
         for callback in callbacks:
@@ -327,12 +343,15 @@ class Voice:
         self.eleven = None
         self.local = None
         self.studio = None
+        self.piper = None
         self._studio_failures = 0
         if engine == "voicestudio":
             self._start_voicestudio(profile)
         if engine == 'qwen':
             import qwen_voice
             self.local = qwen_voice.create()
+        if engine == "piper":
+            self._start_piper(profile)
         self._eleven_failures = 0
         if engine == "elevenlabs":
             self._start_elevenlabs()
@@ -461,6 +480,8 @@ class Voice:
             return "voicestudio"
         if getattr(self, "local", None) is not None:
             return 'qwen'
+        if getattr(self, "piper", None) is not None:
+            return "piper"
         return "elevenlabs" if self.eleven else "kokoro"
 
     def _start_elevenlabs(self) -> bool:
@@ -483,11 +504,23 @@ class Voice:
         self.studio = VoiceStudioEngine(self.speed, profile)
         self._studio_failures = 0
 
+    def _start_piper(self, name: str = ""):
+        from piper_voice import PiperEngine
+        try:
+            self.piper = PiperEngine(name, self.speed, RATE)
+        except Exception as e:
+            print(f"(Piper voice unavailable: {e} - using Kokoro)", flush=True)
+            hud.emit("error", text=f"Piper voice unavailable: {e}")
+            self.piper = None
+
     @property
     def choice(self) -> str:
         """The picker id of the current voice, e.g. "voicestudio:27c8e8a9" or "kokoro"."""
         studio = getattr(self, "studio", None)
-        return f"voicestudio:{studio.profile}" if studio is not None else self.engine
+        if studio is not None:
+            return f"voicestudio:{studio.profile}"
+        piper = getattr(self, "piper", None)
+        return f"piper:{piper.name}" if piper is not None else self.engine
 
     def switch_engine(self, engine: str) -> str:
         """Switch voice engine while running (see ENGINES, or "voicestudio:<profile id>").
@@ -501,6 +534,9 @@ class Voice:
             self._studio_failures = 0
             threading.Thread(target=self._warm_studio, daemon=True).start()
             return engine
+        if engine == "piper" and getattr(self, "piper", None) is not None and profile and profile != self.piper.name:
+            self._start_piper(profile)  # another Piper voice
+            return self.engine
         if engine == self.engine:
             return engine
         local = getattr(self, 'local', None)
@@ -511,6 +547,8 @@ class Voice:
             self.studio = None
         if engine != 'elevenlabs':
             self.eleven = None
+        if engine != 'piper':
+            self.piper = None
         if engine == 'qwen':
             import qwen_voice
             self.local = qwen_voice.create()
@@ -519,6 +557,8 @@ class Voice:
             threading.Thread(target=self._warm_studio, daemon=True).start()
         elif engine == 'elevenlabs':
             self._start_elevenlabs()
+        elif engine == 'piper':
+            self._start_piper(profile)
         return self.engine
 
     def _drop_elevenlabs(self, reason: str):
@@ -556,6 +596,15 @@ class Voice:
                     # instead of waiting on the dead connection every sentence.
                     self._studio_reopening = True
                     threading.Thread(target=self._reopen_studio, daemon=True).start()
+        piper = getattr(self, "piper", None)
+        if piper is not None:
+            try:
+                samples = piper.render(SOUND_TAGS.sub(' ', text).strip())
+                if len(samples):
+                    yield samples
+                return
+            except Exception as e:
+                print(f"(Piper: {e} - using Kokoro for this sentence)", flush=True)
         if self.local is not None:
             started = time.monotonic()
             samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())
@@ -593,6 +642,7 @@ class Voice:
         text = clean_for_speech(text)
         if not text:
             return
+        runtime_metrics.mark('first_text')
         print(f"JARVIS: {shown or text}", flush=True)
         hud.emit("jarvis", text=shown or text)
         pieces = sentences(text) if len(text) > MAX_CHUNK_CHARS else [text]
@@ -607,7 +657,7 @@ class Voice:
     def synthesize(self, text: str) -> np.ndarray:
         """Render text to one float32 array at RATE without playing it (e.g. a Telegram voice note)."""
         text = clean_for_speech(text)
-        pieces = list(self._render(text)) if text else []
+        pieces = list(self._timed_render(text)) if text else []
         return np.concatenate(pieces).astype(np.float32) if pieces else np.zeros(0, np.float32)
 
     def chime(self):
@@ -666,7 +716,7 @@ class Voice:
             try:
                 # Hold back one piece so the last one can get a fade-out
                 held, first = None, True
-                for piece in self._render(text):
+                for piece in self._timed_render(text):
                     if gen != self._gen:
                         break
                     if held is not None:
@@ -682,6 +732,25 @@ class Voice:
                 voice_health.output_failed()
                 print(f"(voice error: {e})", flush=True)
                 self._done(count, gen)
+
+    def _timed_render(self, text):
+        with runtime_metrics.work('synthesis'):
+            yield from self._render(text)
+
+    def recover_output(self):
+        """Drop stale speech and reopen the selected output (default if disconnected)."""
+        self.stop()
+        wanted = getattr(self, 'output', '')
+        device = find_output(wanted)
+        new = _Player(RATE, device)
+        with self._player_lock:
+            old, self._player = self._player, new
+            try:
+                old.close()
+            except Exception:
+                pass
+        voice_health.output_recovered()
+        return 'Output reconnected: ' + new.device_name
 
     def _shape(self, samples: np.ndarray, fade_in: bool, fade_out: bool) -> np.ndarray:
         n = len(self._fade)

@@ -1,3 +1,8 @@
+> **Update 2026-10-27:** seven-area upgrade implemented and activated. See
+> [upgrade report and usage guide](UPGRADE-2026-10-27.txt) for conversation timing,
+> real holographic panes, project resume, agent progress controls, audio recovery,
+> adaptive graphics, three visual models, native orb, verification and remaining tests.
+>
 > **Update 2026-10-26:** this checklist was last audited on 2026-10-21 and is out of date. Since then:
 > Codex became the default brain (Claude via Claude Code is selectable), VoiceStudio became the default
 > voice with Kokoro as fallback, the second brain gained task reports, a daily journal and meaning search,

@@ -132,8 +132,12 @@ class VoiceStudioEngine:
         return True
 
     def render(self, text: str) -> np.ndarray:
+        # VoiceStudio's prompt preprocessing trims a long reference clip but keeps its whole transcript, and the
+        # mismatch makes the clone start replies with stray syllables ("E, done."). Measured: ~10 stray words in
+        # 16 short replies with it on, 1 with preprocessing and denoise off, at the same speed.
         body = {"model": "omnivoice", "input": text, "voice": self.profile,
-                "response_format": "pcm", "speed": self.speed}
+                "response_format": "pcm", "speed": self.speed,
+                "preprocess_prompt": False, "denoise": False}
         if self.seed is not None:
             body["seed"] = self.seed
         try:

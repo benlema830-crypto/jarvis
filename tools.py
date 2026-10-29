@@ -18,6 +18,7 @@ from anthropic import beta_tool
 
 import activity
 import apps
+import chrome_browser  # noqa: F401 - open links in Chrome
 import context
 import hud
 import memory
@@ -126,6 +127,23 @@ def youtube(query: str) -> str:
     """
     webbrowser.open("https://www.youtube.com/results?search_query=" + urllib.parse.quote(query))
     return f"Opened YouTube results for '{query}'"
+
+
+@beta_tool(eager_input_streaming=True)
+def last_youtube_video() -> str:
+    """Open the video the user was most recently watching on YouTube (on any device,
+    e.g. their phone) in Chrome on this computer. YouTube resumes where they left off.
+    Use for "pull up the video I was watching", "put my last YouTube video on the monitor"."""
+    import youtube_history
+    try:
+        video = youtube_history.last_video()
+    except PermissionError:
+        youtube_history.login()
+        return "Jarvis's YouTube profile isn't signed in. Opened a Chrome window - sign into YouTube there once, then ask again."
+    except Exception as exc:
+        return f"Couldn't read YouTube watch history: {exc}"
+    webbrowser.open(video["url"])
+    return f"Opened '{video['title']}' ({video['url']})"
 
 
 # ---------- Apps, files, clipboard, screen ----------
@@ -465,25 +483,33 @@ def set_voice_engine(engine: str) -> str:
 @beta_tool(eager_input_streaming=True)
 def switch_voice(engine: str) -> str:
     """Switch speaking voice. 'voicestudio' is the owner's Jarvis-like VoiceStudio clone
-    (the default). 'qwen' is the owner's older local Qwen clone. 'kokoro' is the
-    lightweight local alternative. 'elevenlabs' requires separate paid API access.
+    (the default). 'qwen' is the owner's older local Qwen clone. 'piper' is a fast offline
+    voice the owner downloaded. 'kokoro' is the lightweight local alternative.
+    'elevenlabs' requires separate paid API access.
 
-    Any voice the owner saved in VoiceStudio can be chosen by its name, e.g. 'JARVIS 2.0'.
+    Any voice the owner saved in VoiceStudio, or downloaded for Piper, can be chosen by its
+    name, e.g. 'JARVIS 2.0' or 'en_US-BEN_Real-medium' ('BEN' is enough for Piper).
 
     Args:
-        engine: 'voicestudio', 'qwen', 'kokoro', 'elevenlabs', or a VoiceStudio voice name.
+        engine: 'voicestudio', 'qwen', 'piper', 'kokoro', 'elevenlabs', or a voice name.
     """
+    import piper_voice
     import voicestudio_voice
     wanted = engine.strip()
+    piper_named = next((n for n in piper_voice.voices() if len(wanted) > 2 and wanted.casefold() in n.casefold()), None)
+    if piper_named:
+        set_voice_engine(f"piper:{piper_named}")
+        return f"Now speaking with the {piper_named} Piper voice."
     named = next((p for p in voicestudio_voice.profiles(max_age=0)  # a voice saved moments ago counts
                   if wanted.casefold() in (p["name"].casefold(), p["id"].casefold())), None)
     if named:
         set_voice_engine(f"voicestudio:{named['id']}")
         return f"Now speaking with the {named['name']} voice."
     engine = wanted.lower()
-    if engine not in ("voicestudio", "elevenlabs", "kokoro", "qwen"):
+    if engine not in ("voicestudio", "elevenlabs", "kokoro", "qwen", "piper"):
         names = ", ".join(p["name"] for p in voicestudio_voice.profiles()) or "none found; is VoiceStudio open?"
-        return f"Choose voicestudio, qwen, kokoro, elevenlabs, or a VoiceStudio voice ({names})."
+        return (f"Choose voicestudio, qwen, piper, kokoro, elevenlabs, a VoiceStudio voice ({names}), "
+                f"or a Piper voice ({', '.join(piper_voice.voices()) or 'none in models/piper'}).")
     from voice import KOKORO_ONLY
     if KOKORO_ONLY and engine == "elevenlabs":
         return "This installation uses local speech only. ElevenLabs is disabled."
@@ -1250,7 +1276,7 @@ def response_style(settings: str = '{}') -> str:
     return json.dumps(response_settings.update(changes) if changes else response_settings.read())
 
 
-TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, open_app, list_apps, find_files, open_path, read_clipboard,
+TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, last_youtube_video, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, correct_memory, forget, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,

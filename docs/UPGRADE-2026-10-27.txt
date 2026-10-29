@@ -1,0 +1,108 @@
+JARVIS UPGRADE — 27 OCTOBER 2026
+
+The seven improvements are implemented and the updated assistant/Brain services
+have been activated. The existing voice enrollment and account settings remain.
+
+HOW TO USE THE CHANGES
+
+1. Conversation
+   More (...) > Voice health shows response timings and pacing controls.
+   Defaults: 1.2 seconds to finish a phrase, 12-second follow-up window, and an
+   85-character target for the first natural clause. Long first sentences can
+   start speaking at a clause boundary. Later clauses retain normal buffering.
+   Existing stop/barge-in behavior remains available. Timings record numbers,
+   not speech/audio, and retain at most 60 observations per stage in memory.
+
+2. Useful holographic panels
+   Orbiting panels now contain notes, tasks, research citations, generated
+   documents and project-session progress. Click one to expand its content.
+   Say "show my tasks", "expand panel Alpha", "bring that closer", or
+   "put that away". More > Holographic panels lists and restores dismissed panes.
+   Source previews are bounded text; links and document opening are explicit.
+
+3. Project continuity
+   More > Resume project > Restore workspace, or say "resume Jarvis" or
+   "resume Rocket Frontier". The workspace displays saved progress, attribution,
+   unresolved items, next action, current Git evidence and relevant source files.
+   Newer agent reports take precedence over older handoff summaries. Old plans
+   are labeled for reconciliation. Restoring a project does not execute its plan.
+
+4. Project-agent progress
+   Tasks & agents displays observed tool milestones, current progress, changed
+   files, reports, and Pause / Resume / Cancel controls for managed project agents.
+   Pause interrupts the current agent turn; Resume starts another turn using its
+   saved thread and task, with instructions to inspect existing work first.
+   Completed side effects are not undone. A process restart marks unfinished
+   sessions interrupted, allowing deliberate resumption. Stale activity is labeled.
+   These controls cover named project sessions; standalone screen/terminal tasks
+   retain their existing stop controls, not the new pause/resume interface.
+
+5. Recovery
+   A background monitor reconnects inactive/stalled microphone and speaker
+   streams, with serialized retries and bounded backoff. Microphone-processing
+   exceptions restart that processing loop. Voice health includes manual
+   reconnect buttons and recovery status. VoiceStudio's existing bounded request
+   timeout, reopen behavior and Kokoro fallback remain in use. Actions and AI
+   requests are never automatically replayed. This does not recover arbitrary
+   operating-system/driver hangs or every possible model failure.
+
+6. GPU sharing
+   Core graphics reduce to 24 fps and a maximum 512-pixel rendering target while
+   speech recognition or synthesis is active, with a short hold to avoid flicker.
+   Hidden pages stop the main rendering loop. The Quality selector offers
+   Automatic, Cinematic, Balanced and Economy. GPU usage still depends on the
+   display, other applications and the chosen model; this is not a GPU reservation.
+
+7. Models and desktop orb
+   The Core selector offers Holographic Core (purple), Jarvis Orbit (blue metal)
+   and Fracture Sphere (orange fissures), inspired by the three reference designs.
+   Each saves its color and quality settings. The purple core retains its nebula,
+   orbiting particles/shooting stars and smoothly blended conversation motion.
+   These are animated procedural interpretations, not pixel-identical replicas.
+   Open the new "Jarvis Orb" desktop shortcut or More > Desktop orb.
+   Drag its title strip; Expand opens the full workspace; Compact pins it again.
+   Double-clicking the sphere also toggles size. The compact window has a command
+   box and stays on top. pywebview 6.2.1 was installed in Jarvis's existing venv.
+
+VERIFICATION
+
+Final automated suite: 478 unit tests passed; Brain browser checks passed;
+HOLO browser checks passed. data/reports/project-verification.json contains the
+final result. git diff --check also passed (line-ending notices only).
+Browser checks cover existing graph/gesture behavior, real panel content,
+project restoration, pacing/recovery controls, agent pause requests, model
+persistence, gradual motion transitions and graphics resource budgets.
+The separate HOLO synthetic gesture probe passed 26/26.
+
+GPU Chrome preview: all three models rendered without console or WebGL errors;
+context-loss fallback and restoration passed. Observed animation-frame cadence
+averaged 16.38 ms in the isolated preview. This is a cadence observation, not a
+guarantee of GPU headroom during gaming. Screenshots and details are in data/:
+  holographic-core-model.png, jarvis-orbit-model.png, fracture-sphere-model.png
+  upgrade-gpu-preview.log
+
+Native Windows orb: actual topmost flag, compact/expanded sizing, and WebGL2
+passed against both a local fixture and the running application.
+  data/orb-native-check.json
+
+Live application: INZONE microphone and output reconnected successfully; the
+listener, processing and both streams were healthy, voice lock stayed enabled,
+and project resume returned eight readable source candidates.
+One real typed prompt to Codex/VoiceStudio reached text in 5.219 seconds and
+first output audio in 6.265 seconds, completing in 7.344 seconds. This was not a
+spoken-input benchmark or a before/after speed comparison. Model response time
+remains the main delay in that sample.
+  data/upgrade-live-check.json, data/upgrade-live-health.json
+
+REMAINING VALIDATION / LIMITS
+
+Owner listening tests for natural pause length, voice quality and interruption
+comfort; spoken end-to-end latency under real room noise; and a gaming-load GPU
+test remain unverified. Automatic audio recovery was regression-tested; manual
+reconnection was also verified on the actual devices. Agent pause/resume was
+tested with an inert worker, not a new paid/live coding task. No external accounts
+were connected or tested as part of this upgrade.
+
+Source changes are saved in the working tree. Existing unrelated clip-farm files
+were not changed. A normal Windows shutdown will be requested after this report
+and the final verification finish, without force-closing unsaved applications.

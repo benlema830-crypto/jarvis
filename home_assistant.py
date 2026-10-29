@@ -4,6 +4,8 @@ Needs HA_URL and HA_TOKEN (a long-lived access token) in .env. Talks only to tha
 address, never through a proxy. Locks, alarms, garage doors and covers are left out on purpose.
 """
 import os
+import json
+from pathlib import Path
 import re
 import time
 
@@ -30,6 +32,57 @@ NEEDS = {'pause': 1, 'play_pause': 1, 'play': 16384, 'previous': 16, 'next': 32,
 
 class HomeError(RuntimeError):
     pass
+
+
+DEFAULTS_PATH = Path(__file__).resolve().parent / 'data' / 'home-device-defaults.json'
+
+
+def _name(text):
+    """Case/spacing normalization only: brackets distinguish these TV names."""
+    return ' '.join(text.casefold().split())
+
+
+def _default(query):
+    try:
+        saved = json.loads(DEFAULTS_PATH.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        raise HomeError('Could not read the saved home-device defaults; no device was selected.') from None
+    if not isinstance(saved, dict):
+        raise HomeError('Invalid saved home-device defaults; no device was selected.')
+    key = re.sub(r'^(?:the|my)\s+', '', _name(query))
+    target = saved.get(key)
+    if target is None:
+        return None
+    if (not isinstance(target, dict) or target.get('domain') not in DOMAINS
+            or any(not isinstance(target.get(k), str) or not target[k].strip() for k in ('name', 'area'))):
+        raise HomeError(f"Invalid saved default for '{query}'; no device was selected.")
+    return target
+
+
+def _exact(matches, query):
+    # Prefer the player over a same-named remote, never one of two same-domain entities.
+    rank = min(DOMAINS.index(d['domain']) for d in matches)
+    preferred = [d for d in matches if DOMAINS.index(d['domain']) == rank]
+    if len(preferred) != 1:
+        raise HomeError(f"'{query}' could mean multiple entities: {', '.join(d['id'] for d in preferred)}. Which one?")
+    return preferred
+
+
+def _resolve_default(query, target, everything):
+    candidates = [d for d in everything if d['domain'] == target['domain'] and _name(d['name']) == _name(target['name'])]
+    if candidates:
+        # Fresh effective area (entity override or device area), not a cached fuzzy
+        # manufacturer/model string. Template rendering is read-only in HA.
+        template = "{% for s in states %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}\n{% endfor %}"
+        text = _api('POST', '/api/template', {'template': template})
+        areas = dict(line.split('|', 1) for line in str(text).splitlines() if '|' in line)
+        candidates = [d for d in candidates if _name(areas.get(d['id'], '')) == _name(target['area'])]
+    if len(candidates) != 1:
+        raise HomeError(f"Saved default for '{query}' needs exactly one {target['name']} in {target['area']}; "
+                        "no device was selected. Check the name and room in Home Assistant.")
+    return candidates
 
 
 def _config():
@@ -94,6 +147,17 @@ def devices():
 def find(query, everything=None):
     """The entities a spoken name means. "the lights" means every light; otherwise the best match."""
     everything = devices() if everything is None else everything
+    everything = [d for d in everything if d['domain'] in DOMAINS]
+    # Explicit entity IDs and punctuation-preserving full names remain usable.
+    exact_ids = [d for d in everything if _name(d['id']) == _name(query)]
+    if exact_ids:
+        return _exact(exact_ids, query)
+    target = _default(query)
+    if target is not None:
+        return _resolve_default(query, target, everything)
+    exact_names = [d for d in everything if _name(d['name']) == _name(query)]
+    if exact_names:
+        return _exact(exact_names, query)
     words = _words(query) - FILLER
     kinds = {KIND_WORDS[w] for w in words if w in KIND_WORDS}
     words -= set(KIND_WORDS)

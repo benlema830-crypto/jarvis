@@ -4,6 +4,7 @@ import json
 import subprocess
 import threading
 import uuid
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -91,3 +92,62 @@ def handoff(name, summary='', unresolved='', next_action='', files=''):
         with (folder / (entry['id'] + '.json')).open('x', encoding='utf-8') as f:
             json.dump(entry, f, ensure_ascii=False, indent=2)
         return entry
+
+
+def source_file(name, relative):
+    """Read bounded project source for resume panes, excluding runtime data and binaries."""
+    name, root = project(name)
+    if not isinstance(relative, str) or len(relative) > 500:
+        raise ValueError('Choose a project source file.')
+    path = root / relative
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()) or path.is_symlink():
+        raise ValueError('File must stay inside the project.')
+    parts = resolved.relative_to(root.resolve()).parts
+    if any(p.startswith('.') or p.lower() in {'data','models','voices','node_modules','vendor'} for p in parts):
+        raise ValueError('Runtime data and hidden files are not available in project panes.')
+    if resolved.name.lower() == 'voice-profile.json' or resolved.suffix.lower() not in {
+        '.py','.js','.css','.html','.md','.txt','.ts','.tsx','.jsx','.lua','.luau','.toml','.yaml','.yml','.json'}:
+        raise ValueError('Choose a text source file.')
+    if not resolved.is_file() or resolved.stat().st_size > 512000:
+        raise ValueError('Source file is unavailable or too large.')
+    return {'project':name,'path':resolved.relative_to(root.resolve()).as_posix(),
+            'text':resolved.read_text(encoding='utf-8',errors='replace')[:24000],
+            'modified':resolved.stat().st_mtime, 'truncated':resolved.stat().st_size>24000}
+
+
+def resume(name):
+    evidence = status(name)
+    handoff = evidence.get('last_handoff') or {}
+    claims = handoff.get('claims') or {}
+    reports = evidence.get('agent_reports') or []
+    last = max(reports, key=lambda r: r.get('reported_at') or 0) if reports else {}
+    try:
+        handoff_at = dt.datetime.fromisoformat(handoff.get('created_at', '')).timestamp()
+    except (ValueError, TypeError):
+        handoff_at = 0
+    newer_report = bool(last.get('report') and (last.get('reported_at') or 0) > handoff_at)
+    use_handoff = bool(claims.get('summary') and not newer_report)
+    summary = claims['summary'] if use_handoff else last.get('report') or 'No saved progress report yet.'
+    origin = ('Saved handoff, ' + str(handoff.get('created_at'))) if use_handoff else (
+        'Agent report: ' + str(last.get('name'))) if last else 'No report'
+    unresolved = claims.get('unresolved') or ('Last agent run: '+str(last['status']) if last.get('status') in {'failed','interrupted'} else 'No unresolved items recorded; this does not establish that the project is issue-free.')
+    next_action = claims.get('next_action') or 'Review the current changes and record the next concrete action.'
+    if newer_report and claims.get('next_action'):
+        next_action = 'Earlier handoff: ' + next_action + ' Reconcile this with the newer agent report before continuing.'
+    candidates = [x.strip(' \t`"-') for x in re.split(r'[\n,;]+', claims.get('files') or '') if x.strip()]
+    _, root = project(name)
+    candidates += (_git(root, 'diff', '--name-only', 'HEAD') or '').splitlines()
+    candidates += [n['source'] for n in evidence.get('reference_notes', [])]
+    files=[]
+    for relative in dict.fromkeys(candidates):
+        try:
+            file=source_file(name,relative)
+            files.append({k:v for k,v in file.items() if k not in {'text','truncated'}})
+        except (ValueError,OSError):
+            continue
+        if len(files)>=8:
+            break
+    return {'project':evidence['project'],'checked_at':evidence['checked_at'], 'summary':summary[:6000],
+            'summary_source':origin,'unresolved':unresolved[:6000],'next_action':next_action[:6000],
+            'files':files,'verified':evidence['verified'],'interpretation':evidence['interpretation']}

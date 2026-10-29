@@ -43,7 +43,7 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 INTEL_TTL = 600
 TRANSCRIPTS = os.path.join(HERE, "data", "transcripts")
 TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
-LIVE_ONLY = {"level", "usage", "settings", "ui"}  # not replayed to pages that connect later
+LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume", "visual-model"}  # not replayed to pages that connect later
 
 # Read by jarvis.py: typed commands (str) and background events (dict)
 commands: queue.Queue = queue.Queue()
@@ -293,6 +293,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(status())
         elif self.path == "/voice-health":
             self._json(voice_health.snapshot(_state, preferences.listening_mode()))
+        elif self.path == '/conversation-settings':
+            import conversation_settings
+            self._json(conversation_settings.read())
         elif self.path in ("/intel", "/intel?refresh=1"):
             self._json(intel(refresh=self.path.endswith("refresh=1")))
         elif self.path == "/settings":
@@ -312,6 +315,26 @@ class _Handler(BaseHTTPRequestHandler):
         # Requiring JSON forces a CORS preflight, so other websites can't send commands
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             self._reject(400)
+            return
+        if self.path in ('/voice-recovery', '/conversation-settings', '/session-control'):
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 2000:
+                    raise ValueError('Invalid request size.')
+                value = json.loads(self.rfile.read(length))
+                if not isinstance(value, dict):
+                    raise ValueError('Expected an object.')
+                if self.path == '/voice-recovery':
+                    result = voice_health.request_recovery(value.get('component'))
+                elif self.path == '/session-control':
+                    from agent_sessions import MANAGER
+                    result = MANAGER.control(value.get('action'), value.get('name', ''))
+                else:
+                    import conversation_settings
+                    result = conversation_settings.update(value)
+                self._json(result)
+            except (ValueError, TypeError):
+                self._json({'error': 'Invalid recovery, pacing or session request.'}, 400)
             return
         if self.path == '/models':
             from model_provider import SELECTION
@@ -399,20 +422,22 @@ class _Handler(BaseHTTPRequestHandler):
                 _subscribers.remove(q)
 
 
-def track_voice(level_fn):
+def track_voice(level_fn, input_fn=None):
     """Stream audio loudness so the reactor pulses as Jarvis speaks (or you do)."""
-    threading.Thread(target=_level_loop, args=(level_fn,), daemon=True).start()
+    threading.Thread(target=_level_loop, args=(level_fn, input_fn), daemon=True).start()
 
 
-def _level_loop(level_fn):
+def _level_loop(level_fn, input_fn=None):
     last = 0.0
     while True:
         try:
-            level = level_fn()
+            output = max(0.0, min(1.0, float(level_fn())))
+            microphone = max(0.0, min(1.0, float(input_fn()))) if input_fn else 0.0
+            level = max(output, microphone)
         except Exception:  # e.g. the audio device changed mid-read; keep the meter alive
-            level = 0.0
+            level = output = microphone = 0.0
         if level > 0.002 or last > 0.002:
-            emit("level", v=round(level, 4))
+            emit("level", v=round(level, 4), output=round(output, 4), input=round(microphone, 4))
         last = level
         time.sleep(1 / 20)
 
@@ -432,14 +457,17 @@ def start() -> bool:
 
 
 def open_window():
-    """Open a fullscreen Edge app using Jarvis's own browser profile."""
+    """Open a fullscreen Chrome (or Edge fallback) app using Jarvis's own browser profile."""
     try:
-        edge = shutil.which("msedge") or next((path for path in (
+        edge = shutil.which("chrome") or next((path for path in (
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ) if os.path.isfile(path)), None)
+        ) if os.path.isfile(path)), None) or shutil.which("msedge")
         if not edge:
-            raise FileNotFoundError("Microsoft Edge not found")
+            raise FileNotFoundError("Chrome/Edge not found")
         subprocess.Popen([edge, f"--app={URL}", "--start-fullscreen", "--no-first-run",
                           "--no-default-browser-check",
                           f"--user-data-dir={os.path.join(HERE, 'data', 'hud-browser')}"],
