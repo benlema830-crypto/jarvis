@@ -66,29 +66,7 @@ def normal_effort():
 
 HIGHER_EFFORT = {"minimal": "low", "low": "medium", "medium": "high", "high": "xhigh"}
 
-# Plain inspection commands. Anything else, any redirection, subexpression or encoded
-# command, and flags that can run programs or write files make the whole command "not read-only".
-READ_COMMAND = re.compile(r"(Get-Content|gc|cat|type|Get-ChildItem|gci|dir|ls|Get-Item|Test-Path|Resolve-Path|"
-                          r"Select-Object|select|Select-String|sls|Measure-Object|Sort-Object|Format-List|Format-Table|"
-                          r"Out-String|rg|findstr|git\s+(status|log|diff|show|branch|rev-parse|ls-files|blame))(\s|$)", re.I)
-UNSAFE = re.compile(r"[>`]|\$\(|\$\{|@'|@\"|&|--pre\b|--output|--ext-diff|\bgit\s+-c\b|-Encoded|\bInvoke-|\biex\b|"
-                    r"-Stream\b|::", re.I)
-POWERSHELL = re.compile(r'^\s*"?[^"\s]*?(powershell|pwsh)(\.exe)?"?\s+(-NoProfile\s+|-NoLogo\s+)*-Command\s+(?P<script>.+)$', re.I | re.S)
-
-
-def plain_read_command(command: str) -> bool:
-    """True only when every part of a (PowerShell-wrapped) command just reads or searches."""
-    match = POWERSHELL.match(command or "")
-    script = (match.group("script") if match else command or "").strip()
-    if len(script) > 1 and script[0] == script[-1] == '"':
-        script = script[1:-1]
-    if not script or UNSAFE.search(script):
-        return False
-    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "''", script)  # separators inside quotes are just text
-    if "'" in unquoted.replace("''", "") or '"' in unquoted:
-        return False  # unbalanced or nested quoting: don't guess
-    parts = [p.strip() for p in re.split(r"[;\n|]", unquoted) if p.strip()]
-    return bool(parts) and all(READ_COMMAND.match(p) for p in parts)
+plain_read_command = cc_guard.plain_read_command
 
 
 def safe_permissions(permissions: dict) -> bool:

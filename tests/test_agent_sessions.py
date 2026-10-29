@@ -289,6 +289,17 @@ class SessionTest(unittest.TestCase):
         self.manager.cancel()
         conn.request.assert_called_once_with("turn/interrupt", {"threadId": "thread1", "turnId": "turn1"})
 
+    def test_searching_for_risky_words_is_not_risky(self):
+        for command in ('rg -n "Remove-Item|shutdown" tools.py', 'Select-String -Pattern "Restart-Service" *.py',
+                        'git log --grep "rm "', 'git branch -a'):
+            self.assertEqual(cc_guard.decide("PowerShell", {"command": command}), ("allow", ""), command)
+        for command in ('Get-ChildItem | Remove-Item', 'rg -n shutdown > out.txt', 'git branch -D old',
+                        'Get-Content x; shutdown /r', 'cat a.txt && rm a.txt'):
+            self.assertEqual(cc_guard.decide("PowerShell", {"command": command})[0] != "allow"
+                             or not cc_guard.plain_read_command(command), True, command)
+        self.assertEqual(cc_guard.decide("Bash", {"command": "rm -rf build"}), ("approval", "delete"))
+        self.assertEqual(cc_guard.decide("Bash", {"command": "cat data/cc_approvals.json"})[0], "blocked")
+
     def test_publication_and_destructive_git_guard(self):
         for command in ("git push origin main", "git reset --hard", "npm publish", "gh pr merge 5"):
             self.assertEqual(cc_guard.decide("Bash", {"command": command})[0], "approval")
