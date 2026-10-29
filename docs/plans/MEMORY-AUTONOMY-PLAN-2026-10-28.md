@@ -96,3 +96,23 @@ nothing tying them together. The fix is one reader that assembles them, not a ne
 
 Requirements kept throughout: approval for money, external commitments, destructive and significant
 system changes; backups and git checkpoints; agents cannot change their own guard rules.
+
+## Status (2026-10-28, end of day)
+
+All seven steps have a first version, tested (535 tests) and running:
+
+1. Working memory: `working_memory.py`; brief rides in the user turn when it changes.
+2. Memory capture: `memory_proposals.py`; journal sections "Decisions" and "Facts to remember";
+   approval by voice or the Brain page; `update_memory` keeps history; cap 1000, still never evicts.
+3. Shared agent context: project brief in every agent task; results in `data/project_log.jsonl`.
+4. Speed (measured first): plain replies median 1.8s, tool turns 4.8s; Codex agent startup ~1s, so no
+   warm pool. Fixed: saving a fact no longer restarts the Codex thread. Removed false approval prompts.
+5. Daily review: `daily_review.py`, Briefs/<day> Daily review.md after 8:00, spoken once, proposals only.
+6. Performance: `performance.py` per-model turn timing and task scorecard (`performance_report` tool);
+   `scripts/benchmark_models.py` for fixed-question model comparisons.
+7. Self-improvement: the review's "Jarvis improvements" section; acting on it needs the owner's go and
+   goes through agent sessions and the guard rules.
+
+Known limits: reviews are only as good as the records (5 core facts today; approve proposals and state
+goals). Events outside Jarvis (e.g. restarts done by hand) are unknown unless a handoff records them.
+Turn timing starts collecting now; task records have no model name yet.

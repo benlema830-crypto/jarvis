@@ -96,7 +96,11 @@ class WorkingMemoryTest(unittest.TestCase):
 
     def test_brief_is_capped(self):
         self.journal(0, threads=["x" * 600] * 1 + [f"thread {i} " + "y" * 500 for i in range(8)])
-        self.assertLessEqual(len(working_memory.brief()), working_memory.MAX_CHARS)
+        memory.remember("The owner just started a new job.")
+        brief = working_memory.brief()
+        self.assertLessEqual(len(brief), working_memory.MAX_CHARS)
+        self.assertIn("new job", brief)  # old journal items are trimmed first, never the current parts
+        self.assertIn("xxxx", brief)
 
     def test_conversation_gets_brief_once_and_again_when_work_changes(self):
         import jarvis

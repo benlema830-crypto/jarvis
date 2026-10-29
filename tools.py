@@ -463,6 +463,21 @@ def decide_memory_proposals(which: str, approve: bool, reword: str = "") -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def performance_report(days: int = 14) -> str:
+    """Jarvis's own scorecard: reply speed per model (time to the first spoken sentence) and how
+    background agent tasks went (finished, struggled, stopped, typical duration). Use it when the
+    user asks how Jarvis or the agents are performing, or whether a model switch helped. To compare
+    models on fixed questions, suggest scripts/benchmark_models.py (Codex/Claude subscriptions are
+    free to run; Anthropic/OpenAI API models cost credits).
+
+    Args:
+        days: How many days of conversation to cover (tasks always cover at least 30).
+    """
+    import performance
+    return performance.scorecard(max(1, min(90, int(days))))
+
+
+@beta_tool(eager_input_streaming=True)
 def forget(fact: str) -> str:
     """Delete a saved fact about the user (when it's wrong, outdated, or they ask you to forget).
 
@@ -1315,7 +1330,7 @@ def response_style(settings: str = '{}') -> str:
 TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, last_youtube_video, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, correct_memory, update_memory, forget,
-         review_memory_proposals, decide_memory_proposals, set_reminder, list_reminders, cancel_reminder,
+         review_memory_proposals, decide_memory_proposals, performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
          terminal_status, stop_terminal_task, open_agent_session, send_agent_task,
          agent_session_status, list_agent_sessions, stop_agent_session, move_app_window, list_app_windows,

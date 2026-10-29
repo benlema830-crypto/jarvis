@@ -53,7 +53,9 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
-| Proactive | reminders.py, nudges.py, activity.py |
+| Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex) |
+| Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), memory_proposals.py (journal proposes, owner approves; Decisions/Decision log.md) |
+| Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
 | Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py, task_effort.py (learned per-task effort) |
 | Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_openai_key.py |

@@ -120,8 +120,9 @@ def handoffs(now=None):
                 continue
             claims = entry.get("claims") or {}
             if now - when < HANDOFF_DAYS * 86400 and (claims.get("next_action") or claims.get("summary")):
-                text = claims.get("next_action") or claims.get("summary")
-                lines.append(f"- {folder.name} ({_ago(when, now)}): next: {_clip(text, 220)}")
+                text = ", ".join(f"{label}: {_clip(claims[key], limit)}" for key, label, limit in
+                                 (("summary", "summary", 400), ("next_action", "next", 220)) if claims.get(key))
+                lines.append(f"- {folder.name} ({_ago(when, now)}): {text}")
             break
     return lines
 
@@ -135,12 +136,15 @@ def recent_facts(now=None):
     return [f"- {_clip(i['fact'], 300)}" for i in sorted(items, key=memory._when)[-8:]]
 
 
-PROJECT_LOG = HERE / "data" / "project_log.jsonl"
+PROJECT_LOG = DEFAULT_PROJECT_LOG = HERE / "data" / "project_log.jsonl"
 PROJECT_BRIEF_CHARS = 2500
 
 
 def record_result(project, session, task, ok, report, when=None):
     """Append a finished agent task to the shared project record (append-only, never rewritten)."""
+    import performance
+    if PROJECT_LOG == DEFAULT_PROJECT_LOG and performance.under_test():
+        return
     entry = {"t": when or time.time(), "project": project, "session": session, "ok": bool(ok),
              "task": _clip(task, 400), "report": _clip(report, 800)}
     PROJECT_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -217,31 +221,46 @@ def project_brief(project, session="", now=None, today=None) -> str:
 
 
 def brief(now=None, today=None) -> str:
-    """The working-memory brief, or "" when nothing is recorded."""
-    parts = []
-    work = agent_work(now)
-    if work:
-        parts.append("Agent work (from agent session records):\n" + "\n".join(work))
-    todo = open_tasks()
-    if todo:
-        parts.append("Open to-dos (Tasks.md):\n" + "\n".join(todo))
-    threads, decisions = journal(today)
-    if threads:
-        parts.append("Open threads (nightly AI summaries of past conversations; may be resolved since):\n"
-                     + "\n".join(f"- {item} ({day})" for day, item in threads))
-    if decisions:
-        parts.append("Recent decisions and preferences (same AI summaries; not confirmed facts):\n"
-                     + "\n".join(f"- {item} ({day})" for day, item in decisions))
-    projects = handoffs(now)
-    if projects:
-        parts.append("Project handoffs:\n" + "\n".join(projects))
-    fresh = recent_facts(now)
-    if fresh:
-        parts.append("Saved to memory in the last day (current wording):\n" + "\n".join(fresh))
+    """The working-memory brief, or "" when nothing is recorded. Over the size cap, the oldest
+    journal threads and decisions are dropped first, so the short, current parts always fit."""
+    import daily_review
     import memory_proposals
-    if waiting := memory_proposals.count_line():
-        parts.append(waiting)
-    text = "\n\n".join(parts)
+    work, todo, projects, fresh = agent_work(now), open_tasks(), handoffs(now), recent_facts(now)
+    threads, decisions = journal(today)
+    day, review = daily_review.latest(today)
+    review_line = ""
+    if review and day == (today or datetime.date.today()).isoformat() and daily_review.spoken(review):
+        review_line = (f"Today's daily review ({daily_review.note_for(day)}): {daily_review.spoken(review)} "
+                       "Its ideas, research suggestions and Jarvis improvement proposals are in that note "
+                       "(read_knowledge_note); they are proposals until the owner says go.")
+    waiting = memory_proposals.count_line()
+
+    def compose():
+        parts = []
+        if work:
+            parts.append("Agent work (from agent session records):\n" + "\n".join(work))
+        if review_line:
+            parts.append(review_line)
+        if fresh:
+            parts.append("Saved to memory in the last day (current wording):\n" + "\n".join(fresh))
+        if todo:
+            parts.append("Open to-dos (Tasks.md):\n" + "\n".join(todo))
+        if projects:
+            parts.append("Project handoffs:\n" + "\n".join(projects))
+        if threads:
+            parts.append("Open threads (nightly AI summaries of past conversations; may be resolved since):\n"
+                         + "\n".join(f"- {item} ({day})" for day, item in threads))
+        if decisions:
+            parts.append("Recent decisions and preferences (same AI summaries; not confirmed facts):\n"
+                         + "\n".join(f"- {item} ({day})" for day, item in decisions))
+        if waiting:
+            parts.append(waiting)
+        return "\n\n".join(parts)
+
+    text = compose()
+    while len(text) > MAX_CHARS and (threads or decisions):
+        (threads if len(threads) >= len(decisions) else decisions).pop()  # oldest last
+        text = compose()
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS - 1].rstrip() + "…"
     return privacy.redact(text)

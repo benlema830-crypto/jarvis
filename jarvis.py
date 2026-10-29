@@ -60,6 +60,7 @@ import conversation_settings
 import model_provider
 import router
 import working_memory
+import performance
 from types import SimpleNamespace
 from instance_config import MUTEX_NAME  # noqa: E402
 
@@ -195,7 +196,8 @@ Using your tools:
 - {off_limits} may hold the user's work data and are off-limits: never open, read, or operate them.
 
 Messages in square brackets such as [REMINDER DUE], [TASK FINISHED], [FOCUS DRIFT], [EYES CHECK] or [HOLO] come from your own systems, not the user.
-A [WORKING STATE] block before the user's words is your own record of where things stand: agent work, to-dos, open threads, recent decisions and project handoffs. Use it to know where you left off and to connect requests to ongoing work. Don't read it out, don't act on it unasked, and treat its AI summaries as leads to confirm, not facts. [Via Telegram] messages are the user's own words.
+A [WORKING STATE] block before the user's words is your own record of where things stand: agent work, to-dos, open threads, recent decisions and project handoffs. Use it to know where you left off and to connect requests to ongoing work. Don't read it out, don't act on it unasked, and treat its AI summaries as leads to confirm, not facts.
+Be a chief of staff, not just a responder: when it helps, connect a request to ongoing work, point out a risk or a stalled item, push back on a weak plan with your reason, and suggest a better option. Ideas, research and improvements to Jarvis himself (from the daily review or your own thinking) are proposals: say them briefly and start the work only when the user says go. Changes to Jarvis's own code go to an agent session in work mode like any other job, never around the approvals. For questions about your own speed or how agents are doing, use performance_report. [Via Telegram] messages are the user's own words.
 
 What you know about the user from earlier sessions:
 {memory}"""
@@ -364,15 +366,19 @@ class Brain:
         state = '' if local else self._working_state()
         self.messages.append({"role": "user", "content": f"[{stamp}] {state}{text}"})
         spoken = []
+        began, first, outcome = time.monotonic(), [], "failed"
         def deliver(sentence):
             with self._speech_lock:
                 if self.cancel.is_set():
                     raise Interrupted()
+                if not first:
+                    first.append(time.monotonic() - began)
                 spoken.append(sentence)
                 speak(sentence)
         try:
             self._run(deliver)
         except Interrupted:
+            outcome = "interrupted"
             # Keep the turn, so Jarvis knows what he was saying when you cut in
             said = " ".join(spoken)
             del self.messages[start + 1:]  # discard any unmatched tool_use blocks
@@ -384,8 +390,15 @@ class Brain:
             del self.messages[start:]  # keep history consistent after a failed turn
             raise
         else:
+            outcome = "ok"
             self._save_turn(text, " ".join(spoken), self._turn_privacy)
         finally:
+            answered = local or config  # a local turn may still hand over to the main brain mid-turn
+            try:  # which model answered and how fast; no words are kept
+                performance.record_turn(answered['provider'], answered['model'], bool(local),
+                                        first[0] if first else None, time.monotonic() - began, outcome)
+            except OSError:
+                pass
             self._local = None
             self.selection.end()
 
@@ -1134,6 +1147,12 @@ def main():
     reminders.start(on_due)  # after the briefing, so overdue reminders don't talk over it
     import vault_log
     vault_log.start_journal()  # daily notes in the vault for finished days (Codex only, never paid APIs)
+    import daily_review
+    daily_review.start(lambda summary: hud.commands.put({
+        "label": "Daily review", "chime": True, "say": summary,
+        "note": "[DAILY REVIEW] You gave the user today's review summary. The full review (priorities, risks, "
+                "ideas, research worth starting, Jarvis improvements) is in the vault under Briefs. Offer research "
+                "or changes from it only when relevant; start them only when the user says so."}))
     threading.Thread(target=start_local_embeddings, daemon=True).start()
     start_bridges(ears)
     if text_mode:

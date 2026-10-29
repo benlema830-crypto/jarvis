@@ -7,10 +7,13 @@ import unittest
 from unittest import mock
 
 import jarvis
+import knowledge
 import memory
+import memory_proposals
 import model_provider
 import privacy
 import response_settings
+import working_memory
 
 
 class IsolatedMemory(unittest.TestCase):
@@ -23,7 +26,11 @@ class IsolatedMemory(unittest.TestCase):
         for module, field, value in [(memory, 'PATH', str(root / 'memory.json')),
                                      (memory, 'RECENT_PATH', str(root / 'recent.json')),
                                      (privacy, 'STORE', root / 'privacy.json'),
-                                     (response_settings, 'STORE', root / 'response-settings.json')]:
+                                     (response_settings, 'STORE', root / 'response-settings.json'),
+                                     (knowledge, 'VAULT', root / 'vault'),
+                                     (working_memory, 'SESSIONS', root / 'sessions.json'),
+                                     (working_memory, 'HANDOFFS', root / 'handoffs'),
+                                     (memory_proposals, 'STORE', root / 'proposals.json')]:
             patcher = mock.patch.object(module, field, value)
             patcher.start()
             self.addCleanup(patcher.stop)

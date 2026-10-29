@@ -111,9 +111,9 @@ Bullets of things left unfinished or to follow up.
 Use only facts from the log. Speech recognition errors and test chatter can be ignored. No preamble."""
 
 
-def _summarize(day: str, rows) -> str | None:
-    """A Codex summary (always the ChatGPT subscription, whichever brain Jarvis talks with),
-    or None when Codex isn't available."""
+def codex_once(system: str, text: str, label: str) -> str | None:
+    """One tool-free Codex answer on the ChatGPT subscription (whichever brain Jarvis talks with),
+    or None when Codex isn't available. Never spends API credits."""
     import codex_brain
     import preferences
     config = preferences.read().get("conversation_model") or {}
@@ -126,18 +126,21 @@ def _summarize(day: str, rows) -> str | None:
         if not catalog:
             return None
         model = catalog[0]
-    text = "\n".join(f"{t} {who}: {said}" for t, who, said in rows)[-MAX_LOG_CHARS:]
     brain = codex_brain.CodexBrain()
     try:
-        answer = brain.ask(model, SUMMARY_PROMPT,
-                           [{"role": "user", "content": f"Log for {day}:\n\n{text}"}], [],
+        answer = brain.ask(model, system, [{"role": "user", "content": text}], [],
                            None, lambda _: None, threading.Event())
         return answer.strip() or None
     except Exception as e:
-        print(f"(journal: Codex summary for {day} failed: {type(e).__name__})", flush=True)
+        print(f"({label} failed: {type(e).__name__})", flush=True)
         return None
     finally:
         brain.close()
+
+
+def _summarize(day: str, rows) -> str | None:
+    text = "\n".join(f"{t} {who}: {said}" for t, who, said in rows)[-MAX_LOG_CHARS:]
+    return codex_once(SUMMARY_PROMPT, f"Log for {day}:\n\n{text}", f"journal: Codex summary for {day}")
 
 
 def write_day(day: str) -> str | None:
