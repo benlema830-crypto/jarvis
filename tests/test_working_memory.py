@@ -8,6 +8,7 @@ from unittest import mock
 
 import knowledge
 import memory
+import memory_proposals
 import privacy
 import working_memory
 
@@ -22,6 +23,7 @@ class WorkingMemoryTest(unittest.TestCase):
         for module, field, value in [(knowledge, "VAULT", self.vault),
                                      (working_memory, "SESSIONS", self.root / "sessions.json"),
                                      (working_memory, "HANDOFFS", self.root / "handoffs"),
+                                     (memory_proposals, "STORE", self.root / "proposals.json"),
                                      (privacy, "STORE", self.root / "privacy.json"),
                                      (memory, "PATH", str(self.root / "memory.json")),
                                      (memory, "RECENT_PATH", str(self.root / "recent.json"))]:
@@ -70,6 +72,27 @@ class WorkingMemoryTest(unittest.TestCase):
         self.assertIn("not confirmed facts", brief)
         self.assertIn("Jarvis (today", brief)
         self.assertEqual(brief, working_memory.brief())  # stable between turns
+
+    def test_project_brief_warns_about_live_agents_and_shares_results(self):
+        with mock.patch.object(working_memory, "PROJECT_LOG", self.root / "log.jsonl"):
+            self.assertEqual(working_memory.project_brief("Rocket Frontier", "Frontier"), "")
+            self.sessions(
+                me={"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "My own task"},
+                other={"name": "Frontier Claude", "project": "Rocket Frontier", "status": "running",
+                       "task": "Rework the shop UI"},
+                elsewhere={"name": "Builder", "project": "Jarvis", "status": "running", "task": "Jarvis work"})
+            working_memory.record_result("Rocket Frontier", "Frontier Claude", "Fix saves", True, "Saves fixed.")
+            working_memory.record_result("Jarvis", "Builder", "Jarvis thing", True, "Jarvis result.")
+            self.journal(0, threads=["Verify Rocket Frontier's place IDs"], decisions=["Use Obsidian"])
+            brief = working_memory.project_brief("Rocket Frontier", "Frontier")
+        self.assertIn("Don't undo or overwrite", brief)
+        self.assertIn("Rework the shop UI", brief)
+        self.assertNotIn("My own task", brief)
+        self.assertNotIn("Jarvis work", brief)
+        self.assertIn("Saves fixed.", brief)
+        self.assertNotIn("Jarvis result.", brief)
+        self.assertIn("place IDs", brief)
+        self.assertNotIn("Use Obsidian", brief)
 
     def test_brief_is_capped(self):
         self.journal(0, threads=["x" * 600] * 1 + [f"thread {i} " + "y" * 500 for i in range(8)])

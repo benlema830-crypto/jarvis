@@ -41,6 +41,10 @@ class SessionTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         for patch in (mock.patch.object(sessions, "STORE", self.root / "sessions.json"),
+                      mock.patch.object(sessions.working_memory, "SESSIONS", self.root / "sessions.json"),
+                      mock.patch.object(sessions.working_memory, "PROJECT_LOG", self.root / "project_log.jsonl"),
+                      mock.patch.object(sessions.working_memory, "HANDOFFS", self.root / "handoffs"),
+                      mock.patch.object(sessions.working_memory, "journal", return_value=([], [])),
                       mock.patch.object(sessions, "PROJECT", self.root),
                       mock.patch.object(sessions, "executable", return_value="codex.exe"),
                       mock.patch.object(sessions.hud, "emit")):
@@ -288,6 +292,25 @@ class SessionTest(unittest.TestCase):
         conn = self.manager.connection = mock.Mock()
         self.manager.cancel()
         conn.request.assert_called_once_with("turn/interrupt", {"threadId": "thread1", "turnId": "turn1"})
+
+    def test_tasks_get_project_context_and_record_results(self):
+        FakeConnection.calls = []
+        self.manager.open()
+        with mock.patch.object(sessions, "Connection", FakeConnection):
+            self.manager.start("Find next task")
+            self.manager.thread.join(3)
+            first = next(p for m, p in FakeConnection.calls if m == "turn/start")["input"][0]["text"]
+            self.assertNotIn("Context from Jarvis", first)  # nothing recorded yet
+            FakeConnection.calls = []
+            self.manager.start("Find the task after that")
+            self.manager.thread.join(3)
+        second = next(p for m, p in FakeConnection.calls if m == "turn/start")["input"][0]["text"]
+        self.assertIn("Context from Jarvis", second)
+        self.assertIn("I recommend fixing the save flow next.", second)  # the previous result
+        self.assertIn("User request:\nFind the task after that", second)
+        log = (self.root / "project_log.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(log), 2)
+        self.assertEqual(json.loads(log[0])["project"], "Rocket Frontier")
 
     def test_searching_for_risky_words_is_not_risky(self):
         for command in ('rg -n "Remove-Item|shutdown" tools.py', 'Select-String -Pattern "Restart-Service" *.py',

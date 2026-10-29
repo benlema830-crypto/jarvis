@@ -15,6 +15,7 @@ import cc_guard
 import hud
 import task_effort
 import terminal
+import working_memory
 
 HERE = Path(__file__).resolve().parent
 STORE = HERE / "data" / "agent_sessions.json"
@@ -534,6 +535,13 @@ class SessionManager:
         started = time.monotonic()
         effort = None
         task_prompt = ('Continue the paused task below. First inspect prior tool results and current files; preserve completed work and do not repeat external actions.\n'+task) if entry.get('resume_requested') else task
+        try:  # what other agents found and decided, so each task starts where the project left off
+            context = working_memory.project_brief(entry["project"], entry["name"])
+        except Exception as error:
+            print(f"(project brief unavailable: {type(error).__name__})", flush=True)
+            context = ""
+        if context:
+            task_prompt = f"{context}\n\nUser request:\n{task_prompt}"
         try:
             if entry.get("provider") == "claude":
                 ok, report = self._run_claude(entry, task_prompt, mode)
@@ -614,6 +622,11 @@ class SessionManager:
             if effort:  # Claude-provider sessions are recorded by the terminal worker
                 task_effort.record("codex", task, effort, ok, time.monotonic() - started, report,
                                    stopped_by_user=self.cancelled.is_set())
+            if not self.pause_requested.is_set():
+                try:
+                    working_memory.record_result(entry["project"], entry["name"], task, ok, report)
+                except OSError as error:
+                    print(f"(project log not written: {error})", flush=True)
             if self.on_done and not self.pause_requested.is_set():
                 self.on_done({"name": entry["name"], "task": task, "ok": ok, "report": report})
 
