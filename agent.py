@@ -6,8 +6,8 @@ use toolset, one screenshot at a time, in the background while Jarvis carries on
 Safety:
   - "Jarvis, stop", Ctrl+Alt+J, the HUD's STOP button, or flinging the mouse into a screen
     corner stops it.
-  - It asks out loud before anything consequential (approvals.py); only your own spoken "yes" counts, and
-    PowerShell scripts that change anything always need that yes.
+  - It asks out loud before anything consequential (approvals.py); only your own spoken "yes" counts.
+    PowerShell scripts follow cc_guard.py, like Claude's terminal tasks: only risky ones need that yes.
   - It never types passwords or payment details.
   - Teams (and Outlook, unless JARVIS_ALLOW_OUTLOOK=1) are blacked out of its screenshots and it
     can't click or type into them.
@@ -29,6 +29,7 @@ import pyperclip
 import win32api
 
 import approvals
+import cc_guard
 import hud
 import task_effort
 import worksafe
@@ -67,7 +68,7 @@ How to work - speed matters, the user is waiting and can't use the mouse meanwhi
 - For file, folder and settings chores, one PowerShell script via run_powershell is far faster than clicking.
 
 Rules:
-- Before anything consequential, call ask_user and wait for the answer: sending or posting anything, purchases or payments, deleting or overwriting files, installing or uninstalling software, changing system or account settings, accepting terms or cookie banners, closing windows that may have unsaved work. Phrase the question for speaking aloud, in one sentence.
+- Before anything consequential, call ask_user and wait for the answer: sending or posting anything, purchases or payments, deleting files, installing or uninstalling software, changing system or account settings, accepting terms, closing windows that may have unsaved work. Phrase the question for speaking aloud, in one sentence.
 - Never type passwords, payment card numbers, or other credentials. If a login or payment is needed, stop and say the user must do that part.
 - {off_limits} are off-limits: they appear blacked out and actions on them are refused. Don't try to work around this.
 - The window titled "J.A.R.V.I.S." and the Jarvis console window are your own; never close or type into them.
@@ -91,8 +92,8 @@ TOOLS = [
     },
     {
         "name": "run_powershell",
-        "description": "Run a PowerShell script on the user's PC and get its output. Read-only scripts run "
-                       "immediately; anything that changes something asks the user for approval first.",
+        "description": "Run a PowerShell script on the user's PC and get its output. Ordinary scripts run "
+                       "immediately; deleting, installing or changing system settings asks the user for approval first.",
         "input_schema": {"type": "object", "properties": {
             "script": {"type": "string", "description": "The PowerShell to run."},
             "purpose": {"type": "string", "description": "What it does, as a short spoken phrase, e.g. 'sort 52 files in Downloads into folders by type'."},
@@ -434,7 +435,11 @@ class Agent:
     def _powershell(self, script: str, purpose: str) -> list[dict]:
         self.log.append(f"PowerShell: {purpose}")
         hud.emit("tool", name="agent powershell", input={"purpose": purpose, "script": script[:300]})
-        if not read_only(script):
+        # Same rules as Claude's terminal tasks: cc_guard pauses only risky scripts.
+        verdict, detail = ("allow", "") if read_only(script) else cc_guard.decide("PowerShell", {"command": script})
+        if verdict == "blocked":
+            return [{"type": "text", "text": f"BLOCKED: {detail} Don't try another way; tell the user it's off-limits."}]
+        if verdict == "approval":
             approved, said = self._request_approval(f"May I run a script to {purpose}?")
             if not approved:
                 return self._verdict(approved, said)

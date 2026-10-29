@@ -91,6 +91,21 @@ def plain_read_command(command: str) -> bool:
     return bool(parts) and all(READ_COMMAND.match(p) for p in parts)
 
 
+def safe_permissions(permissions: dict) -> bool:
+    """True when a broader-access request only adds network and/or writes cc_guard allows without asking."""
+    fs = permissions.get("fileSystem") or {}
+    writes = list(fs.get("write") or [])
+    for item in fs.get("entries") or []:
+        if item.get("access") != "write":
+            continue
+        path = item.get("path") or {}
+        if path.get("type") != "path":
+            return False  # globs and special roots (e.g. the whole drive) are too broad to judge
+        writes.append(path.get("path"))
+    return all(isinstance(p, str) and Path(p).is_absolute()
+               and cc_guard.decide("Edit", {"file_path": p})[0] == "allow" for p in writes)
+
+
 def isolate_for_mode(mode):
     """Research only inspects and reports, so it gets no MCP tools; work keeps the user's setup."""
     return mode != "work"
@@ -400,7 +415,8 @@ class SessionManager:
             actions = params.get("commandActions") or []
             read_only = (bool(actions) and all(a.get("type") in ("read", "listFiles", "search") for a in actions)) \
                 or plain_read_command(command)
-            allowed = bool(command) and verdict == "allow" and (entry["mode"] == "work" or read_only) and not params.get("additionalPermissions") and not params.get("networkApprovalContext")
+            # Same rule as Claude's bypass mode: anything cc_guard allows runs, network and extra access included.
+            allowed = bool(command) and verdict == "allow" and (entry["mode"] == "work" or read_only)
             if verdict == "blocked":
                 return {"decision": "decline"}
             question = f"{entry['name']} needs approval: {params.get('reason') or detail or 'run a command outside normal access'}. Command: {command}"
@@ -414,15 +430,15 @@ class SessionManager:
         elif method == "item/fileChange/requestApproval":
             item = self._items.get(params.get("itemId"), {})
             changes = item.get("changes", [])
-            root = Path(entry["cwd"]).resolve()
+            # Adds and edits anywhere cc_guard allows (the user's folder, minus agent/credential settings); deletes ask.
             allowed = entry["mode"] == "work" and bool(changes) and all(
                 bool(c.get("path")) and Path(c["path"]).is_absolute()
-                and Path(c["path"]).resolve().is_relative_to(root)
                 and isinstance(c.get("kind"), dict) and c["kind"].get("type") in ("add", "update")
                 and cc_guard.decide("Edit", {"file_path": c["path"]})[0] == "allow" for c in changes)
             question = f"{entry['name']} requests a file change: {params.get('reason') or ''}\n{json.dumps(changes)}"
             speech = "The agent wants to change or delete files outside its automatic permissions. Review the details on screen. May I proceed?"
         elif method == "item/permissions/requestApproval":
+            allowed = entry["mode"] == "work" and safe_permissions(params.get("permissions") or {})
             question = f"{entry['name']} requests broader access: {params.get('reason', '')}. {json.dumps(params.get('permissions', {}))}"
             speech = "The agent needs broader file or network access. Review the requested access on screen. May I allow it?"
         else:
@@ -509,7 +525,7 @@ class SessionManager:
             if self.cancelled.is_set():
                 raise InterruptedError()
             sandbox = {"type": "readOnly"} if mode == "research" else {
-                "type": "workspaceWrite", "writableRoots": [entry["cwd"]], "networkAccess": False}
+                "type": "workspaceWrite", "writableRoots": [entry["cwd"]], "networkAccess": True}
             normal = normal_effort()
             effort, reason = task_effort.choose("codex", task, normal, HIGHER_EFFORT.get(normal, normal))
             print(f"(Codex effort: {effort} - {reason})", flush=True)

@@ -227,6 +227,30 @@ class SessionTest(unittest.TestCase):
         with mock.patch.object(sessions.approvals, "ask", return_value=(False, "no")):
             self.assertEqual(self.manager._approval(event), {"decision": "decline"})
 
+    def test_work_mode_matches_claude_bypass(self):
+        self.prepare_approval()
+        with mock.patch.object(sessions.approvals, "ask") as ask:
+            self.assertEqual(self.approve_command("pip install requests", networkApprovalContext={"host": "pypi.org"},
+                                                  additionalPermissions={"network": {"enabled": True}}), {"decision": "accept"})
+            self.manager._items["edit"] = {"changes": [{"path": str(Path.home() / "Documents" / "notes.txt"), "kind": {"type": "add"}}]}
+            event = {"method": "item/fileChange/requestApproval", "params": {"itemId": "edit"}}
+            self.assertEqual(self.manager._approval(event), {"decision": "accept"})
+            grant = {"network": {"enabled": True}, "fileSystem": {"write": [str(Path.home() / "Documents")]}}
+            event = {"method": "item/permissions/requestApproval", "params": {"permissions": grant}}
+            self.assertEqual(self.manager._approval(event), {"permissions": grant, "scope": "turn"})
+            ask.assert_not_called()
+
+    def test_sensitive_writes_still_ask(self):
+        self.prepare_approval()
+        self.manager._items["edit"] = {"changes": [{"path": str(Path.home() / ".ssh" / "config"), "kind": {"type": "update"}}]}
+        event = {"method": "item/fileChange/requestApproval", "params": {"itemId": "edit"}}
+        with mock.patch.object(sessions.approvals, "ask", return_value=(False, "no")) as ask:
+            self.assertEqual(self.manager._approval(event), {"decision": "decline"})
+            grant = {"fileSystem": {"entries": [{"access": "write", "path": {"type": "special", "value": {"kind": "root"}}}]}}
+            event = {"method": "item/permissions/requestApproval", "params": {"permissions": grant}}
+            self.assertEqual(self.manager._approval(event), {"permissions": {}, "scope": "turn"})
+            self.assertEqual(ask.call_count, 2)
+
     def test_cancelled_approval_cannot_proceed(self):
         self.prepare_approval()
         self.manager.cancelled.set()
