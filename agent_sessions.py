@@ -424,6 +424,7 @@ class SessionManager:
         method, params = event["method"], event.get("params", {})
         entry = self.entries[self.active]
         allowed = False
+        kind = None  # the approval category, for the owner's auto_approve setting
         speech = "The agent needs your approval. Please review the details on screen. May I proceed?"
         if method == "item/commandExecution/requestApproval":
             command = params.get("command") or ""
@@ -436,6 +437,7 @@ class SessionManager:
             if verdict == "blocked":
                 return {"decision": "decline"}
             question = f"{entry['name']} needs approval: {params.get('reason') or detail or 'run a command outside normal access'}. Command: {command}"
+            kind = detail or None
             action = {"delete": "delete data", "install": "install or remove software",
                       "system settings": "change system settings", "destructive git": "make a destructive change to project history",
                       "publish or external message": "publish changes or send an external message",
@@ -452,17 +454,19 @@ class SessionManager:
                 and isinstance(c.get("kind"), dict) and c["kind"].get("type") in ("add", "update")
                 and cc_guard.decide("Edit", {"file_path": c["path"]})[0] == "allow" for c in changes)
             question = f"{entry['name']} requests a file change: {params.get('reason') or ''}\n{json.dumps(changes)}"
+            kind = "delete" if any((c.get("kind") or {}).get("type") == "delete" for c in changes) else "file edit"
             speech = "The agent wants to change or delete files outside its automatic permissions. Review the details on screen. May I proceed?"
         elif method == "item/permissions/requestApproval":
             allowed = entry["mode"] == "work" and safe_permissions(params.get("permissions") or {})
             question = f"{entry['name']} requests broader access: {params.get('reason', '')}. {json.dumps(params.get('permissions', {}))}"
+            kind = "broader access"
             speech = "The agent needs broader file or network access. Review the requested access on screen. May I allow it?"
         else:
             return None
         if not allowed:
             entry["status"] = "waiting"
             self.publish()
-            allowed, _ = approvals.ask(question, self.cancelled, spoken=speech)
+            allowed, _ = approvals.ask(question, self.cancelled, spoken=speech, kind=kind)
             entry["status"] = "running"
             self.publish()
         allowed = allowed and not self.cancelled.is_set()

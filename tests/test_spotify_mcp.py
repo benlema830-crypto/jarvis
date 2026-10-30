@@ -189,7 +189,9 @@ class SpotifyTest(unittest.TestCase):
                 self.assertNotIn('spotify_play', [call.args[0] for call in dispatch.call_args_list])
 
     def test_scope_and_input_boundaries(self):
-        self.assertEqual(set(spotify.SCOPES.split()), {'user-read-playback-state', 'user-modify-playback-state'})
+        self.assertEqual(set(spotify.SCOPES.split()), {'user-read-playback-state', 'user-modify-playback-state',
+                                                       'user-library-read', 'playlist-read-private',
+                                                       'playlist-modify-private'})  # never public or account scopes
         with patch.object(spotify, 'api') as api:
             for name, args in [('spotify_search', {'query': 'jazz', 'limit': 11}),
                                ('spotify_search', {'query': 'jazz', 'limit': True}),

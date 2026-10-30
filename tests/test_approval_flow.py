@@ -17,6 +17,18 @@ import knowledge
 import tools
 
 
+# These tests cover the spoken question itself; the owner's real auto_approve setting must not skip it.
+_ask_always = mock.patch("approvals.auto_approved", return_value=False)
+
+
+def setUpModule():
+    _ask_always.start()
+
+
+def tearDownModule():
+    _ask_always.stop()
+
+
 class LoopHarness(unittest.TestCase):
     def setUp(self):
         self.commands = queue.Queue()

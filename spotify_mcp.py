@@ -20,7 +20,9 @@ import mcp_oauth
 STORE = Path(__file__).resolve().parent / 'data' / 'spotify-mcp.enc'
 PORT = 8791
 CALLBACK_PORT = 8792
-SCOPES = 'user-read-playback-state user-modify-playback-state'
+# Playback, plus reading Liked Songs/playlists and making private playlists (added 2026-10-29).
+SCOPES = ('user-read-playback-state user-modify-playback-state user-library-read '
+          'playlist-read-private playlist-modify-private')
 _lock = threading.RLock()
 
 

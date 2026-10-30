@@ -131,5 +131,25 @@ class ConnectionsTest(unittest.TestCase):
         self.assertEqual(len(mcp.connections()), 1)
 
 
+class CatalogTest(unittest.TestCase):
+    ITEMS = [{'id': 'aaa', 'name': 'GitHub', 'enabled': True,
+              'tools': [{'name': f't{i}', 'description': 'x' * 2000, 'inputSchema': {}} for i in range(40)]},
+             {'id': 'bbb', 'name': 'Spotify (local)', 'enabled': True,
+              'tools': [{'name': 'spotify_play', 'description': 'Play', 'inputSchema': {'type': 'object'}}]}]
+
+    def test_unfiltered_list_is_names_only_so_the_last_server_is_seen(self):
+        with patch.object(mcp, 'connections', return_value=self.ITEMS):
+            listed = mcp.catalog()
+        self.assertLess(len(json.dumps(listed)), 2000)
+        self.assertEqual(listed[1]['tools'], ['spotify_play'])
+
+    def test_lookup_by_id_or_name_returns_full_schemas(self):
+        with patch.object(mcp, 'connections', return_value=self.ITEMS):
+            for key in ('bbb', 'spotify', 'Spotify (local)'):
+                self.assertEqual(mcp.catalog(key)[0]['id'], 'bbb')
+                self.assertIn('inputSchema', mcp.catalog(key)[0]['tools'][0])
+            self.assertEqual(mcp.catalog('slack'), [])
+
+
 if __name__ == '__main__':
     unittest.main()

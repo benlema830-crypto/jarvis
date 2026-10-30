@@ -12,6 +12,7 @@ Run:  run.bat            voice mode - say "Jarvis, ..." to talk to him
 Say "Jarvis" or press Ctrl+Alt+J at any time - even mid-sentence - to get his attention.
 """
 
+import contextlib
 import ctypes
 import ctypes.wintypes
 import datetime
@@ -825,6 +826,16 @@ Recently opened files:
 Rules: keep this briefing to a few useful sentences. Prioritize imminent calendar events and reminders; mention weather or recent work only when useful. If the working state shows unfinished agent work, a result the user hasn't heard or an open thread worth picking up, mention the one or two most important in a sentence. If nothing needs attention, a short greeting and status is enough. Don't add a joke, filler, or a closing question. Skip anything unavailable or not connected; don't invent details. The CPU reading was taken while you were loading, so don't mention CPU."""
 
 
+def gather_greeting_context() -> str:
+    """The lighter briefing for "welcome back": what's coming up, not a full status report."""
+    with ThreadPoolExecutor() as ex:
+        cal = ex.submit(_safe, context.upcoming_events, 1, False)
+        wx = ex.submit(_safe, context.weather)
+    return (f"Calendar (rest of today and tomorrow):\n{cal.result()}\n"
+            f"Reminders in the next 24 hours:\n{_safe(_upcoming_reminders)}\n"
+            f"Weather: {wx.result()}")
+
+
 # ---------- Helpers ----------
 
 def saved_provider() -> str:
@@ -892,6 +903,7 @@ class Turns:
         self.idle = threading.Event()  # set while Jarvis is waiting for a command
         self.count = 0                 # bumped each time Jarvis starts answering
         self.followup_until = 0.0
+        self.last_user = 0.0           # when the owner last said or typed something (stops the wake-up checks)
         self.dictate_until = 0.0       # Ctrl+Alt+D: the next phrase is typed, not answered
 
 
@@ -1027,6 +1039,9 @@ def start_bridges(ears):
     holo_bridge.watch()
     import nudges
     nudges.start(hud.commands.put)
+    import presence_greeting
+    if presence_greeting.start(hud.commands.put, gather_greeting_context):
+        print("Bedroom presence greeting on.", flush=True)
 
 
 # ---------- Main ----------
@@ -1209,6 +1224,9 @@ def main():
                 "or changes from it only when relevant; start them only when the user says so."}))
     threading.Thread(target=start_local_embeddings, daemon=True).start()
     start_bridges(ears)
+    import morning_wakeup
+    if morning_wakeup.start(hud.commands.put, gather_greeting_context, lambda: turns.last_user):
+        print(f"Weekday wake-up armed for {morning_wakeup.WAKE_AT.strftime('%H:%M')}.", flush=True)
     import phone_bridge
     phone_bridge.BRIDGE.speak = lambda text: phone_voice_wav(voice, text)
     if text_mode:
@@ -1217,6 +1235,8 @@ def main():
         listener = threading.Thread(target=listen_loop, args=(ears, voice, turns), daemon=True)
     listener.start()
     voice_health.bind(voice=voice, ears=ears, listener=listener, text_mode=text_mode)
+    if ears:
+        voice.on_refresh = ears.recover_input
     voice_health.phase("ready")
     runtime_metrics.bind(hud.emit)
     voice_health.start_recovery()
@@ -1254,6 +1274,7 @@ def main():
                 prompt = item["prompt"]
             else:
                 prompt = item.strip()
+                turns.last_user = time.time()
                 # Voice requests already started their timing at the utterance endpoint.
                 recent = runtime_metrics.snapshot().get('turn')
                 if not recent or 'complete' in recent['stages']:
@@ -1303,9 +1324,17 @@ def main():
                 if direct:
                     speak(direct)
             else:
-                respond(brain, voice, prompt, speak)
+                # Greetings go to the room speaker; everything else stays on the usual output.
+                output = item.get("output") if isinstance(item, dict) else None
+                with voice.through(output) if output else contextlib.nullcontext():
+                    if isinstance(item, dict) and item.get("alarm"):
+                        voice.alarm(item["alarm"])
+                    respond(brain, voice, prompt, speak)
+                    voice.wait()
             voice.wait()
             runtime_metrics.mark('complete')
+            if isinstance(item, dict) and item.get("after"):  # e.g. the greeting remembers its own wording
+                item["after"](" ".join(spoke))
             if spoke:  # only invite a follow-up after actually saying something
                 turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
             hud.emit("state", state="standby")

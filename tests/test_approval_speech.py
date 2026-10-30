@@ -6,6 +6,18 @@ import agent_sessions
 from jarvis import interruption_command
 
 
+# These tests cover the spoken question itself; the owner's real auto_approve setting must not skip it.
+_ask_always = mock.patch("approvals.auto_approved", return_value=False)
+
+
+def setUpModule():
+    _ask_always.start()
+
+
+def tearDownModule():
+    _ask_always.stop()
+
+
 class ApprovalSpeechTest(unittest.TestCase):
     def test_early_yes_in_wake_mode_reaches_pending_approval(self):
         def speaking(question):

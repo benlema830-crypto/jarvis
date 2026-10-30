@@ -17,6 +17,7 @@ audio goes through one continuously open stream so there are no gaps or clicks.
 """
 
 import collections
+import contextlib
 import json
 import os
 import queue
@@ -330,6 +331,16 @@ def _chime() -> np.ndarray:
     return (np.concatenate([note(880, 0.09), note(1320, 0.16)]) * 0.18).astype(np.float32)
 
 
+def _alarm(rounds: int = 4) -> np.ndarray:
+    """The wake-up tone: a bell-like rising arpeggio, repeated and getting louder each round."""
+    def note(freq, secs):
+        t = np.arange(int(RATE * secs)) / RATE
+        return (np.sin(2 * np.pi * freq * t) + 0.3 * np.sin(4 * np.pi * freq * t)) * np.exp(-t * 4)
+    phrase = np.concatenate([note(f, 0.28) for f in (523, 659, 784, 1047)] + [np.zeros(int(RATE * 0.6))])
+    loud = np.linspace(0.12, 0.45, rounds)
+    return np.concatenate([phrase * v for v in loud] + [np.zeros(int(RATE * 0.5))]).astype(np.float32)
+
+
 class Voice:
     def __init__(self, voice: str = "bm_george", speed: float = 1.0, engine: str = "kokoro"):
         engine, _, profile = engine.partition(":")  # "voicestudio:<profile id>" picks a VoiceStudio voice
@@ -465,6 +476,38 @@ class Voice:
                 new.play(samples, on_done)
         self.output = dict(output_devices()).get(device, "") if device is not None else ""
         return self.output or "the Windows default output"
+
+    def refresh_outputs(self):
+        """Re-read the device list, so a Bluetooth speaker that connected after startup can be found.
+        PortAudio only sees devices present when it started, and restarting it closes every stream,
+        the microphone's included - so on_refresh (the ears' recover_input) reopens it right after."""
+        with self._player_lock:
+            for _ in self._player.close():
+                pass
+            sd._terminate()
+            sd._initialize()
+            self._player = _Player(RATE, find_output(self.output))
+        if getattr(self, 'on_refresh', None):
+            self.on_refresh()
+
+    @contextlib.contextmanager
+    def through(self, name: str):
+        """Speak through another output for one turn (greetings on the Bose), then switch back.
+        Yields False and stays put when that device isn't connected."""
+        previous = self.output
+        if find_output(name) is None:
+            self.refresh_outputs()
+        if find_output(name) is None:
+            print(f"(Speaker '{name}' not connected - staying on {previous or 'the default output'})", flush=True)
+            yield False
+            return
+        print(f"(Speaking through {self.set_output(name)})", flush=True)
+        self._player.play(np.zeros(int(RATE * 0.4), dtype=np.float32))  # Bluetooth clips the first moment
+        try:
+            yield True
+        finally:
+            self.wait()
+            self.set_output(previous)
 
     def test_outputs(self) -> list[tuple[int, str]]:
         """Say "This is speaker number N" through each output in turn."""
@@ -671,6 +714,10 @@ class Voice:
     def chime(self):
         """Play the "listening" chime right away."""
         self._play(self._chime)
+
+    def alarm(self, rounds: int = 4):
+        """Play the wake-up tone; speech queued after it plays once it ends."""
+        self._play(_alarm(rounds))
 
     def stop(self):
         """Stop talking immediately and drop everything queued."""

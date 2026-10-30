@@ -266,8 +266,17 @@ def manage(payload):
 
 
 def catalog(connection_id=""):
-    return [{"id": c["id"], "name": c["name"], "tools": c["tools"]} for c in connections()
-            if c["enabled"] and (not connection_id or c["id"] == connection_id)]
+    """Enabled servers. Unfiltered: tool names only - full schemas for every server ran past 80k characters,
+    so the brain never saw the last one (Spotify). Filtered by ID, or by name ("spotify"): full schemas."""
+    enabled = [c for c in connections() if c["enabled"]]
+    if not connection_id:
+        return [{"id": c["id"], "name": c["name"], "tools": [t["name"] for t in c["tools"]],
+                 "note": "Pass this id (or the name) to list_mcp_tools for input schemas."} for c in enabled]
+    key = connection_id.strip().casefold()
+    picked = ([c for c in enabled if c["id"] == connection_id]
+              or [c for c in enabled if c["name"].casefold() == key]
+              or [c for c in enabled if key and key in c["name"].casefold()])
+    return [{"id": c["id"], "name": c["name"], "tools": c["tools"]} for c in picked[:1]]
 
 
 def call(connection_id, tool_name, arguments):

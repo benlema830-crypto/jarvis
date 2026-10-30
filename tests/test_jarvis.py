@@ -22,6 +22,18 @@ from ears import split_wake_word  # noqa: E402
 from voice import ElevenLabsEngine, SentenceBuffer, clean_for_speech  # noqa: E402
 
 
+# These tests cover the spoken question itself; the owner's real auto_approve setting must not skip it.
+_ask_always = mock.patch("approvals.auto_approved", return_value=False)
+
+
+def setUpModule():
+    _ask_always.start()
+
+
+def tearDownModule():
+    _ask_always.stop()
+
+
 class SentenceBufferTest(unittest.TestCase):
     def test_releases_short_sentence_without_waiting_for_more(self):
         buf = SentenceBuffer()

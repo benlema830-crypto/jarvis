@@ -26,7 +26,10 @@ def main():
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    token = simpledialog.askstring(
+    token = None
+    if sys.argv[1:] == ["--pair"]:
+        token = tb.load_token()  # the token is already saved; only pair the chat
+    token = token or simpledialog.askstring(
         "JARVIS - Telegram bot token",
         "Paste the bot token from @BotFather.\n\nIt is encrypted for your Windows account and never shown again.",
         show="*", parent=root)
@@ -37,7 +40,8 @@ def main():
     except (requests.RequestException, RuntimeError, ValueError):
         messagebox.showerror("JARVIS", "Telegram didn't accept that token. Nothing was saved.", parent=root)
         return
-    tb.save_token(token)
+    if sys.argv[1:] != ["--pair"]:
+        tb.save_token(token)
     code = f"{secrets.randbelow(900000) + 100000}"
     messagebox.showinfo(
         "JARVIS - pair your chat",
@@ -50,8 +54,13 @@ def main():
             params = {"timeout": 20, "allowed_updates": ["message"]}
             if offset is not None:
                 params["offset"] = offset
-            updates = tb.call(token.strip(), "getUpdates", timeout=30, **params)
-        except (requests.RequestException, RuntimeError):
+            # Telegram's long-poll "timeout" would collide with tb.call's HTTP timeout; post directly.
+            data = requests.post(tb.API.format(token=token.strip(), method="getUpdates"), json=params,
+                                 timeout=30).json()
+            if not data.get("ok"):
+                raise RuntimeError(data.get("description", "Telegram polling failed"))
+            updates = data["result"]
+        except (requests.RequestException, RuntimeError, ValueError):
             time.sleep(3)
             continue
         for update in updates:

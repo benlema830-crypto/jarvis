@@ -196,7 +196,7 @@ def authorize(client_id, wait_browser=None):
             tokens = spotify.token_request({'grant_type': 'authorization_code', 'code': result.pop('code'),
                                             'redirect_uri': REDIRECT, 'client_id': client_id, 'code_verifier': verifier})
             if not set(spotify.SCOPES.split()) <= set(tokens.get('scope', '').split()):
-                raise spotify.SpotifyError('Spotify did not grant the required playback scopes. Nothing was saved.')
+                raise spotify.SpotifyError('Spotify did not grant the required permissions. Nothing was saved.')
             value = mcp_oauth.token_result(tokens)
             if not value['refresh_token']:
                 raise spotify.SpotifyError('Spotify did not return a refresh token. Nothing was saved.')
@@ -240,6 +240,16 @@ def main():
     root = tk.Tk()
     root.withdraw()
     try:
+        if sys.argv[1:] == ['--add-scopes']:
+            # Same account and app, newer SCOPES: sign in again, keep the bridge token so the running
+            # bridge and the saved MCP connection carry on unchanged.
+            old = spotify.load_credentials()
+            value = authorize(old['client_id'], wait_browser=lambda url, done, deadline: browser_wait(root, url, done, deadline))
+            value['bridge_token'] = old['bridge_token']
+            spotify.save_credentials(value)
+            messagebox.showinfo('JARVIS Spotify', 'Spotify permissions updated. Jarvis can now read your Liked Songs '
+                                'and make private playlists.', parent=root)
+            return 0
         # Do not overwrite an existing account or rotate a running bridge's token.
         resume = sys.argv[1:] == ['--resume']
         if spotify.STORE.exists() and not resume:
