@@ -133,3 +133,12 @@ class DirectWindowTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 wc.control("Test", "force_kill")
             windows.assert_not_called()
+
+
+class SleepComputerTest(unittest.TestCase):
+    def test_sleeps_after_a_clamped_delay(self):
+        import tools
+        with mock.patch.object(tools.threading, "Timer") as timer:
+            tools.sleep_computer.call({"delay_seconds": 1})
+            timer.assert_called_once_with(5, tools._suspend)
+            timer.return_value.start.assert_called_once()

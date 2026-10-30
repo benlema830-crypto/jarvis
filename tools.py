@@ -316,6 +316,28 @@ def set_volume(percent: int) -> str:
     return f"{name} volume set to {round(vol.GetMasterVolumeLevelScalar() * 100)}%"
 
 
+# ---------- Power ----------
+
+@beta_tool(eager_input_streaming=True)
+def sleep_computer(delay_seconds: int = 10) -> str:
+    """Put this PC to sleep (not shut down or restart). It waits a few seconds first so your
+    reply still reaches the user, including on the phone, which can wake the PC again.
+
+    Args:
+        delay_seconds: Seconds to wait before sleeping, 5 to 300.
+    """
+    delay = max(5, min(int(delay_seconds), 300))
+    timer = threading.Timer(delay, _suspend)
+    timer.daemon = True
+    timer.start()
+    return f"The computer will go to sleep in {delay} seconds."
+
+
+def _suspend():
+    import ctypes
+    ctypes.windll.powrprof.SetSuspendState(False, False, False)  # sleep, not hibernate; wake events stay on
+
+
 # ---------- Information ----------
 
 @beta_tool(eager_input_streaming=True)
@@ -1388,7 +1410,7 @@ def response_style(settings: str = '{}') -> str:
 
 
 TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, last_youtube_video, open_app, list_apps, find_files, open_path, read_clipboard,
-         look_at_screen, media_control, set_volume, system_status, get_schedule, add_calendar_event, get_weather,
+         look_at_screen, media_control, set_volume, sleep_computer, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, correct_memory, update_memory, forget,
          review_memory_proposals, decide_memory_proposals, performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
