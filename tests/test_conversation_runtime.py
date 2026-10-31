@@ -77,6 +77,13 @@ class ConversationRuntimeTest(unittest.TestCase):
         device.recover_input.assert_called_once()
         self.assertEqual(device.voiceprint, 'enrolled')
 
+    def test_failed_mic_reopen_restarts_portaudio_and_retries(self):
+        device=SimpleNamespace(recover_input=Mock(side_effect=OSError), mic='Headset Microphone')
+        speaker=SimpleNamespace(refresh_outputs=Mock())
+        with patch.multiple(health, _ears=device, _voice=speaker, _recoveries={}):
+            self.assertEqual(health.recover('microphone')['status'], 'recovered')
+        speaker.refresh_outputs.assert_called_once()
+
     def test_recovery_monitor_only_reopens_failed_components(self):
         ears=SimpleNamespace(stream=SimpleNamespace(active=True), last_input=10, pause_seconds=1.2)
         speaker=SimpleNamespace(_player=SimpleNamespace(_stream=SimpleNamespace(active=False)))

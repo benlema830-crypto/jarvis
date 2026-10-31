@@ -37,7 +37,18 @@ def recover(component, automatic=False):
         attempts = previous.get('attempts', 0) + 1
         _recoveries[component] = {'status': 'recovering', 'attempts': attempts, 'at': time.time(), 'automatic': automatic}
     try:
-        message = device.recover_input() if component == 'microphone' else device.recover_output()
+        if component == 'microphone':
+            try:
+                message = device.recover_input()
+            except Exception:
+                # After sleep or a replug PortAudio keeps the stale device list; only a restart of it
+                # (which the speaker's refresh does, reopening the mic via on_refresh) sees the headset again.
+                if not hasattr(_voice, 'refresh_outputs'):
+                    raise
+                _voice.refresh_outputs()
+                message = 'Microphone reconnected: ' + device.mic
+        else:
+            message = device.recover_output()
         result = {'status': 'recovered', 'attempts': 0, 'message': message, 'retry_at': now+5}
     except Exception as exc:
         result = {'status': 'failed', 'attempts': attempts, 'message': f'Reconnect the device and try again ({type(exc).__name__}).',
