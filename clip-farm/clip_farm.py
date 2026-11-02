@@ -225,28 +225,7 @@ def render(source, candidate, target, subtitle, args):
         cwd=target.parent)
 
 
-def download(url, folder, allowed):
-    if not allowed:
-        raise ValueError("URL download requires --allow-download and permission to clip the content.")
-    parsed = urlsplit(url)
-    if parsed.username or parsed.password:
-        raise ValueError("Do not put credentials in input URLs.")
-    try:
-        from yt_dlp import YoutubeDL
-    except ImportError as exc:
-        raise RuntimeError("yt-dlp is missing. Local files still work; see README.") from exc
-    # Python API does not load user CLI configs, cookies, plugins or shell commands.
-    options = {"outtmpl": str(folder / "source.%(ext)s"), "noplaylist": True,
-               "format": "bv*+ba/b", "merge_output_format": "mp4", "quiet": True,
-               "no_warnings": True, "overwrites": False}
-    with YoutubeDL(options) as downloader:
-        info = downloader.extract_info(url, download=True)
-        if not info or info.get("_type") == "playlist":
-            raise ValueError("Expected one VOD, not a playlist.")
-    files = [p for p in folder.glob("source.*") if p.suffix not in (".part", ".ytdl")]
-    if len(files) != 1:
-        raise RuntimeError("Could not identify one completed VOD download.")
-    return files[0].resolve()
+from vod_download import download
 
 
 def parser():

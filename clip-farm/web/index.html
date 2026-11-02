@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Clip Studio · GTA 6 Clip Farm</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Clip Studio home"><span class="brand-icon">Ⅵ</span><span>CLIP<span class="thin">STUDIO</span><small>THE LOCAL EDIT ROOM</small></span></a>
+  <div class="nav-label">WORKSPACE</div>
+  <button class="nav active" id="newRun"><span>＋</span> Create clips <kbd>N</kbd></button>
+  <div class="history-heading"><span class="nav-label">RECENT RUNS</span><button class="icon" id="refreshHistory" aria-label="Refresh history">↻</button></div>
+  <div id="history" class="history"><p class="muted">Your runs will live here.</p></div>
+  <div class="sidebar-bottom"><span class="local-dot"></span> Local by design<p>Your footage stays on this PC.<br>No accounts. No automatic posting.</p></div>
+</aside>
+<main>
+  <header class="topbar"><span>GTA 6 CLIP FARM <span class="slash">/</span> <span class="muted">Creator workspace</span></span><div><button id="historyToggle" class="secondary">History</button> <span id="connection" class="connection">Connecting…</span></div></header>
+  <section class="intro"><div><p class="eyebrow">LONG SESSIONS. SHORT STORIES.</p><h1>Good moments.<br><span>Great clips.</span></h1><p class="subtitle">Find the peaks. Frame the action. Keep the ones worth sharing.</p></div><div class="format"><b>9:16</b><span>720 × 1280<br>Made for the feed</span></div></section>
+  <div id="message" class="message" role="alert" hidden></div>
+  <div class="workspace">
+    <section class="setup panel" aria-labelledby="setupTitle">
+      <div class="section-heading"><h2 id="setupTitle">Create a new cut</h2><span class="step">01 — SOURCE</span></div>
+      <div class="source-tabs"><button class="selected" type="button" id="localTab">Local file</button><button type="button" id="urlTab">From URL</button></div>
+      <div id="urlNotice" hidden><label class="small-label" for="vodUrl">VIDEO OR VOD LINK</label><input id="vodUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." aria-label="Video or VOD URL"><p class="inline-note">YouTube, Twitch VODs or public video links. Finished videos only; no live streams. Downloads stay in the run folder (up to 8 GB per file).</p></div>
+      <label id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose or drop a VOD file">
+        <input id="videoFile" type="file" accept=".mp4,.mkv,.mov,.webm,.avi,.m4v" hidden>
+        <span class="upload-icon">↥</span><strong id="videoName">Drop your VOD here</strong><span id="videoHint">or <u>browse files</u></span><small>MP4, MKV, MOV, WebM · up to 8 GB</small>
+      </label>
+      <div id="uploadStatus" class="upload-status" role="status" hidden><progress id="uploadProgress" max="100" value="0"></progress><span></span></div>
+      <div class="chat-row"><label for="chatFile"><b>＋ Add chat CSV</b><small>Optional · use chat activity to rank moments</small></label><input type="file" id="chatFile" accept=".csv" hidden><button id="clearChat" class="icon" aria-label="Remove chat CSV" hidden>×</button></div><p id="chatName" class="file-note"></p>
+      <div class="divider"></div><div class="section-heading"><h2>Make it yours</h2><span class="step">02 — SETTINGS</span></div>
+      <div class="setting-row"><label for="top">Number of clips</label><div class="number-control"><button type="button" id="less" aria-label="Fewer clips">−</button><input id="top" type="number" min="1" max="100" value="5" aria-label="Number of clips"><button type="button" id="more" aria-label="More clips">＋</button></div></div>
+      <div class="setting-row"><label for="duration">Clip length</label><output id="durationLabel" for="duration">30 <span>sec</span></output></div><input type="range" id="duration" min="15" max="60" value="30" step="1"><div class="range-labels"><span>15s · quick hit</span><span>60s · full moment</span></div>
+      <fieldset class="layout-picker"><legend>Vertical layout</legend><label><input type="radio" name="layout" value="blur" checked><span class="layout-option"><i class="layout-preview blur"><b></b></i><span><b>Blur fill</b><small>Keep the full scene</small></span></span></label><label><input type="radio" name="layout" value="crop"><span class="layout-option"><i class="layout-preview crop"><b></b></i><span><b>Center crop</b><small>Fill the frame</small></span></span></label></fieldset>
+      <label class="caption-toggle" for="captions"><span><b>Burned-in captions</b><small>Transcribed locally. Always review the words.</small></span><input type="checkbox" id="captions" checked><i aria-hidden="true"></i></label>
+      <div id="modelWrap"><label class="small-label" for="model">LOCAL WHISPER MODEL</label><select id="model" aria-label="Local Whisper model"></select><p class="file-note">Uses existing models only. No downloads.</p></div>
+      <button id="run" class="primary" disabled><span>Find my highlights</span><span>↗</span></button><p class="footnote">Use footage you own or have permission to clip.</p>
+    </section>
+    <section class="results" id="resultsAnchor" aria-label="Run workspace">
+      <div class="results-heading"><div><p class="eyebrow">YOUR EDIT ROOM</p><h2 id="runTitle">From recording to ready.</h2></div><button id="openFolder" class="secondary" hidden>↗ Open folder</button></div>
+      <section id="empty" class="empty panel"><div class="empty-art" aria-hidden="true"><div class="film back"></div><div class="film front"><span>✦</span><div class="waveform"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><b>THE MOMENT<br>IS IN THERE.</b><small>LET’S FIND IT.</small></div></div><h3>Your next highlight starts here.</h3><p>Add a recording and we’ll find its loudest, most active moments.<br>Preview each clip here before deciding what makes the cut.</p><div class="workflow"><span><b>01</b> Find peaks</span><span><b>02</b> Frame & caption</span><span><b>03</b> Your final say</span></div></section>
+      <section id="processing" class="processing panel" hidden><div class="processing-top"><span id="statusBadge" class="badge">WORKING</span><span id="elapsed" class="muted"></span></div><h3 id="phase">Preparing pipeline</h3><p id="phaseNote">Working locally. You can leave this page open and watch the progress.</p><div id="activityBar" class="activity-bar"><i></i></div><details id="logDetails"><summary>Pipeline log <span>Live output ↙</span></summary><pre id="logs" tabindex="0"></pre></details></section>
+      <section id="reviewSection" hidden><div class="review-toolbar"><div><h3>Review your highlights <span id="clipCount"></span></h3><p id="resultNote"></p></div><div class="filters" role="group" aria-label="Filter clips"><button class="selected" data-filter="all">All</button><button data-filter="pending">To review</button><button data-filter="approved">Approved</button><button data-filter="rejected">Rejected</button></div></div><div id="gallery" class="gallery"></div><p id="filterEmpty" class="panel filter-empty" hidden>No clips in this view yet.</p><p class="review-note">Approving copies the video and subtitles to <b>approved/</b>. Rejecting removes that review copy; originals stay in the run folder. Scores measure activity, not viral potential.</p></section>
+    </section>
+  </div>
+  <footer>CLIP STUDIO <span>Built for the moments between the missions.</span><span id="outputPath"></span></footer>
+</main>
+<dialog id="preview"><div class="preview-heading"><div><p class="eyebrow">THE REVIEW SCREEN</p><h2 id="previewTitle">Highlight</h2></div><button id="closePreview" class="icon" aria-label="Close preview">×</button></div><div class="preview-body"><video id="previewVideo" controls playsinline preload="metadata"></video><aside><span id="previewScore" class="badge"></span><h3>Caption transcript</h3><p class="muted">Read along and check the wording before sharing.</p><pre id="previewCaptions"></pre><div id="previewActions"></div></aside></div></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/app.js"></script>
+</body></html>

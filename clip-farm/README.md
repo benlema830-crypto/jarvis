@@ -2,7 +2,78 @@
 
 Turn a recorded VOD into ranked vertical clips, ready for **human review**. Test
 with GTA 5 roleplay recordings now; the pipeline does not depend on a specific game.
-This is a standalone CLI, not a Jarvis plugin or an unattended publishing service.
+This is a standalone local app with a graphical studio and a CLI, not an unattended publishing service.
+
+## Clip Studio — graphical interface
+
+From the Jarvis project folder, run **`clip-farm\start-studio.bat`**, or double-click
+that file in Explorer. It uses the clip-farm virtual environment if present,
+otherwise Jarvis's existing environment, and opens **http://127.0.0.1:7792**.
+Keep the terminal open while working. Nothing in Jarvis itself is restarted.
+
+Alternatively, with the existing Python environment:
+
+```powershell
+cd C:\Users\Lemab\Jarvis\clip-farm
+..\.venv\Scripts\python.exe studio.py
+# Optional: choose another port/output location, or skip opening a browser:
+..\.venv\Scripts\python.exe studio.py --port 7792 --out clips --no-browser
+```
+
+1. Drop a local VOD or click **browse files**. Optionally add a chat CSV with a
+   `time_seconds` column. Uploads are local copies, limited to 8 GB per video and
+   20 MB per chat file; originals stay untouched. Use the CLI for larger inputs.
+2. Choose clip count, length (15–60 seconds), blur fill or center crop, captions,
+   and an existing local Whisper model. Cached models are listed automatically.
+3. Click **Find my highlights**. The studio runs the original `clip_farm.main`
+   pipeline in a separate process, at 720×1280. The live stage/log display reports
+   real pipeline messages; it does not invent a time-to-completion percentage.
+4. Preview clips, inspect activity scores and read the SRT caption transcript.
+   **Approve** copies the MP4 and SRT to `clips/approved/<run-id>/`.
+   **Reject**, or clicking Approved again, removes only those generated review
+   copies. Original outputs remain in their `clips/run-.../` directory.
+5. Use **Open folder** for the original run folder. The sidebar (or **History** on
+   a small screen) restores previous runs and decisions. Completed CLI runs under
+   the selected output folder are also imported into history.
+
+The app uses Python's standard-library local server; no Flask/FastAPI installation
+or frontend build is needed. Its assets have no CDN/font/network dependencies.
+It binds only to loopback, checks the Host and mutation origin/token, streams
+uploads to disk, supports seeking in preview videos, and runs one render at a time.
+Do not expose it as a public/multi-user server.
+
+Local uploads and run/review state are retained in `.studio/` under the selected
+output directory (`clips/.studio/` by default), so output libraries stay separate. Closing
+the browser does not cancel a run. Ctrl+C closes the web server and lets an active
+render finish before Python exits. A forcibly terminated run is marked interrupted
+on the next start, not automatically resumed. There is no cancel/resume UI yet.
+Partial pipeline outputs are retained for diagnosis. Nothing is auto-published.
+
+Choose **From URL**, paste a YouTube video, finished Twitch VOD or direct public
+video link, set your clip options, and click **Find my highlights**. Only clip
+footage you have permission to use. The log shows download percentage, speed and
+ETA, followed by FFmpeg merge (when separate audio/video tracks are supplied) and
+the normal clip pipeline. The downloaded `source.*` stays in that run's folder.
+Live, upcoming and still-processing streams are refused; streaming manifests with
+unknown duration are refused too. Playlist/channel collections are not processed.
+Downloads are limited to 8 GB per media file, at up to 1080p where available;
+network retries are bounded. Private/subscriber-only/sign-in-required videos may
+fail with an explanation. No cookies or account access are imported.
+Refresh an already-open page after updating/restarting Clip Studio.
+
+Studio checks:
+
+```powershell
+..\.venv\Scripts\python.exe -m unittest -v test_clip_farm test_studio test_vod_download
+..\.venv\Scripts\python.exe check_studio_browser.py
+```
+
+The browser check needs the already-installed Playwright package and Chrome plus
+the existing `test-artifacts/*/synthetic.mp4` fixture and a cached Whisper model.
+It performs real local ASR/rendering, playback, approve/reject, reload/history,
+and responsive-layout checks. Folder opening is mocked; no Explorer window or
+external service is used. Screenshots and verification JSON are saved under
+`test-artifacts/studio-*/`. No dependencies/models are installed by the check.
 
 ## Permission first
 
@@ -89,10 +160,15 @@ Uses the [official yt-dlp Python API](https://github.com/yt-dlp/yt-dlp#embedding
 It downloads one VOD, not a playlist, and retains the source in the run directory.
 No browser cookies, account credentials, user CLI configs or custom shell hooks
 are supplied. DRM/private streams are not bypassed. Some platforms additionally
-require an approved JavaScript runtime, authentication or extractor updates; these
-are not installed/configured here. URL downloads were **not live-tested** in this
-prototype: yt-dlp is not installed in the existing test environment, and no
-third-party content was downloaded.
+require authentication or extractor updates; these are not configured automatically.
+yt-dlp 2026.10.26 and its YouTube EJS dependency 0.8.0 are installed in Jarvis's
+`.venv` under the approved installation. The downloader enables the existing Node
+runtime when available; no new system runtime is installed. A real URL-to-clip browser test uses the
+[W3C-hosted Big Buck Bunny trailer](https://media.w3.org/2010/05/bunny/trailer.mp4).
+Attribution: (c) copyright 2008, Blender Foundation / www.bigbuckbunny.org;
+[Creative Commons Attribution 3.0](https://peach.blender.org/about/).
+Run `..\.venv\Scripts\python.exe check_url_browser.py` to repeat that opt-in
+network test. YouTube/Twitch account-specific restrictions are not tested by it.
 
 ### Optional chat
 
