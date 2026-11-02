@@ -92,8 +92,10 @@ class VoiceStudioTest(unittest.TestCase):
         engine = voicestudio_voice.VoiceStudioEngine()
         with mock.patch.object(engine, "running", return_value=False), \
                 mock.patch.object(voicestudio_voice, "_app_processes", return_value={123}), \
+                mock.patch.object(voicestudio_voice, "_close_if_stuck", return_value=False) as stuck, \
                 mock.patch.object(voicestudio_voice.subprocess, "Popen") as popen:
-            self.assertFalse(engine.launch())
+            self.assertFalse(engine.launch())  # still starting up
+        stuck.assert_called_once()
         popen.assert_not_called()
 
     def test_no_waiting_on_voicestudio_while_it_reopens(self):

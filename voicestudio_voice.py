@@ -36,6 +36,34 @@ def _app_processes() -> set[int]:
     return found
 
 
+STARTUP_GRACE = 120  # seconds the app may take to bring its speech server up
+
+
+def _close_if_stuck(grace=STARTUP_GRACE) -> bool:
+    """VoiceStudio's window can outlive its speech server (e.g. the server was ended in Task Manager);
+    then it never answers again. If every app process is older than the start-up grace period and the
+    server is still down, close the app so it can be reopened whole. Returns True if it was closed."""
+    import psutil
+    folder = str(APP.parent).casefold()
+    procs = []
+    for proc in psutil.process_iter(["exe", "create_time"]):
+        try:
+            if (proc.info["exe"] or "").casefold().startswith(folder):
+                procs.append(proc)
+        except (psutil.Error, OSError):
+            pass
+    if not procs or any(time.time() - (p.info["create_time"] or 0) < grace for p in procs):
+        return False
+    print("(VoiceStudio's window is open but its speech server is gone - restarting VoiceStudio)", flush=True)
+    for proc in procs:
+        try:
+            proc.terminate()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(procs, timeout=10)
+    return True
+
+
 def _tuck_away(focus, seconds=25):
     """Minimize VoiceStudio's windows as they appear after a launch, and give focus back."""
     import win32con
@@ -123,8 +151,11 @@ class VoiceStudioEngine:
 
         Its window ignores a minimized start, so it is minimized as it appears and focus goes back to the
         user's window. Never starts a second copy while one is still starting up."""
-        if self.running() or not APP.is_file() or _app_processes():
+        if self.running() or not APP.is_file():
             return False
+        if _app_processes():
+            if not _close_if_stuck():
+                return False  # still starting up; don't open a second copy
         import win32gui
         focus = win32gui.GetForegroundWindow()
         subprocess.Popen([str(APP)], cwd=APP.parent, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))

@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.parse
 import webbrowser
+from pathlib import Path
 
 import pyperclip
 import re
@@ -336,6 +337,66 @@ def sleep_computer(delay_seconds: int = 10) -> str:
 def _suspend():
     import ctypes
     ctypes.windll.powrprof.SetSuspendState(False, False, False)  # sleep, not hibernate; wake events stay on
+
+
+@beta_tool(eager_input_streaming=True)
+def self_check(focus: str = "") -> str:
+    """Check your own health from live facts: your processes and uptime, whether code changed
+    since you started, the voice actually speaking vs the one chosen (and VoiceStudio's state),
+    your conversation model, background work really running (terminal task, agent sessions,
+    computer task), local services, Home Assistant reachability and devices, and errors logged
+    since you started. Read-only and takes about a second.
+
+    ALWAYS call this before answering anything about your own state: "are you stuck", "what's
+    running", "why is your voice different", "is X broken", "did the restart work", or before
+    claiming a job is still running. Never answer those from memory of the conversation: earlier
+    statements may be stale after a restart. If this doesn't show the cause, say you don't know.
+
+    Args:
+        focus: Optional single area: processes, code, brain, voice, background, services, home, errors.
+    """
+    import self_check as checker
+    background = []
+    try:
+        background.append("Terminal task: " + (TERMINAL.status() if TERMINAL.running else "none running"))
+    except Exception as e:
+        background.append(f"Terminal task: unknown ({e})")
+    try:
+        active = [s for s in SESSIONS.snapshot()["sessions"] if s.get("status") in ("running", "waiting", "pausing")]
+        background.append("Agent sessions running: " + (", ".join(f"{s['name']} ({s['status']})" for s in active)
+                                                        if active else "none"))
+    except Exception as e:
+        background.append(f"Agent sessions: unknown ({e})")
+    try:
+        background.append("Computer (screen) task: " + ("running" if AGENT.running else "none running"))
+    except Exception as e:
+        background.append(f"Computer task: unknown ({e})")
+    return checker.report(focus, info=dict(hud.info), background=background)
+
+
+@beta_tool(eager_input_streaming=True)
+def restart_jarvis(reason: str = "") -> str:
+    """Restart Jarvis himself (this assistant), not the computer. Use when the owner asks you to
+    restart, reboot or reload yourself, when you seem stuck or jammed, or after code changes.
+    It stops every Jarvis process including stuck background agents, repairs a half-closed
+    VoiceStudio, and starts a fresh copy quietly in about 20-40 seconds. Tell the owner you are
+    restarting before calling this; you will be offline briefly.
+
+    Args:
+        reason: Optional short note for the restart log.
+    """
+    root = Path(__file__).resolve().parent
+    script = root / "scripts" / "restart_jarvis.py"
+    pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
+    flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    args = [str(pythonw), str(script), "--delay", "6"]
+    try:  # leave any job object so the restarter outlives this process
+        subprocess.Popen(args, cwd=root, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, close_fds=True)
+    except OSError:
+        subprocess.Popen(args, cwd=root, creationflags=flags, close_fds=True)
+    if reason:
+        print(f"(restart requested: {reason[:200]})", flush=True)
+    return "Restarting in about 6 seconds; Jarvis will be back in under a minute."
 
 
 # ---------- Information ----------
@@ -1410,7 +1471,7 @@ def response_style(settings: str = '{}') -> str:
 
 
 TOOLS = [open_website, show_search_results, amazon_cart, home_control, home_status, youtube, last_youtube_video, open_app, list_apps, find_files, open_path, read_clipboard,
-         look_at_screen, media_control, set_volume, sleep_computer, system_status, get_schedule, add_calendar_event, get_weather,
+         look_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, correct_memory, update_memory, forget,
          review_memory_proposals, decide_memory_proposals, performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
