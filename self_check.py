@@ -125,12 +125,16 @@ def check_voice(info):
              + (" (still loading)" if info.get("voice_warming") else "")]
     if str(chosen).startswith("voicestudio"):
         try:
+            import psutil
             import voicestudio_voice
             procs = voicestudio_voice._app_processes()
+            youngest = min((time.time() - psutil.Process(pid).create_time() for pid in procs), default=None)
         except Exception:
-            procs = set()
+            procs, youngest = set(), None
         if _port(3900):
             lines.append("VoiceStudio: running and answering.")
+        elif procs and youngest is not None and youngest < voicestudio_voice.STARTUP_GRACE:
+            lines.append(f"VoiceStudio: starting up ({_ago(youngest)} ago) - a fallback voice is used until it's ready.")
         elif procs:
             lines.append("VoiceStudio: PROBLEM - its window is open but its speech server isn't answering, so a "
                          "fallback voice is used. It is reopened automatically after 2 minutes, or restart Jarvis.")

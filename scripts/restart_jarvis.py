@@ -83,14 +83,25 @@ def jarvis_processes():
 
 
 def stop_jarvis():
-    targets = {}
+    targets, keep = {}, set()
     for proc in jarvis_processes():
         targets[proc.pid] = proc
         try:
-            for child in proc.children(recursive=True):
-                targets[child.pid] = child
+            children = proc.children(recursive=True)
         except psutil.Error:
-            pass
+            continue
+        # Jarvis opens VoiceStudio, but it's its own app: leave it and its speech server running
+        # so the voice is warm the moment Jarvis is back.
+        for child in children:
+            if _is_voicestudio(child):
+                keep.add(child.pid)
+                try:
+                    keep.update(p.pid for p in child.children(recursive=True))
+                except psutil.Error:
+                    pass
+        for child in children:
+            if child.pid not in keep:
+                targets[child.pid] = child
     targets.pop(os.getpid(), None)
     if not targets:
         log("No Jarvis processes were running.")
@@ -112,6 +123,13 @@ def stop_jarvis():
         if not port_open(HUD_PORT) and not port_open(BRAIN_PORT):
             break
         time.sleep(.2)
+
+
+def _is_voicestudio(proc):
+    try:
+        return (proc.exe() or '').casefold().startswith(str(VOICESTUDIO_DIR).casefold())
+    except (psutil.Error, OSError):
+        return False
 
 
 def _name(proc):

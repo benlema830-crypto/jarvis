@@ -27,6 +27,29 @@ class IsJarvisProcess(unittest.TestCase):
         self.assertFalse(restart_jarvis.is_jarvis_process(None))
 
 
+class Stop(unittest.TestCase):
+    def test_keeps_voicestudio_running_but_stops_jarvis_workers(self):
+        jarvis = mock.Mock(pid=10)
+        worker = mock.Mock(pid=11)
+        studio = mock.Mock(pid=12)
+        studio.exe.return_value = str(restart_jarvis.VOICESTUDIO_DIR / 'VoiceStudio.exe')
+        worker.exe.return_value = r'C:\tools\codex.exe'
+        server = mock.Mock(pid=13)  # VoiceStudio's speech server: a python.exe under VoiceStudio.exe
+        server.exe.return_value = r'C:\Users\x\AppData\Roaming\VoiceStudio\runtime\python.exe'
+        studio.children.return_value = [server]
+        jarvis.children.return_value = [worker, studio, server]
+        with mock.patch.object(restart_jarvis, 'jarvis_processes', return_value=[jarvis]), \
+             mock.patch.object(restart_jarvis, '_name', return_value='x'), \
+             mock.patch.object(restart_jarvis.psutil, 'wait_procs', return_value=([], [])), \
+             mock.patch.object(restart_jarvis, 'port_open', return_value=False), \
+             mock.patch.object(restart_jarvis, 'log'):
+            restart_jarvis.stop_jarvis()
+        jarvis.terminate.assert_called_once()
+        worker.terminate.assert_called_once()
+        studio.terminate.assert_not_called()
+        server.terminate.assert_not_called()
+
+
 class Main(unittest.TestCase):
     def test_refuses_to_start_a_second_copy(self):
         with mock.patch.object(restart_jarvis, "stop_jarvis"), \

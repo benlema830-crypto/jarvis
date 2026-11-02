@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,14 +30,26 @@ class Report(unittest.TestCase):
 
 
 class Voice(unittest.TestCase):
-    def test_half_dead_voicestudio_is_reported(self):
+    def _voice_report(self, app_age_seconds, voice="kokoro"):
+        import psutil
         import voicestudio_voice
+        proc = mock.Mock()
+        proc.create_time.return_value = time.time() - app_age_seconds
         with mock.patch.object(self_check, "_preferences", return_value={"voice_engine": "voicestudio:abc"}), \
              mock.patch.object(self_check, "_port", return_value=False), \
-             mock.patch.object(voicestudio_voice, "_app_processes", return_value={1, 2}):
-            text = "\n".join(self_check.check_voice({"voice": "kokoro"}))
+             mock.patch.object(voicestudio_voice, "_app_processes", return_value={1, 2}), \
+             mock.patch.object(psutil, "Process", return_value=proc):
+            return "\n".join(self_check.check_voice({"voice": voice}))
+
+    def test_half_dead_voicestudio_is_reported(self):
+        text = self._voice_report(app_age_seconds=600)
         self.assertIn("speaking with kokoro", text)
         self.assertIn("window is open but its speech server isn't answering", text)
+
+    def test_voicestudio_still_starting_is_not_called_a_problem(self):
+        text = self._voice_report(app_age_seconds=10)
+        self.assertIn("VoiceStudio: starting up", text)
+        self.assertNotIn("PROBLEM", text)
 
     def test_other_voices_skip_voicestudio(self):
         with mock.patch.object(self_check, "_preferences", return_value={"voice_engine": "kokoro"}):
