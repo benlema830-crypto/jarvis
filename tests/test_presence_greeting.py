@@ -18,8 +18,8 @@ class Sensor:
         self.states = {pg.SENSOR: {'state': state, 'last_changed': _iso(changed)},
                        pg.PERSON: {'state': person, 'last_changed': _iso(person_changed)}}
 
-    def set(self, state):
-        self.states[pg.SENSOR] = dict(self.states[pg.SENSOR], state=state)
+    def set(self, state, changed):
+        self.states[pg.SENSOR] = dict(self.states[pg.SENSOR], state=state, last_changed=_iso(changed))
 
     def __call__(self, entity):
         return self.states[entity]
@@ -34,106 +34,117 @@ class WatcherTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.now = AFTERNOON
         self.queued = []
+        self.sensor = Sensor('on', changed=self.now)
+        self.w = pg.Watcher(self.queued.append, self.sensor, lambda: 999,
+                            clock=lambda: self.now)
+        self.w.poll()
 
-    def watcher(self, sensor, idle=999.0, briefing=None):
-        return pg.Watcher(self.queued.append, sensor, lambda: idle, briefing, clock=lambda: self.now)
+    def change(self, state):
+        self.sensor.set(state, self.now)
+        return self.w.poll()
 
-    def test_never_greets_for_the_state_seen_at_startup(self):
-        sensor = Sensor('on')
-        self.assertIsNone(self.watcher(sensor).poll())
+    def wait(self, seconds):
+        for _ in range(seconds // 2):
+            self.now += 2
+            self.w.poll()
+        if seconds % 2:
+            self.now += 1
+            self.w.poll()
+
+    def test_ten_continuous_minutes_boundary_and_exact_duration(self):
+        self.change('off'); self.wait(599)
+        self.assertEqual(self.change('on'), 'room was only briefly empty')
+        self.change('off'); self.wait(600)
+        self.assertEqual(self.change('on'), 'greeted')
+        self.assertIn('about 10 minutes', self.queued[0]['prompt'])
+
+    def test_repeated_doorway_trips_do_not_reuse_absence_or_refund_cooldown(self):
+        self.change('off'); self.wait(16 * 60); self.change('on')
+        greeted = self.w.saved['last_greeted']
+        for minutes in (4, 1, 3):
+            self.wait(20); self.change('off'); self.wait(minutes * 60)
+            self.assertEqual(self.change('on'), 'room was only briefly empty')
+            self.assertEqual(self.w.saved['last_greeted'], greeted)
+        self.assertEqual(len(self.queued), 1)
+
+    def test_new_absence_has_own_duration_even_after_brief_return(self):
+        self.change('off'); self.wait(16 * 60); self.change('on')
+        self.wait(20); self.change('off'); self.wait(31 * 60)
+        self.assertEqual(self.change('on'), 'greeted')
+        self.assertIn('about 31 minutes', self.queued[-1]['prompt'])
+
+    def test_short_clear_blips_do_not_accumulate_or_reset_cooldown(self):
+        for _ in range(8):
+            self.change('off'); self.wait(120); self.change('on'); self.wait(2)
         self.assertEqual(self.queued, [])
+        self.assertNotIn('last_greeted', self.w.saved)
 
-    def test_greets_after_room_was_empty_for_an_hour_since_startup(self):
-        sensor = Sensor('off', changed=AFTERNOON - 3600)
-        w = self.watcher(sensor, briefing=lambda: 'Calendar: Dentist 5 PM')
-        w.poll()
-        sensor.set('on')
-        self.assertEqual(w.poll(), 'greeted')
-        prompt = self.queued[0]['prompt']
-        self.assertIn('[PRESENCE GREETING]', prompt)
-        self.assertIn('about an hour', prompt)
-        self.assertIn('Dentist 5 PM', prompt)  # medium tier includes the briefing
-
-    def test_short_absence_gets_one_line_and_no_briefing(self):
-        sensor = Sensor('on')
-        w = self.watcher(sensor, briefing=mock.Mock(return_value='x'))
-        w.poll()
-        sensor.set('off')
-        w.poll()
-        self.now += 10 * 60
-        sensor.set('on')
-        self.assertEqual(w.poll(), 'greeted')
-        self.assertIn('One sentence', self.queued[0]['prompt'])
-        w.briefing.assert_not_called()
-
-    def test_flicker_quiet_hours_cooldown_and_desk_use_block_greeting(self):
-        sensor = Sensor('on')
-        w = self.watcher(sensor)
-        w.poll()
-        sensor.set('off'); w.poll()
-        self.now += 60
-        sensor.set('on')
-        self.assertEqual(w.poll(), 'room was only briefly empty')
-
-        self.assertEqual(pg.should_greet(60, datetime.datetime(2026, 10, 29, 23, 30), 0, 999), 'quiet hours')
-        self.assertEqual(pg.should_greet(60, datetime.datetime(2026, 10, 29, 6, 39), 0, 999), 'quiet hours')
-        self.assertIsNone(pg.should_greet(60, datetime.datetime(2026, 10, 29, 6, 40), 0, 999))
-        noon = datetime.datetime(2026, 10, 29, 12, 0)
-        self.assertEqual(pg.should_greet(60, noon, noon.timestamp() - 600, 999), 'cooldown')
-        self.assertEqual(pg.should_greet(60, noon, 0, 5), 'someone was just using the PC')
-        self.assertEqual(self.queued, [])
-
-    def test_cooldown_survives_a_restart_and_wording_is_remembered(self):
-        sensor = Sensor('off', changed=AFTERNOON - 3600)
-        w = self.watcher(sensor)
-        w.poll(); sensor.set('on'); w.poll()
+    def test_cooldown_persists_and_survives_restart(self):
+        self.change('off'); self.wait(600); self.change('on')
         self.queued[0]['after']('Welcome back, sir.')
-        again = self.watcher(Sensor('off', changed=self.now - 600))
-        again.poll()
-        again.read_state.set('on')
-        self.now += 5 * 60
-        self.assertEqual(again.poll(), 'cooldown')
-        self.assertEqual(again.saved['recent'][-1]['text'], 'Welcome back, sir.')
+        self.wait(20); self.change('off'); self.wait(600)
+        self.w = pg.Watcher(self.queued.append, self.sensor, lambda: 999, clock=lambda: self.now)
+        self.w.poll()
+        self.assertEqual(self.change('on'), 'cooldown')
+        self.assertEqual(self.w.saved['recent'][-1]['text'], 'Welcome back, sir.')
+        self.assertGreaterEqual(pg.COOLDOWN_MINUTES, 10)
 
-    def test_a_quick_pass_through_gives_the_cooldown_back(self):
-        # 2026-10-29: in for 20 s at 5:52 (greeted, they'd already gone), back at 6:09 -> cooldown blocked it.
-        sensor = Sensor('off', changed=AFTERNOON - 240)
-        w = self.watcher(sensor)
-        w.poll(); sensor.set('on')
-        self.assertEqual(w.poll(), 'greeted')
-        self.now += 20
-        sensor.set('off'); w.poll()
-        self.assertEqual(w.saved['last_greeted'], 0)
-        self.now += 17 * 60
-        sensor.set('on')
-        self.assertEqual(w.poll(), 'greeted')
-        self.assertIn('about 21 minutes', self.queued[1]['prompt'])  # timed from before the pass-through
+    def test_unknown_and_read_errors_break_continuity(self):
+        for failure in ('unavailable', 'unknown', 'exception'):
+            self.change('off'); self.wait(600)
+            if failure == 'exception':
+                with mock.patch.object(self.w, 'read_state', side_effect=RuntimeError('offline')):
+                    with self.assertRaises(RuntimeError): self.w.poll()
+            else:
+                self.change(failure)
+            self.change('on')
+        self.assertEqual(self.queued, [])
 
-    def test_staying_keeps_the_cooldown(self):
-        sensor = Sensor('off', changed=AFTERNOON - 3600)
-        w = self.watcher(sensor)
-        w.poll(); sensor.set('on'); w.poll()
-        self.now += 10 * 60
-        sensor.set('off'); w.poll()
-        self.now += 5 * 60
-        sensor.set('on')
-        self.assertEqual(w.poll(), 'cooldown')
+    def test_missed_on_off_between_polls_uses_new_clear_timestamp(self):
+        self.change('off'); self.wait(600)
+        self.now += 1
+        self.sensor.set('off', self.now)  # HA reports a fresh clear interval after an unseen on.
+        self.w.poll(); self.wait(60)
+        self.assertEqual(self.change('on'), 'room was only briefly empty')
+        self.assertEqual(self.queued, [])
 
-    def test_just_got_home_is_a_full_briefing_and_lists_past_lines(self):
-        sensor = Sensor('off', changed=AFTERNOON - 3600, person_changed=AFTERNOON - 120)
-        w = self.watcher(sensor)
-        w.saved['recent'] = [{'text': 'Good to see you, sir.', 'style': pg.STYLES[1]}]
-        w.poll(); sensor.set('on'); w.poll()
-        prompt = self.queued[0]['prompt']
-        self.assertIn('just got home', prompt)
-        self.assertIn('short spoken briefing', prompt)
-        self.assertIn('Good to see you, sir.', prompt)
+    def test_poll_stall_does_not_invent_continuity(self):
+        self.change('off'); self.wait(600)
+        self.now += 100
+        self.assertEqual(self.change('on'), 'observation gap')
+        self.assertEqual(self.queued, [])
 
-    def test_style_never_repeats_twice_running(self):
-        for _ in range(50):
-            _, style = pg.build_prompt(10, False, datetime.datetime(2026, 10, 29, 12, 0),
-                                       [{'text': 'x', 'style': pg.STYLES[0]}])
-            self.assertNotEqual(style, pg.STYLES[0])
+    def test_sensor_transition_times_not_poll_times_measure_absence(self):
+        self.sensor.set('off', self.now - 2); self.w.poll(); self.wait(600)
+        self.sensor.set('on', self.now - 1)
+        self.assertEqual(self.w.poll(), 'greeted')
+        self.assertIn('about 10 minutes', self.queued[0]['prompt'])
+
+    def test_startup_does_not_greet_but_ha_clear_duration_is_used(self):
+        self.assertEqual(self.queued, [])
+        self.sensor = Sensor('off', changed=self.now - 3600)
+        self.w = pg.Watcher(self.queued.append, self.sensor, lambda:999,
+                            briefing=lambda:'Calendar: Dentist 5 PM', clock=lambda:self.now)
+        self.assertIsNone(self.w.poll())
+        self.assertEqual(self.change('on'), 'greeted')
+        self.assertIn('about an hour', self.queued[0]['prompt'])
+        self.assertIn('Dentist', self.queued[0]['prompt'])
+
+    def test_quiet_hours_and_desk_use_still_block(self):
+        self.assertEqual(pg.should_greet(60, datetime.datetime(2026,10,29,23,30),0,999),'quiet hours')
+        self.assertEqual(pg.should_greet(60, datetime.datetime(2026,10,29,6,39),0,999),'quiet hours')
+        self.assertIsNone(pg.should_greet(60, datetime.datetime(2026,10,29,6,40),0,999))
+        noon=datetime.datetime(2026,10,29,12,0)
+        self.assertEqual(pg.should_greet(60,noon,noon.timestamp()-599,999),'cooldown')
+        self.assertEqual(pg.should_greet(60,noon,0,5),'someone was just using the PC')
+
+    def test_style_and_home_briefing_preserved(self):
+        self.assertEqual(pg.tier(10, True),'long')
+        for _ in range(20):
+            prompt,style=pg.build_prompt(10,True,datetime.datetime(2026,10,29,12,0),
+                                        [{'text':'x','style':pg.STYLES[0]}])
+            self.assertNotEqual(style,pg.STYLES[0])
+            self.assertIn('just got home',prompt)
 
 
 class ThroughTest(unittest.TestCase):

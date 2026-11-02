@@ -16,12 +16,11 @@ from pathlib import Path
 SENSOR = 'binary_sensor.bedroom_presence_occupancy'
 PERSON = 'person.benjamin_lema'
 POLL_SECONDS = 2
-MIN_EMPTY_MINUTES = 3        # shorter gaps are sensor flicker or stepping into the hall
+MIN_EMPTY_MINUTES = 10       # require one uninterrupted clear interval
 COOLDOWN_MINUTES = 30
 QUIET_START = datetime.time(23, 0)
 QUIET_END = datetime.time(6, 40)
 RECENT_INPUT_SECONDS = 60    # keyboard/mouse this recent means they were at the desk all along
-PASS_THROUGH_SECONDS = 90    # left again this fast: a pass-through, so it doesn't count as being back
 HOME_ARRIVAL_MINUTES = 20    # the phone reported "home" this recently: they just got home
 KEEP = 8
 # Spoken through the bedroom speaker, not the headset (which they won't be wearing as they walk in).
@@ -135,37 +134,48 @@ class Watcher:
         self.briefing, self.clock = briefing, clock
         self.occupied = None
         self.empty_since = None
-        self.entered = None          # (when they came in, empty_since before that, last_greeted before that)
+        self.last_poll = None
         self.saved = _load()
 
     def poll(self):
         """Read the sensor once; queue a greeting on an empty -> occupied change that passes the checks."""
-        state = self.read_state(SENSOR)
-        if state['state'] not in ('on', 'off'):
-            return None  # unavailable: keep what we knew
-        on = state['state'] == 'on'
-        if self.occupied is None:  # first look: learn the state, never greet for it
-            self.occupied = on
-            self.empty_since = None if on else _since(state, self.clock())
-            return None
-        if on == self.occupied:
-            return None
-        self.occupied = on
         now_ts = self.clock()
-        if not on:
-            self.empty_since = now_ts
-            if self.entered and now_ts - self.entered[0] < PASS_THROUGH_SECONDS:
-                # In and out again: keep timing the whole absence, and give back the cooldown if a
-                # greeting went out that they most likely didn't stay to hear.
-                _, self.empty_since, before = self.entered
-                if self.saved.get('last_greeted', 0) >= self.entered[0]:
-                    self.saved['last_greeted'] = before
-                    _save(self.saved)
-            self.entered = None
+        try:
+            state = self.read_state(SENSOR)
+        except Exception:
+            # A gap in observations cannot prove continuous absence.
+            self.occupied, self.empty_since, self.last_poll = None, None, None
+            raise
+        if state['state'] not in ('on', 'off'):
+            self.occupied, self.empty_since, self.last_poll = None, None, None
             return None
-        if self.empty_since is not None:
-            self.entered = (now_ts, self.empty_since, self.saved.get('last_greeted', 0))
-        away = (now_ts - (self.empty_since or now_ts)) / 60
+        on = state['state'] == 'on'
+        changed = min(now_ts, _since(state, now_ts))
+        previous_poll = self.last_poll
+        self.last_poll = now_ts
+        if self.occupied is None:  # Learn current state; never greet at startup/recovery.
+            self.occupied = on
+            self.empty_since = None if on else changed
+            return None
+        if not on:
+            # HA last_changed is the start of THIS continuous clear interval.
+            # Even if an on/off flicker happened between polls, a newer timestamp
+            # invalidates the old interval. Never restore an earlier absence.
+            if self.occupied or self.empty_since is None:
+                self.empty_since = changed
+            elif 'last_changed' in state:
+                self.empty_since = max(self.empty_since, changed)
+            self.occupied = False
+            return None
+        if self.occupied:
+            return None
+        self.occupied = True
+        empty_since, self.empty_since = self.empty_since, None
+        # A stalled poller may have missed whole occupied/clear cycles. Fail
+        # closed rather than greeting from an interval we did not observe.
+        if previous_poll is not None and now_ts - previous_poll > max(10, POLL_SECONDS * 3):
+            return 'observation gap'
+        away = max(0, changed - empty_since) / 60 if empty_since is not None else 0
         now = datetime.datetime.fromtimestamp(now_ts)
         idle = self.idle_seconds() if self.idle_seconds else None
         reason = should_greet(away, now, self.saved.get('last_greeted', 0), idle)

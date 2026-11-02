@@ -1,0 +1,87 @@
+{
+  "id": "bedroom_lights_presence",
+  "alias": "Bedroom Lights - Presence",
+  "description": "Presence off-to-on turns on the ceiling group and bedroom lamp only from 06:40 until 23:00 HA local time. Five continuous minutes clear turns both off at any hour. Re-entry cancels the clear timer. No startup or reload turn-on.",
+  "triggers": [
+    {
+      "trigger": "state",
+      "entity_id": "binary_sensor.bedroom_presence_occupancy",
+      "from": "off",
+      "to": "on",
+      "id": "arrive"
+    },
+    {
+      "trigger": "state",
+      "entity_id": "binary_sensor.bedroom_presence_occupancy",
+      "to": "off",
+      "for": {
+        "minutes": 5
+      },
+      "id": "empty"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "choose": [
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "arrive"
+            },
+            {
+              "condition": "state",
+              "entity_id": "binary_sensor.bedroom_presence_occupancy",
+              "state": "on"
+            },
+            {
+              "condition": "time",
+              "after": "06:40:00",
+              "before": "23:00:00"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "light.turn_on",
+              "target": {
+                "entity_id": [
+                  "light.ceiling_light",
+                  "light.bedroom_lamp"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "empty"
+            },
+            {
+              "condition": "state",
+              "entity_id": "binary_sensor.bedroom_presence_occupancy",
+              "state": "off",
+              "for": {
+                "minutes": 5
+              }
+            }
+          ],
+          "sequence": [
+            {
+              "action": "light.turn_off",
+              "target": {
+                "entity_id": [
+                  "light.ceiling_light",
+                  "light.bedroom_lamp"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "mode": "restart"
+}

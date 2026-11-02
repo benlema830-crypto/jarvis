@@ -1,0 +1,136 @@
+{
+  "id": "bedroom_fan_on_when_back",
+  "alias": "Bedroom fan: on when you come in, off when empty",
+  "description": "Arrive: always send on (a lost Zigbee ack can leave HA thinking it is already on) unless you switched it off by hand. Empty 1 min: off, and the hand-off hold is cleared. Hand/voice changes are told apart from this automation by context.parent_id.",
+  "triggers": [
+    {
+      "trigger": "state",
+      "entity_id": "binary_sensor.bedroom_presence_occupancy",
+      "from": "off",
+      "to": "on",
+      "id": "arrive"
+    },
+    {
+      "trigger": "state",
+      "entity_id": "binary_sensor.bedroom_presence_occupancy",
+      "to": "off",
+      "for": {
+        "minutes": 1
+      },
+      "id": "empty"
+    },
+    {
+      "trigger": "state",
+      "entity_id": "fan.bedroom_fan",
+      "from": "on",
+      "to": "off",
+      "id": "hand_off"
+    },
+    {
+      "trigger": "state",
+      "entity_id": "fan.bedroom_fan",
+      "from": "off",
+      "to": "on",
+      "id": "hand_on"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "choose": [
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "arrive"
+            },
+            {
+              "condition": "state",
+              "entity_id": "input_boolean.bedroom_fan_manual_off",
+              "state": "off"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "fan.turn_on",
+              "target": {
+                "entity_id": "fan.bedroom_fan"
+              },
+              "continue_on_error": true
+            }
+          ]
+        },
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "empty"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_off",
+              "target": {
+                "entity_id": "input_boolean.bedroom_fan_manual_off"
+              }
+            },
+            {
+              "action": "fan.turn_off",
+              "target": {
+                "entity_id": "fan.bedroom_fan"
+              },
+              "continue_on_error": true
+            }
+          ]
+        },
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "hand_off"
+            },
+            {
+              "condition": "template",
+              "value_template": "{{ trigger.to_state.context.parent_id is none }}"
+            },
+            {
+              "condition": "state",
+              "entity_id": "binary_sensor.bedroom_presence_occupancy",
+              "state": "on"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_on",
+              "target": {
+                "entity_id": "input_boolean.bedroom_fan_manual_off"
+              }
+            }
+          ]
+        },
+        {
+          "conditions": [
+            {
+              "condition": "trigger",
+              "id": "hand_on"
+            },
+            {
+              "condition": "template",
+              "value_template": "{{ trigger.to_state.context.parent_id is none }}"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_off",
+              "target": {
+                "entity_id": "input_boolean.bedroom_fan_manual_off"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "mode": "queued",
+  "max": 5
+}
