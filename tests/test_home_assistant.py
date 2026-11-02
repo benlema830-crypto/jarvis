@@ -23,10 +23,10 @@ STATES = [
     {'entity_id': 'lock.front_door', 'state': 'locked', 'attributes': {'friendly_name': 'Front Door'}},
     {'entity_id': 'sensor.temperature', 'state': '70', 'attributes': {'friendly_name': 'Temperature'}},
 ]
-INFO = ('media_player.lg_webos_tv_oled65c4pua|LGE OLED65C4PUA \n'
-        'media_player.living_room_living_room|Apple Apple TV 4K (gen 2) Living Room\n'
-        'remote.living_room_living_room|Apple Apple TV 4K (gen 2) Living Room\n'
-        'light.desk_lamp|IKEA TRADFRI Bedroom\nlight.ceiling|Hue Bedroom\n')
+INFO = ('media_player.lg_webos_tv_oled65c4pua||LGE OLED65C4PUA\n'
+        'media_player.living_room_living_room|Living Room|Apple Apple TV 4K (gen 2)\n'
+        'remote.living_room_living_room|Living Room|Apple Apple TV 4K (gen 2)\n'
+        'light.desk_lamp|Bedroom|IKEA TRADFRI\nlight.ceiling|Bedroom|Hue\n')
 
 
 class HomeAssistantTest(unittest.TestCase):
@@ -37,12 +37,15 @@ class HomeAssistantTest(unittest.TestCase):
         default_patch.start()
         self.addCleanup(default_patch.stop)
         self.calls = []
+        self.woken_state = 'on'
         def api(method, path, payload=None):
             self.calls.append((method, path, payload))
             if path == '/api/states':
                 return STATES
             if path == '/api/template':
                 return INFO
+            if path.startswith('/api/states/'):
+                return {'state': self.woken_state}
             return []
         patcher = mock.patch.object(ha, '_api', side_effect=api)
         patcher.start()
@@ -177,11 +180,32 @@ class HomeAssistantTest(unittest.TestCase):
         self.addCleanup(STATES[1].__setitem__, 'state', 'playing')
         with mock.patch.object(ha.time, 'sleep') as sleep:
             ha.control('Apple TV', 'open_app', 'Netflix')
-        sleep.assert_called_once_with(ha.WAKE_SECONDS)
+        self.assertTrue(sleep.called)  # waits for the player to report on before opening the app
         services = [p.rsplit('/', 1)[1] for m, p, d in self.calls if p.startswith('/api/services/')]
         self.assertEqual(services, ['turn_on', 'select_source'])
         with self.assertRaisesRegex(ha.HomeError, 'is off'):
             ha.control('Apple TV', 'pause')
+
+    def test_open_app_reports_a_tv_that_never_wakes(self):
+        STATES[1]['state'] = 'off'
+        self.addCleanup(STATES[1].__setitem__, 'state', 'playing')
+        self.woken_state = 'off'
+        clock = iter(range(10, 1000, 5))
+        with mock.patch.object(ha.time, 'sleep'), mock.patch.object(ha.time, 'monotonic', lambda: next(clock)):
+            with self.assertRaisesRegex(ha.HomeError, "didn't wake"):
+                ha.control('Apple TV', 'open_app', 'Netflix')
+        services = [p.rsplit('/', 1)[1] for m, p, d in self.calls if p.startswith('/api/services/')]
+        self.assertEqual(services, ['turn_on'])  # no app is opened on a TV that is still off
+
+    def test_light_group_is_commanded_once_not_with_its_bulbs(self):
+        group = {'id': 'light.ceiling_group', 'domain': 'light', 'state': 'on', 'name': 'Ceiling Light',
+                 'attributes': {'entity_id': ['light.ceiling']}}
+        found = [d['id'] for d in ha.find('lights', ha.devices() + [group])]
+        self.assertEqual(set(found), {'light.desk_lamp', 'light.ceiling_group'})
+
+    def test_lamp_means_the_lamp_and_television_means_tv(self):
+        self.assertEqual(self.ids('the lamp'), ['light.desk_lamp'])
+        self.assertEqual(ha._words('the television'), {'the', 'tv'})
 
     def test_off_device_can_still_be_turned_on(self):
         ha.control('nightstand speaker', 'turn_on')

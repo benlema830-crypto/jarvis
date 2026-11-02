@@ -21,6 +21,7 @@ MEDIA = {'play': 'media_play', 'pause': 'media_pause', 'play_pause': 'media_play
          'next': 'media_next_track', 'previous': 'media_previous_track',
          'volume_up': 'volume_up', 'volume_down': 'volume_down'}
 WAKE_SECONDS = 2
+WAKE_TIMEOUT = 25  # seconds a TV may take to boot after Wake-on-LAN
 ACTIONS = ('turn_on', 'turn_off', 'toggle', 'set_brightness', 'set_color', 'set_volume', 'mute', 'unmute',
            'open_app') + tuple(MEDIA)
 # What a media player must report supporting (Home Assistant feature bits) before an action is sent,
@@ -110,17 +111,23 @@ def _api(method, path, payload=None):
     return response.json() if 'json' in response.headers.get('Content-Type', '') else response.text
 
 
-_DEVICE_INFO = "{% for s in states %}{{ s.entity_id }}|{{ device_attr(s.entity_id, 'manufacturer') or '' }} " \
-               "{{ device_attr(s.entity_id, 'model') or '' }} {{ area_name(s.entity_id) or '' }}\n{% endfor %}"
+_DEVICE_INFO = "{% for s in states %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}|" \
+               "{{ device_attr(s.entity_id, 'manufacturer') or '' }} {{ device_attr(s.entity_id, 'model') or '' }}" \
+               "\n{% endfor %}"
 _info = (0.0, {})
 
 
 def _device_info():
-    """Maker, model and room per entity, so "Apple TV" finds a player named "Living Room"."""
+    """(room, maker and model) per entity, so "Apple TV" finds a player named "Living Room"
+    and "bedroom lights" finds every light in the Bedroom, whatever the bulbs are called."""
     global _info
     if time.monotonic() > _info[0]:
         text = _api('POST', '/api/template', {'template': _DEVICE_INFO})
-        info = dict(line.split('|', 1) for line in str(text).splitlines() if '|' in line)
+        info = {}
+        for line in str(text).splitlines():
+            parts = line.split('|', 2)
+            if len(parts) == 3:
+                info[parts[0]] = (parts[1], parts[2])
         _info = (time.monotonic() + 300, info)
     return _info[1]
 
@@ -129,6 +136,8 @@ def _words(text):
     words = set(re.findall(r'[a-z0-9]+', text.lower()))
     if 'lge' in words:
         words.add('lg')
+    if words & {'television', 'telly'}:
+        words = (words - {'television', 'telly'}) | {'tv'}
     return words
 
 
@@ -160,19 +169,23 @@ def find(query, everything=None):
         return _exact(exact_names, query)
     words = _words(query) - FILLER
     kinds = {KIND_WORDS[w] for w in words if w in KIND_WORDS}
+    lamp = bool(words & {'lamp', 'lamps'})
     words -= set(KIND_WORDS)
     pool = [d for d in everything if not kinds or d['domain'] in kinds]
+    if lamp:  # "the lamp" means a light named lamp, not every light
+        pool = [d for d in pool if 'lamp' in _words(d['name'] + ' ' + d['id'])] or pool
     if not words:
         if kinds and pool:
-            return pool
+            return _without_group_members(pool)
         raise HomeError(f"I couldn't find '{query}' in Home Assistant.")
     info = _device_info()
     scored = []
     for d in pool:
-        named = _words(d['name'] + ' ' + d['id'].split('.', 1)[1])
-        if words <= named:
+        area, maker = info.get(d['id'], ('', ''))
+        named = _words(d['name'] + ' ' + d['id'].split('.', 1)[1]) | _words(area)
+        if words <= named:  # the device's own name and its room count equally
             scored.append((2, d))
-        elif words <= named | _words(info.get(d['id'], '')):
+        elif words <= named | _words(maker):
             scored.append((1, d))
     if not scored:
         raise HomeError(f"I couldn't find '{query}' in Home Assistant.")
@@ -185,7 +198,17 @@ def find(query, everything=None):
     matches = list(by_name.values())
     if len(matches) > 1 and not kinds:
         raise HomeError(f"'{query}' could mean {', '.join(d['name'] for d in matches)}. Which one?")
-    return matches
+    return _without_group_members(matches)
+
+
+def _without_group_members(matches):
+    """A light group and its own bulbs both match "the lights": send the command once, to the group."""
+    grouped = set()
+    for d in matches:
+        members = d['attributes'].get('entity_id')
+        if isinstance(members, list):
+            grouped.update(members)
+    return [d for d in matches if d['id'] not in grouped] or matches
 
 
 def _service(device, action, value):
@@ -242,6 +265,18 @@ def _percent(value):
         raise HomeError(f"'{value}' isn't a percentage.") from None
 
 
+def _wait_until_on(entity_id, timeout=None):
+    """A TV woken over the network takes several seconds to boot before it accepts an app."""
+    deadline = time.monotonic() + (WAKE_TIMEOUT if timeout is None else timeout)
+    time.sleep(WAKE_SECONDS)
+    while time.monotonic() < deadline:
+        if _api('GET', f'/api/states/{entity_id}').get('state') not in ('off', 'unavailable'):
+            time.sleep(WAKE_SECONDS)  # on, but give its app launcher a moment
+            return
+        time.sleep(1)
+    raise HomeError("The TV didn't wake up. Check that 'Turn on via Wi-Fi' is enabled in the TV's settings.")
+
+
 def control(device, action, value=''):
     if action not in ACTIONS:
         raise HomeError(f"Unknown action '{action}'.")
@@ -250,7 +285,7 @@ def control(device, action, value=''):
     for d, domain, service, data in calls:
         if action == 'open_app' and d['state'] == 'off':  # "open Netflix" on a sleeping TV wakes it first
             _api('POST', '/api/services/media_player/turn_on', {'entity_id': d['id']})
-            time.sleep(WAKE_SECONDS)
+            _wait_until_on(d['id'])
         _api('POST', f'/api/services/{domain}/{service}', dict(data, entity_id=d['id']))
     names = ', '.join(d['name'] for d in targets)
     if action == 'open_app':
