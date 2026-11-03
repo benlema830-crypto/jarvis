@@ -343,7 +343,7 @@ def _suspend():
 def self_check(focus: str = "") -> str:
     """Check your own health from live facts: your processes and uptime, whether code changed
     since you started, the voice actually speaking vs the one chosen (and VoiceStudio's state),
-    your conversation model, background work really running (terminal task, agent sessions,
+    your conversation model, your weekday morning alarm routine and its last run, background work really running (terminal task, agent sessions,
     computer task), local services, Home Assistant reachability and devices, and errors logged
     since you started. Read-only and takes about a second.
 
@@ -353,7 +353,8 @@ def self_check(focus: str = "") -> str:
     statements may be stale after a restart. If this doesn't show the cause, say you don't know.
 
     Args:
-        focus: Optional single area: processes, code, brain, voice, background, services, home, errors.
+        focus: Optional single area: processes, code, brain, voice, background, services, home,
+            alarm (the weekday morning alarm routine and what its last run did), errors.
     """
     import self_check as checker
     background = []
@@ -860,7 +861,7 @@ def open_agent_session(name: str = "", project: str = "Rocket Frontier", provide
 
     Args:
         name: Short name; blank defaults to a name based on the project and provider.
-        project: Configured project name: Rocket Frontier or Jarvis.
+        project: Configured project name: Rocket Frontier, Jarvis, or Don't Wake the Giant.
         provider: codex (default) or claude. Keep each provider's session history separate.
     """
     return SESSIONS.open(name, project, provider)
@@ -1312,7 +1313,7 @@ def project_handoff(project: str, action: str = 'status', summary: str = '', unr
     project notes and agent reports are claims, not freshly verified tests.
 
     Args:
-        project: Jarvis or Rocket Frontier.
+        project: Jarvis, Rocket Frontier, or Don't Wake the Giant.
         action: status to recall, or handoff to save.
         summary: Progress reported this session; do not invent completed work.
         unresolved: Known problems or unknowns.

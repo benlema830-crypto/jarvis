@@ -1,8 +1,14 @@
 """Weekday wake-up at 6:40: an alarm tone on the bedroom speaker, then Jarvis's morning briefing.
 
-Turns the box fan off, starts Spotify once the briefing ends, then checks back every few minutes while the owner is still in bed, and stops
-the moment they talk to Jarvis, touch the PC, or leave the room. Home Assistant wakes the PC a few
-minutes early (automation "Jarvis: wake the PC for the morning alarm"), so this runs on the PC.
+The routine, in order (ROUTINE below is the summary Jarvis gives when asked):
+  1. 6:35 Home Assistant wakes the PC over Wi-Fi (automation "Jarvis: wake the PC for the morning
+     alarm", weekdays, only when the owner's phone is home).
+  2. 6:40 the box fan goes off and the bedroom lights (ceiling group + lamp) come on.
+  3. The alarm tone and the briefing play on the Bose speaker. If the Bose isn't connected they play
+     on the PC's default output and the owner's iPhone gets an alert, so the alarm can't go unheard.
+  4. When the briefing ends, Spotify plays preferences "morning_music" (the "Jarvis Morning" playlist).
+  5. Every 3 minutes (up to 5 times) a nudge, until they talk to Jarvis, touch the PC or leave the room.
+Each run's results are saved in data/morning-wakeup.json ("last_run") and shown by self_check.
 """
 import datetime
 import json
@@ -20,6 +26,12 @@ FOLLOWUP_MINUTES = 3
 MAX_FOLLOWUPS = 5
 LEFT_ROOM_SECONDS = 120          # the room empty this long counts as up
 FAN = 'fan.bedroom_fan'
+LIGHTS = ['light.ceiling_light', 'light.bedroom_lamp']
+PHONE = 'mobile_app_jarvis'      # Home Assistant notify service for the owner's iPhone
+ROUTINE = ("Weekdays (Mon-Fri) at 6:40: Home Assistant wakes the PC at 6:35 if the phone is home; then the fan "
+           "turns off, the bedroom lights turn on, an alarm tone and the morning briefing play on the Bose "
+           "speaker (iPhone alert if the Bose isn't connected), then Spotify plays the Jarvis Morning playlist, "
+           "with up to five nudges three minutes apart until the owner is up.")
 # After the briefing: preferences "morning_music" is a Spotify link or a music command ("play my Morning
 # playlist"); unset means resume whatever Spotify last played.
 DEFAULT_MUSIC = 'resume'
@@ -51,7 +63,7 @@ def due(now, last_day):
 def wake_prompt(now, briefing):
     return f"""[MORNING WAKE-UP] It's {now.strftime('%A %I:%M %p').replace(' 0', ' ')}. An alarm tone just played on the bedroom speaker to wake the owner; you're the voice that follows it. They're most likely still in bed.
 
-Wake them properly, then give the morning briefing. Open with a short, crisp wake-up line in your own words (vary it day to day: composed, dryly witty, never chirpy). Then, in three or four sentences: the weather and what to wear if it matters, today's calendar and reminders, and anything that finished or is waiting on them. You've switched the fan off for them; mention it only in passing if at all.
+Wake them properly, then give the morning briefing. Open with a short, crisp wake-up line in your own words (vary it day to day: composed, dryly witty, never chirpy). Then, in three or four sentences: the weather and what to wear if it matters, today's calendar and reminders, and anything that finished or is waiting on them. You've switched the fan off and the lights on for them; mention it only in passing if at all. Their morning playlist starts as soon as you finish, so keep it brief.
 
 Briefing data:
 {briefing}
@@ -68,8 +80,9 @@ def nudge_prompt(n, now):
 
 class Alarm:
     def __init__(self, put, read_state, call_service, briefing, idle_seconds=None, last_user_turn=None,
-                 clock=time.time):
+                 clock=time.time, speaker_ready=None):
         self.put, self.read_state, self.call_service = put, read_state, call_service
+        self.speaker_ready = speaker_ready
         self.briefing, self.idle_seconds = briefing, idle_seconds
         self.last_user_turn = last_user_turn or (lambda: 0.0)
         self.clock = clock
@@ -88,29 +101,60 @@ class Alarm:
         return self._follow_up(now_ts, now)
 
     def _wake(self, now_ts, now):
+        run = self.saved['last_run'] = {'at': now.isoformat(timespec='seconds')}
         self.saved['last_day'] = now.date().isoformat()
         _save(self.saved)
         try:
             if self.read_state(presence_greeting.PERSON)['state'] != 'home':
+                run['result'] = 'skipped: phone not home'
+                _save(self.saved)
                 return 'not home'
         except Exception:
             pass  # can't tell: better to ring than to let them oversleep
-        try:
-            self.call_service('fan', 'turn_off', {'entity_id': FAN})
-        except Exception:
-            pass
+        run['fan'] = self._step('fan', 'turn_off', {'entity_id': FAN})
+        run['lights'] = self._step('light', 'turn_on', {'entity_id': LIGHTS, 'brightness_pct': 100})
+        ready = True
+        if self.speaker_ready:
+            try:
+                ready = bool(self.speaker_ready())
+            except Exception:
+                ready = False
+        run['speaker'] = 'Bose' if ready else 'Bose NOT connected - played on the PC default output'
+        if not ready:
+            run['phone_alert'] = self._step('notify', PHONE, {
+                'title': 'Good morning - time to get up',
+                'message': "Jarvis's alarm is playing, but the Bose speaker isn't connected, so this is the backup.",
+                'data': {'push': {'sound': {'name': 'default', 'critical': 1, 'volume': 1.0},
+                                  'interruption-level': 'critical'}}})
         try:
             briefing = self.briefing()
         except Exception:
             briefing = 'Unavailable.'
         self.woke_at, self.followups, self.empty_since = now_ts, 0, None
+        run['result'] = 'alarm and briefing queued'
+        _save(self.saved)
         self.put({'label': 'Morning wake-up', 'alarm': 4, 'output': presence_greeting.SPEAKER,
                   'prompt': wake_prompt(now, briefing), 'after': lambda _: self.play_music()})
         return 'woke'
 
+    def _step(self, domain, service, data):
+        try:
+            self.call_service(domain, service, data)
+            return 'done'
+        except Exception as e:
+            print(f"(Morning wake-up: {domain}.{service} failed: {e})", flush=True)
+            return f'failed: {e}'
+
     def play_music(self):
         """Start Spotify in the background so the next turn isn't held up while it opens."""
-        threading.Thread(target=start_music, daemon=True, name='morning-music').start()
+        def run():
+            try:
+                result = start_music()
+            except Exception as e:
+                result = f'failed: {e}'
+            self.saved.setdefault('last_run', {})['music'] = result
+            _save(self.saved)
+        threading.Thread(target=run, daemon=True, name='morning-music').start()
 
     def _up(self, now_ts):
         if self.last_user_turn() > self.woke_at:
@@ -157,6 +201,22 @@ def start_music():
         problem = music.run(command)
     if problem:
         print(f"(Morning music didn't start: {problem})", flush=True)
+        return f'failed: {problem}'
+    print(f"(Morning music started: {command})", flush=True)
+    return f'started {command}'
+
+
+def describe(state=None):
+    """The routine and what happened on its last run, for self_check."""
+    state = _load() if state is None else state
+    lines = [f"Morning alarm: {ROUTINE}"]
+    run = state.get('last_run')
+    if run:
+        parts = [f"{k} {v}" for k, v in run.items() if k != 'at']
+        lines.append(f"Last alarm run {run.get('at', '?')}: " + '; '.join(parts))
+    elif state.get('last_day'):
+        lines.append(f"Last alarm ran {state['last_day']} (step-by-step results weren't recorded yet).")
+    return lines
 
 
 def _load():
@@ -174,8 +234,9 @@ def _save(state):
     temp.replace(PATH)
 
 
-def start(put, briefing, last_user_turn):
-    """Run the weekday alarm in the background. False when Home Assistant isn't configured."""
+def start(put, briefing, last_user_turn, speaker_ready=None):
+    """Run the weekday alarm in the background. False when Home Assistant isn't configured.
+    speaker_ready() says whether the Bose is connected (re-checking Bluetooth devices)."""
     import home_assistant
     try:
         home_assistant._config()
@@ -188,7 +249,7 @@ def start(put, briefing, last_user_turn):
         idle = None
     alarm = Alarm(put, lambda entity: home_assistant._api('GET', f'/api/states/{entity}'),
                   lambda domain, service, data: home_assistant._api('POST', f'/api/services/{domain}/{service}', data),
-                  briefing, idle, last_user_turn)
+                  briefing, idle, last_user_turn, speaker_ready=speaker_ready)
 
     def loop():
         awake = False

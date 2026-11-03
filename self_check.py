@@ -176,6 +176,11 @@ def check_home():
     return lines
 
 
+def check_alarm():
+    import morning_wakeup
+    return morning_wakeup.describe()
+
+
 def recent_problems(limit=8, log=LOG):
     """Problem lines from the log since Jarvis last started."""
     try:
@@ -204,12 +209,13 @@ CHECKS = {
     "background": lambda ctx: ctx.get("background", []),
     "services": lambda ctx: check_ports(),
     "home": lambda ctx: check_home(),
+    "alarm": lambda ctx: check_alarm(),
 }
 
 
 def report(focus="", info=None, background=None):
     """The health report as plain text. focus limits it to one area: processes, code, brain, voice,
-    background, services, home or errors."""
+    background, services, home, alarm or errors."""
     focus = (focus or "").strip().casefold()
     ctx = {"info": info or {}, "background": background or []}
     names = [focus] if focus in CHECKS else ([] if focus == "errors" else list(CHECKS))

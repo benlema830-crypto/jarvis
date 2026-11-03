@@ -41,14 +41,55 @@ class AlarmTest(unittest.TestCase):
         item = self.queued[0]
         self.assertEqual((item['alarm'], item['output']), (4, pg.SPEAKER))
         self.assertIn('Weather: 40F', item['prompt'])
-        self.assertEqual(self.services, [('fan', 'turn_off', {'entity_id': mw.FAN})])
+        self.assertEqual(self.services, [('fan', 'turn_off', {'entity_id': mw.FAN}),
+                                         ('light', 'turn_on', {'entity_id': mw.LIGHTS, 'brightness_pct': 100})])
         self.assertIsNone(self.alarm().poll())  # a restart the same morning doesn't ring again
-        with mock.patch.object(mw, 'start_music') as music:
+        with mock.patch.object(mw, 'start_music', return_value='started spotify:playlist:x') as music:
             item['after']('Good morning, sir.')
             for t in __import__('threading').enumerate():
                 if t.name == 'morning-music':
                     t.join(2)
         music.assert_called_once()
+        run = mw._load()['last_run']
+        self.assertEqual((run['fan'], run['lights'], run['speaker'], run['music']),
+                         ('done', 'done', 'Bose', 'started spotify:playlist:x'))
+        self.assertNotIn('phone_alert', run)
+
+    def test_bose_not_connected_still_rings_and_alerts_the_phone(self):
+        a = mw.Alarm(self.queued.append, lambda e: self.states[e],
+                     lambda d, s, data: self.services.append((d, s, data)), lambda: 'Weather: 40F',
+                     lambda: self.idle, lambda: self.last_user, clock=lambda: self.now,
+                     speaker_ready=lambda: False)
+        self.assertEqual(a.poll(), 'woke')
+        self.assertEqual(len(self.queued), 1)  # the alarm still plays, on the default output
+        notify = [x for x in self.services if x[0] == 'notify']
+        self.assertEqual(notify[0][1], mw.PHONE)
+        self.assertEqual(notify[0][2]['data']['push']['sound']['critical'], 1)
+        run = mw._load()['last_run']
+        self.assertIn('NOT connected', run['speaker'])
+        self.assertEqual(run['phone_alert'], 'done')
+
+    def test_a_failed_step_is_recorded_and_the_rest_still_runs(self):
+        def service(domain, name, data):
+            if domain == 'light':
+                raise RuntimeError('Ceiling Light unavailable')
+            self.services.append((domain, name, data))
+        a = mw.Alarm(self.queued.append, lambda e: self.states[e], service, lambda: '',
+                     clock=lambda: self.now)
+        self.assertEqual(a.poll(), 'woke')
+        run = mw._load()['last_run']
+        self.assertEqual(run['lights'], 'failed: Ceiling Light unavailable')
+        self.assertEqual(run['fan'], 'done')
+        self.assertEqual(len(self.queued), 1)
+        text = '\n'.join(mw.describe())
+        self.assertIn('lights failed: Ceiling Light unavailable', text)
+        self.assertIn('Weekdays (Mon-Fri) at 6:40', text)
+
+    def test_not_home_is_recorded_and_nothing_happens(self):
+        self.states[pg.PERSON] = {'state': 'not_home'}
+        self.assertEqual(self.alarm().poll(), 'not home')
+        self.assertEqual((self.queued, self.services), ([], []))
+        self.assertEqual(mw._load()['last_run']['result'], 'skipped: phone not home')
 
     def test_checks_back_every_three_minutes_until_they_answer(self):
         a = self.alarm()
