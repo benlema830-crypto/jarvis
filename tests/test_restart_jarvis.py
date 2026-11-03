@@ -28,16 +28,19 @@ class IsJarvisProcess(unittest.TestCase):
 
 
 class Stop(unittest.TestCase):
-    def test_keeps_voicestudio_running_but_stops_jarvis_workers(self):
-        jarvis = mock.Mock(pid=10)
-        worker = mock.Mock(pid=11)
-        studio = mock.Mock(pid=12)
-        studio.exe.return_value = str(restart_jarvis.VOICESTUDIO_DIR / 'VoiceStudio.exe')
-        worker.exe.return_value = r'C:\tools\codex.exe'
-        server = mock.Mock(pid=13)  # VoiceStudio's speech server: a python.exe under VoiceStudio.exe
-        server.exe.return_value = r'C:\Users\x\AppData\Roaming\VoiceStudio\runtime\python.exe'
-        studio.children.return_value = [server]
-        jarvis.children.return_value = [worker, studio, server]
+    def test_keeps_apps_jarvis_opened_but_stops_jarvis_workers(self):
+        def proc(pid, name, children=()):
+            p = mock.Mock(pid=pid)
+            p.name.return_value = name
+            p.children.return_value = list(children)
+            return p
+        server = proc(13, 'python.exe')        # VoiceStudio's speech server, under VoiceStudio.exe
+        studio = proc(12, 'VoiceStudio.exe', [server])
+        crash = proc(15, 'RobloxCrashHandler.exe')
+        roblox = proc(14, 'RobloxStudioBeta.exe', [crash])  # unsaved game work: never close it
+        worker = proc(11, 'codex.exe')
+        shell = proc(16, 'conhost.exe')
+        jarvis = proc(10, 'python.exe', [worker, shell, studio, server, roblox, crash])
         with mock.patch.object(restart_jarvis, 'jarvis_processes', return_value=[jarvis]), \
              mock.patch.object(restart_jarvis, '_name', return_value='x'), \
              mock.patch.object(restart_jarvis.psutil, 'wait_procs', return_value=([], [])), \
@@ -48,6 +51,9 @@ class Stop(unittest.TestCase):
         worker.terminate.assert_called_once()
         studio.terminate.assert_not_called()
         server.terminate.assert_not_called()
+        shell.terminate.assert_called_once()
+        roblox.terminate.assert_not_called()
+        crash.terminate.assert_not_called()
 
 
 class Main(unittest.TestCase):

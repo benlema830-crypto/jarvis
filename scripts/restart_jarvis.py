@@ -7,8 +7,8 @@ Used by the "Restart Jarvis" desktop shortcut and by Jarvis's own restart_jarvis
     pythonw scripts/restart_jarvis.py --delay 6  wait first, so a spoken reply can finish
 
 What it does:
-  1. Ends jarvis.py, brain.py and spotify_mcp.py from this folder, plus anything they started
-     (Codex / Claude Code workers). Nothing else on the PC is touched.
+  1. Ends jarvis.py, brain.py and spotify_mcp.py from this folder, plus their own workers (Codex /
+     Claude Code, shells). Apps Jarvis opened for the owner (Roblox Studio, VoiceStudio...) keep running.
   2. If VoiceStudio is the chosen voice and its window is open but its speech server is dead
      (e.g. part of it was ended in Task Manager), closes VoiceStudio so Jarvis reopens it whole.
   3. Starts jarvis.py (hidden, quiet start) and brain.py exactly like the Jarvis CEO shortcut does.
@@ -90,10 +90,11 @@ def stop_jarvis():
             children = proc.children(recursive=True)
         except psutil.Error:
             continue
-        # Jarvis opens VoiceStudio, but it's its own app: leave it and its speech server running
-        # so the voice is warm the moment Jarvis is back.
+        # Only Jarvis's own workers are stopped. Apps he opened for the owner (Roblox Studio, VoiceStudio,
+        # Spotify, browsers...) are theirs: leave each one and everything under it running, so a restart
+        # never loses unsaved work and the voice stays warm.
         for child in children:
-            if _is_voicestudio(child):
+            if not _is_worker(child):
                 keep.add(child.pid)
                 try:
                     keep.update(p.pid for p in child.children(recursive=True))
@@ -125,9 +126,14 @@ def stop_jarvis():
         time.sleep(.2)
 
 
-def _is_voicestudio(proc):
+# Programs Jarvis runs for himself: the Codex / Claude Code workers, their shells and consoles.
+WORKERS = {"python.exe", "pythonw.exe", "claude.exe", "codex.exe", "node.exe", "conhost.exe", "cmd.exe",
+           "powershell.exe", "pwsh.exe", "bash.exe", "sh.exe", "git.exe", "uv.exe", "rg.exe"}
+
+
+def _is_worker(proc):
     try:
-        return (proc.exe() or '').casefold().startswith(str(VOICESTUDIO_DIR).casefold())
+        return proc.name().casefold() in WORKERS
     except (psutil.Error, OSError):
         return False
 
