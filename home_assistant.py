@@ -277,20 +277,106 @@ def _wait_until_on(entity_id, timeout=None):
     raise HomeError("The TV didn't wake up. Check that 'Turn on via Wi-Fi' is enabled in the TV's settings.")
 
 
+CONFIRM_SECONDS = 4        # lights and plugs report back within a second or two
+SLOW_CONFIRM_SECONDS = 12  # a TV takes a while to boot or switch apps
+CONFIRM_POLL = 0.3
+OFF_STATES = ('off', 'standby', 'unavailable', 'unknown')
+
+
+def _expectation(device, action, data):
+    """(what success looks like, test on a device state), or None when Home Assistant can't report it.
+
+    A service call only means the command was accepted: 'TV turned on' was said for a TV that stayed dark
+    because the result only said it was sent. So the state is read back before anything is claimed."""
+    before = device['state']
+    if device['domain'] in ('scene', 'script') or device['attributes'].get('assumed_state'):
+        return None
+    attrs = lambda state: state.get('attributes') or {}
+    if action == 'turn_on':
+        return 'on', lambda s: s.get('state') not in OFF_STATES
+    if action == 'turn_off':
+        return 'off', lambda s: s.get('state') in ('off', 'standby')
+    if action == 'toggle':
+        return 'toggled', lambda s: s.get('state') != before and s.get('state') not in ('unavailable', 'unknown')
+    if action == 'set_brightness':
+        percent = data['brightness_pct']
+        if percent == 0:
+            return 'off', lambda s: s.get('state') == 'off'
+        return f'at {percent}%', lambda s: s.get('state') == 'on' and \
+            abs((attrs(s).get('brightness') or 0) / 2.55 - percent) <= 3
+    if action == 'set_color':
+        return "on (the color itself can't be read back)", lambda s: s.get('state') == 'on'
+    if action == 'set_volume':
+        level = data['volume_level']
+        return f'at {round(level * 100)}% volume', lambda s: abs((attrs(s).get('volume_level') or 0) - level) <= 0.02
+    if action in ('mute', 'unmute'):
+        return ('muted' if action == 'mute' else 'unmuted'), lambda s: attrs(s).get('is_volume_muted') is (action == 'mute')
+    if action == 'open_app':
+        app = data['source']
+        return f'showing {app}', lambda s: app in (attrs(s).get('source'), attrs(s).get('app_name'))
+    if action == 'play':
+        return 'playing', lambda s: s.get('state') == 'playing'
+    if action == 'pause':
+        return 'paused', lambda s: s.get('state') in ('paused', 'idle')
+    return None  # next, previous, volume up/down, play/pause: nothing reliable to read back
+
+
+def _read_back(pending, seconds):
+    """Poll until each (device, description, test) passes or time runs out. Returns those that never did."""
+    deadline = time.monotonic() + seconds
+    while True:
+        waiting = []
+        for item in pending:
+            try:
+                state = _api('GET', f"/api/states/{item[0]['id']}")
+            except HomeError:
+                state = {}
+            if not (isinstance(state, dict) and item[2](state)):
+                waiting.append(item + (state.get('state') if isinstance(state, dict) else None,))
+        pending = [item[:3] for item in waiting]
+        if not pending or time.monotonic() >= deadline:
+            return waiting
+        time.sleep(CONFIRM_POLL)
+
+
 def control(device, action, value=''):
+    """Send the command, then read the device back. The result says what was actually observed."""
     if action not in ACTIONS:
         raise HomeError(f"Unknown action '{action}'.")
     targets = find(device)
     calls = [(d, *_service(d, action, value)) for d in targets]  # check them all before acting
+    slow = False
+    pending, already, unknown = [], [], []
     for d, domain, service, data in calls:
+        expected = _expectation(d, action, data)
+        if expected and action not in ('toggle', 'set_color') and expected[1](d):
+            already.append(f"{d['name']} was already {expected[0]}")
+        elif expected:
+            pending.append((d, expected[0], expected[1]))
+        else:
+            unknown.append(d['name'])
+        slow = slow or (d['domain'] == 'media_player' and action in ('turn_on', 'toggle', 'open_app'))
         if action == 'open_app' and d['state'] == 'off':  # "open Netflix" on a sleeping TV wakes it first
             _api('POST', '/api/services/media_player/turn_on', {'entity_id': d['id']})
             _wait_until_on(d['id'])
         _api('POST', f'/api/services/{domain}/{service}', dict(data, entity_id=d['id']))
-    names = ', '.join(d['name'] for d in targets)
-    if action == 'open_app':
-        return f"Asked {names} to open {calls[0][3]['source']}."
-    return f"Sent {action.replace('_', ' ')}{' ' + value if value else ''} to {names}."
+    seconds = SLOW_CONFIRM_SECONDS if slow else CONFIRM_SECONDS
+    failed = _read_back(pending, seconds) if pending else []
+    failed_ids = {item[0]['id'] for item in failed}
+    parts = []
+    confirmed = [f"{d['name']} is {what}" for d, what, _ in pending if d['id'] not in failed_ids]
+    if confirmed:
+        parts.append('Confirmed: ' + '; '.join(confirmed) + '.')
+    if already:
+        parts.append('; '.join(already).capitalize() + ', so nothing changed.')
+    if failed:
+        said = '; '.join(f"{d['name']} should be {what} but reports {now or 'nothing'}" for d, what, _, now in failed)
+        parts.append(f"NOT CONFIRMED after {seconds} seconds: {said}. The command was sent, but it did not visibly "
+                     "work. Do not say it worked.")
+    if unknown:
+        parts.append(f"Sent {action.replace('_', ' ')} to {', '.join(unknown)}. Home Assistant can't report the result "
+                     "of that, so say it was sent, not that it happened.")
+    return ' '.join(parts)
 
 
 def describe(d):

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import away_jobs
 import daily_review
 import gmail
 import knowledge
@@ -44,6 +45,7 @@ class Isolated(unittest.TestCase):
                                      (working_memory, "PROJECT_LOG", self.root / "log.jsonl"),
                                      (memory_proposals, "STORE", self.root / "proposals.json"),
                                      (research, "STORE", self.root / "research.json"),
+                                     (away_jobs, "STORE", self.root / "away_jobs.json"),
                                      (gmail, "STORE", self.root / "gmail.enc"),
                                      (performance, "TURNS", self.root / "turns.jsonl"),
                                      (task_effort, "PATH", self.root / "effort.jsonl"),

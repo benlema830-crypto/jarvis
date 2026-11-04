@@ -23,6 +23,7 @@ FOLDER = "Research"
 MAX_SEARCHES = 12
 MAX_SECONDS = 600
 MAX_RUNNING = 2
+MAX_TOPIC = 3000  # a detailed brief, not just a title: cutting it silently loses what the owner asked for
 LOCK = threading.RLock()
 
 PROMPT = """You are JARVIS's research agent, working for the owner described below. Research the
@@ -141,7 +142,7 @@ def _write(topic, why, text, sources, used):
     cited = list({s["url"]: s for s in sources if s.get("url") and s["url"] in text}.values())[:20]
     links = "\n".join(f"- [{s.get('title') or s['url']}]({s['url']})" for s in cited) or "- None corroborated."
     body = (f"---\ntype: research\ndate: {day}\nsearches: {used}\nsource: Codex web research; findings cite "
-            f"web pages, which may be wrong or dated\n---\n\n# {topic}\n\n"
+            f"web pages, which may be wrong or dated\n---\n\n# {topic[:150]}\n\n"
             + (f"Requested because: {why}\n\n" if why else "")
             + privacy.redact(text.strip())
             + f"\n\n## Links the search actually returned\n{links}\n")
@@ -157,13 +158,13 @@ def _write(topic, why, text, sources, used):
     raise ValueError("Too many research notes with this name today.")
 
 
-def _work(run, on_done):
+def _work(run, on_done, searches=MAX_SEARCHES, seconds=MAX_SECONDS, cancel=None):
     import working_memory
     ident, topic, why = run["id"], run["topic"], run.get("why", "")
     try:
         text, sources, used = codex_research(
-            PROMPT.format(searches=MAX_SEARCHES, owner=_owner()),
-            topic + (f"\n\nWhy the owner wants it: {why}" if why else ""), MAX_SEARCHES, MAX_SECONDS)
+            PROMPT.format(searches=searches, owner=_owner()),
+            topic + (f"\n\nWhy the owner wants it: {why}" if why else ""), searches, seconds, cancel)
         if not spoken(text):
             raise ValueError("The research came back without a summary.")
         note = _write(topic, why, text, sources, used)
@@ -178,9 +179,11 @@ def _work(run, on_done):
         on_done(dict(run, **result))
 
 
-def start(topic: str, why: str = "", on_done=None, background=True) -> dict:
-    """Queue a research run. Returns its record; `on_done(record)` gets the finished record."""
-    topic = privacy.redact(" ".join(str(topic).split()))[:500]
+def start(topic: str, why: str = "", on_done=None, background=True, searches=MAX_SEARCHES, seconds=MAX_SECONDS,
+          cancel=None) -> dict:
+    """Queue a research run. Returns its record; `on_done(record)` gets the finished record.
+    `searches` and `seconds` widen the limits for work nobody is waiting on (away_jobs)."""
+    topic = privacy.redact(" ".join(str(topic).split()))[:MAX_TOPIC]
     why = privacy.redact(" ".join(str(why).split()))[:500]
     if len(topic) < 4:
         raise ValueError("Say what to research.")
@@ -195,9 +198,10 @@ def start(topic: str, why: str = "", on_done=None, background=True) -> dict:
         data["runs"].append(run)
         _save(data)
     if background:
-        threading.Thread(target=_work, args=(run, on_done), daemon=True, name="research-" + run["id"]).start()
+        threading.Thread(target=_work, args=(run, on_done, searches, seconds, cancel), daemon=True,
+                         name="research-" + run["id"]).start()
     else:
-        _work(run, on_done)
+        _work(run, on_done, searches, seconds, cancel)
     return run
 
 
@@ -218,9 +222,9 @@ def recent_lines(now=None, hours=36):
     lines = []
     for r in _load()["runs"][::-1]:
         if r["status"] == "running":
-            lines.append(f"- Running: {r['topic']}")
+            lines.append(f"- Running: {r['topic'][:150]}")
         elif r.get("finished", r["started"]) >= cutoff:
-            lines.append(f"- {'Done' if r['status'] == 'done' else 'Failed'}: {r['topic']}"
+            lines.append(f"- {'Done' if r['status'] == 'done' else 'Failed'}: {r['topic'][:150]}"
                          + (f" -> {r['note']}" if r.get("note") else ""))
         if len(lines) >= 4:
             break
@@ -235,8 +239,8 @@ def describe(limit: int = 5) -> str:
     for r in runs:
         when = datetime.datetime.fromtimestamp(r["started"]).strftime("%b %d %H:%M")
         if r["status"] == "running":
-            lines.append(f"- Running since {when}: {r['topic']}")
+            lines.append(f"- Running since {when}: {r['topic'][:200]}")
         else:
-            lines.append(f"- {r['status'].title()} ({when}): {r['topic']}. {r.get('summary', '')}"
+            lines.append(f"- {r['status'].title()} ({when}): {r['topic'][:200]}. {r.get('summary', '')}"
                          + (f" Note: {r['note']}" if r.get("note") else ""))
     return "Research runs, newest first:\n" + "\n".join(lines)

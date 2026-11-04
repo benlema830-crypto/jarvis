@@ -73,12 +73,12 @@ class ApprovalSpeechTest(unittest.TestCase):
 
     def test_codex_approval_keeps_command_out_of_voice_and_preserves_all_details(self):
         manager = agent_sessions.SessionManager()
-        manager.active = "test"
+        worker = manager._begin("test")
         manager.entries = {"test": {"name": "Test", "mode": "work"}}
         command = "Remove-Item " + "x" * 800
         event = {"method": "item/commandExecution/requestApproval", "params": {"command": command}}
         with mock.patch.object(manager, "publish"), mock.patch.object(approvals, "ask", return_value=(False, "no")) as ask:
-            self.assertEqual(manager._approval(event), {"decision": "decline"})
+            self.assertEqual(worker._approval(event), {"decision": "decline"})
         self.assertIn(command, ask.call_args.args[0])
         self.assertNotIn("Remove-Item", ask.call_args.kwargs["spoken"])
         self.assertIn("delete data", ask.call_args.kwargs["spoken"])

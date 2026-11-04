@@ -24,7 +24,7 @@ class TerminalRoutingTest(unittest.TestCase):
 
     def assert_codex(self):
         tools.SESSIONS.open.assert_called_with(name='Jarvis Tasks', project='Jarvis', provider='codex')
-        tools.SESSIONS.start.assert_called_with('tidy Downloads', name='Jarvis Tasks', mode='work')
+        tools.SESSIONS.start.assert_called_with('tidy Downloads', name='Jarvis Tasks', mode='work', fresh=True)
         tools.TERMINAL.start.assert_not_called()
 
     def test_paid_apis_enabled_still_uses_codex(self):
@@ -48,16 +48,37 @@ class TerminalRoutingTest(unittest.TestCase):
 
     def test_status_and_stop_follow_the_codex_task(self):
         self.prefs = {'subscription_only': False}
-        self.running.stop()
-        with mock.patch.object(type(tools.SESSIONS), 'running', new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch.object(tools.SESSIONS, 'status', return_value='{"status": "running"}') as status, \
+        with mock.patch.dict(tools.SESSIONS.workers, {'jarvis tasks': object()}), \
+                mock.patch.object(tools.SESSIONS, 'status', return_value='Jarvis Tasks: running') as status, \
                 mock.patch.object(tools.SESSIONS, 'cancel') as cancel, \
                 mock.patch.object(type(tools.TERMINAL), 'running', new_callable=mock.PropertyMock, return_value=False):
             self.assertIn('running', tools.terminal_status.call({}))
             status.assert_called_with('Jarvis Tasks')
             self.assertEqual(tools.stop_terminal_task.call({}), 'Stopping.')
-            cancel.assert_called_once()
-        self.running.start()
+            cancel.assert_called_once_with('Jarvis Tasks')
+
+    def test_stopping_the_terminal_task_leaves_project_agents_alone(self):
+        with mock.patch.dict(tools.SESSIONS.workers, {'giant builder': object()}), \
+                mock.patch.object(tools.SESSIONS, 'cancel') as cancel, \
+                mock.patch.object(type(tools.TERMINAL), 'running', new_callable=mock.PropertyMock, return_value=False):
+            self.assertIn('No terminal task', tools.stop_terminal_task.call({}))
+            cancel.assert_not_called()
+
+    def test_followups_continue_the_conversation_and_folder_is_passed_on(self):
+        from types import SimpleNamespace
+        tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'and also that', 'continue_previous': True}))
+        tools.SESSIONS.start.assert_called_with('and also that', name='Jarvis Tasks', mode='work')
+        tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'build', 'folder': 'C:/Work'}))
+        tools.SESSIONS.start.assert_called_with('build', name='Jarvis Tasks', mode='work', fresh=True, folder='C:/Work')
+
+    def test_sending_a_task_to_a_running_session_delivers_it_as_a_message(self):
+        from types import SimpleNamespace
+        with mock.patch.dict(tools.SESSIONS.workers, {'giant builder': object()}), \
+                mock.patch.object(tools.SESSIONS, 'message', return_value='Delivered') as message, \
+                mock.patch.object(type(tools.TERMINAL), 'running', new_callable=mock.PropertyMock, return_value=False):
+            result = tools.run_tool(SimpleNamespace(name='send_agent_task', id='t', input={'task': 'also this', 'name': 'Giant Builder', 'mode': 'work'}))
+        self.assertEqual(result['content'], 'Delivered')
+        message.assert_called_once_with('also this', 'Giant Builder')
 
     def test_paid_tools_are_not_gated_when_subscription_only_is_off(self):
         self.prefs = {'subscription_only': False}

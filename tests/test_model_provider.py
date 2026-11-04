@@ -248,7 +248,7 @@ class OpenAIConversationTest(unittest.TestCase):
         with mock.patch.object(mp.Responses,'events',events),mock.patch.object(jarvis,'run_tool',return_value={'content':'mock'}) as tool,\
              mock.patch.object(jarvis.memory,'record_turn'):
             with self.assertRaisesRegex(mp.ProviderError,'round limit'):brain.ask('test',mock.Mock())
-        self.assertEqual(tool.call_count,10)
+        self.assertEqual(tool.call_count,jarvis.TOOL_ROUNDS)
         self.assertEqual(brain.messages,[])
 
 

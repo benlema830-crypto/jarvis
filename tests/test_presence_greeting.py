@@ -137,6 +137,10 @@ class WatcherTest(unittest.TestCase):
         noon=datetime.datetime(2026,10,29,12,0)
         self.assertEqual(pg.should_greet(60,noon,noon.timestamp()-599,999),'cooldown')
         self.assertEqual(pg.should_greet(60,noon,0,5),'someone was just using the PC')
+        # 11-04: asleep in bed, the sensor lost them at 6:13, and the 6:40 alarm "welcomed them back".
+        morning=datetime.datetime(2026,11,4,6,40,12)
+        self.assertEqual(pg.should_greet(27,morning,0,999,datetime.datetime(2026,11,4,6,13)),'the room only looked empty overnight')
+        self.assertIsNone(pg.should_greet(40,datetime.datetime(2026,11,4,8,23),0,999,datetime.datetime(2026,11,4,7,43)))
 
     def test_style_and_home_briefing_preserved(self):
         self.assertEqual(pg.tier(10, True),'long')

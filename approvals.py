@@ -64,16 +64,18 @@ def spoken_question(question: str) -> str:
 
 
 def ask(question: str, cancel: threading.Event | None = None, *, spoken: str | None = None,
-        kind: str | None = None) -> tuple[bool, str]:
+        kind: str | None = None, always: bool = False, free_text: bool = False) -> tuple[bool, str]:
     """Ask the user out loud; returns (approved, what they said). Blocks until answered.
-    `kind` names the category when the caller knows it (see ROUTINE)."""
+    `kind` names the category when the caller knows it (see ROUTINE). `always` skips the owner's
+    auto_approve setting. `free_text` is a real question, not yes or no: whatever they say is the answer,
+    so it can't be auto-approved (the "answer" would be meaningless) or rejected as "please say yes or no"."""
     global _pending
-    if auto_approved(question, kind):
+    if not (always or free_text) and auto_approved(question, kind):
         hud.emit("event", text=f"Auto-approved: {question[:300]}")
         return True, "(auto-approved by your settings)"
     with _one_at_a_time:
         speech = spoken_question(spoken if spoken is not None else question)
-        item = {"question": speech, "details": question, "event": threading.Event(), "answer": None}
+        item = {"question": speech, "details": question, "event": threading.Event(), "answer": None, "free_text": free_text}
         _pending = item
         hud.emit("event", text=f"Approval needed: {question}")
         if on_question:
@@ -94,6 +96,11 @@ def waiting() -> str | None:
     return _pending["question"] if _pending else None
 
 
+def waiting_for_answer() -> bool:
+    """The open question takes any words, not a yes or no."""
+    return bool(_pending and _pending.get("free_text"))
+
+
 def classify_answer(text: str) -> bool | None:
     """Only explicit answers decide; questions and unclear transcripts stay pending."""
     text = text.strip(" .,!?")
@@ -109,6 +116,10 @@ def answer(text: str) -> bool | None:
     item = _pending
     if not item:
         return False
+    if item.get("free_text"):
+        item["answer"] = (True, text)
+        item["event"].set()
+        return True
     approved = classify_answer(text)
     if approved is None:
         return None

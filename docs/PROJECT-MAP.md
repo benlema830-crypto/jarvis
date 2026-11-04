@@ -60,6 +60,9 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
 | Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py, task_effort.py (learned per-task effort) |
+| Direct terminal | direct_tools.py (run_command, read_file, search_text, edit_file, write_file: the conversation's own shell and file tools, through cc_guard) |
+| Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return) |
+| Truthfulness | truth_guard.py (ClaimGate holds an unbacked "I've done it" and makes the brain answer again; agent OUTCOME lines; which tools ran this turn). home_assistant.control reads each device back before reporting |
 | Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_openai_key.py |
 | Checks | scripts/verify_project.py; tests/ (unit tests), tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks) |
 
@@ -86,3 +89,57 @@ Git excludes personal data, voices and models; the handoff documents separate mi
 `data/privacy.json` stores selected text filters; `memory.json.epoch` invalidates pre-edit model context.
 The Brain process owns the digest scheduler. XLSX/PDF/PPTX outputs live alongside Word documents in
 `Documents/JARVIS Documents`; no Office process or account is required to create them.
+
+## Don't Wake the Giant (added 2026-11-02)
+
+A separate configured project at `C:\Users\Lemab\Documents\Don't Wake the Giant`.
+The project catalog is shared by agent sessions and handoffs; daily review includes
+registered projects. The Project tools, routines and Resume selectors include it.
+Use `open_agent_session(name="Giant Builder", project="Don't Wake the Giant")` or
+`project_handoff(project="Don't Wake the Giant", ...)` after restarting Jarvis/Brain.
+The vault project note is `Projects/Don't Wake the Giant.md`.
+
+Giant Builder retains its saved Codex thread ID, task, report and timeline. Only
+project and working-directory fields were reassigned. A guarded migration in
+`data/session-project-migrations.json` also applies on the next manager load, so
+an older running process cannot permanently restore the former Rocket Frontier
+association. The migration checks the original thread ID and project. It does not
+start an agent task or rewrite provider conversation files. A real provider
+continuation has not been launched as a setup test; resume uses the existing
+thread ID with the new working directory.
+
+The existing OneDrive `Dont Wake the Giant v2.rbxl` is referenced only. It and all
+Rocket Frontier files/places were left untouched. No game export/build/publish or
+Studio sync was performed. Source/build workflow is not established by setup.
+
+## How agents run (2026-11-04)
+
+Small jobs don't use agents: the conversation runs commands and edits files itself (`direct_tools.py`).
+Agents are for long jobs. `agent_sessions.SessionManager` holds saved sessions; each running task is a
+`Worker`. Up to 4 run at once, but only one may change a given folder at a time. `message_agent` delivers
+words to a running Codex agent through `turn/steer` without stopping it (Claude sessions can't take this).
+A turn ending doesn't mean the job is done: agents end their report with `OUTCOME: done|partial|blocked|failed`,
+which sets `ok`, the spoken status and the project log. `entry["evidence"]` is what Jarvis itself watched
+happen, kept separate from what the report claims. `terminal_task` starts a clean conversation unless it's
+a follow-up (`continue_previous`), and can work in any folder.
+
+`data/claim_checks.jsonl` records each sentence the claim gate stopped, for checking how well it's working.
+`"local_router": {"enabled": false}` in preferences turned off the local quick-request model on 2026-11-04
+(slower to first words than the brain on similar turns, and it reported actions it hadn't checked).
+
+## Work while the owner is away (2026-11-04)
+
+`queue_away_job` puts a build or research job in `data/away_jobs.json`. It starts right away, survives a restart, and
+never waits for anyone. `away_jobs` is the status, stop and resume tool.
+
+A build runs one at a time in `~/Documents/Jarvis Builds/<name>-<id>`: a local clone with its remote removed, or a new
+repo. Its agent is the `Away Builder` session, flagged `unattended`: approval policy `never` in the Codex sandbox, no
+outside tools, no web search, no secrets in its environment, and no spoken questions. `.git` is read-only to the agent, so
+Jarvis commits for it (with hooks off) and fetches the result into the owner's repo as `jarvis/<name>-<id>`. He never merges.
+
+The agent saying done isn't enough. Jarvis re-runs the tests through `codex sandbox`, because the agent wrote them, and
+never falls back to running them outside it. Only failures that weren't there before the agent began count: Jarvis's own
+DPAPI tests always fail in the sandbox. Failures go back to the agent, for up to 4 rounds of up to 30 minutes each.
+
+A project needs git and at least one commit to get a private copy, or it's refused. A copy is made from the last commit,
+so uncommitted files aren't in it; Jarvis says so at the start and the end.

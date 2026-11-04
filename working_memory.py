@@ -59,6 +59,9 @@ def agent_work(now=None):
         live = status in LIVE
         if not s.get("task") or not (live or now - when < SESSION_DAYS * 86400):
             continue
+        if not live and s.get("outcome"):
+            status = {"done": "finished", "partial": "only partly finished", "blocked": "blocked, not done",
+                      "failed": "failed", "stopped": "stopped"}.get(s["outcome"], status)
         head = f"- {s.get('name', '?')} ({s.get('project', '?')}): {status}"
         if not live and when:
             head += f", {_ago(when, now)}"
@@ -223,11 +226,13 @@ def project_brief(project, session="", now=None, today=None) -> str:
 def brief(now=None, today=None) -> str:
     """The working-memory brief, or "" when nothing is recorded. Over the size cap, the oldest
     journal threads and decisions are dropped first, so the short, current parts always fit."""
+    import away_jobs
     import daily_review
     import memory_proposals
     import research
     work, todo, projects, fresh = agent_work(now), open_tasks(), handoffs(now), recent_facts(now)
     studies = research.recent_lines(now)
+    away = away_jobs.recent_lines(now)
     threads, decisions = journal(today)
     day, review = daily_review.latest(today)
     review_line = ""
@@ -243,6 +248,8 @@ def brief(now=None, today=None) -> str:
             parts.append("Agent work (from agent session records):\n" + "\n".join(work))
         if studies:
             parts.append("Research (start_research; reports are vault notes):\n" + "\n".join(studies))
+        if away:
+            parts.append("Work queued for while the owner is away (away_jobs for details):\n" + "\n".join(away))
         if review_line:
             parts.append(review_line)
         if fresh:

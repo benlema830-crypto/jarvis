@@ -107,7 +107,7 @@ class CodexBrain:
         elif 'id' in event and method:
             if method == 'item/tool/call':
                 self.tool_count += 1
-                if self.cancel.is_set() or self.tool_count > 20 or not self.run_tool:
+                if self.cancel.is_set() or self.tool_count > 40 or not self.run_tool:
                     result = {'contentItems': [{'type': 'inputText', 'text': 'Tool execution stopped.'}], 'success': False}
                 else:
                     arguments = params.get('arguments', {})
@@ -135,6 +135,8 @@ class CodexBrain:
         """Codex's native live search: show activity and real result links in the HUD."""
         import hud
         if method == 'item/started':
+            import truth_guard
+            truth_guard.note_tool('web_search')
             hud.emit('tool', name='web_search', input={})
             return
         sources = web_sources(item)

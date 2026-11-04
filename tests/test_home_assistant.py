@@ -50,6 +50,10 @@ class HomeAssistantTest(unittest.TestCase):
         patcher = mock.patch.object(ha, '_api', side_effect=api)
         patcher.start()
         self.addCleanup(patcher.stop)
+        for name in ('CONFIRM_SECONDS', 'SLOW_CONFIRM_SECONDS'):  # read back once rather than waiting
+            limit = mock.patch.object(ha, name, 0)
+            limit.start()
+            self.addCleanup(limit.stop)
         ha._info = (0.0, {})
 
     def ids(self, query):
@@ -140,8 +144,68 @@ class HomeAssistantTest(unittest.TestCase):
         with self.assertRaisesRegex(ha.HomeError, 'Which one'):
             ha.find('bedroom')
 
+    def reads_back(self, state, attributes=None):
+        """Make the device report this state when it is read back after a command."""
+        self.woken_state = state
+        original = ha._api.side_effect
+
+        def api(method, path, payload=None):
+            if path.startswith('/api/states/'):
+                self.calls.append((method, path, payload))
+                return {'state': state, 'attributes': attributes or {}}
+            return original(method, path, payload)
+        ha._api.side_effect = api
+
+    def test_success_is_only_claimed_when_the_device_reports_it(self):
+        self.reads_back('on')
+        self.assertEqual(ha.control('ceiling', 'turn_on'), 'Confirmed: Ceiling is on.')
+        self.reads_back('off')
+        result = ha.control('ceiling', 'turn_on')  # the 11-03 failure: command accepted, device stayed off
+        self.assertIn('NOT CONFIRMED', result)
+        self.assertIn('Ceiling should be on but reports off', result)
+        self.assertIn('Do not say it worked', result)
+        self.assertNotIn('Confirmed:', result)
+
+    def test_a_device_already_in_that_state_is_not_reported_as_changed(self):
+        result = ha.control('TV', 'turn_on')  # the 11-03 "LG TV turned on" when it was on all along
+        self.assertIn('was already on', result)
+        self.assertIn('nothing changed', result)
+        self.assertNotIn('Confirmed', result)
+
+    def test_brightness_volume_and_app_are_read_back_not_assumed(self):
+        self.reads_back('on', {'brightness': 102})
+        self.assertEqual(ha.control('desk lamp', 'set_brightness', '40'), 'Confirmed: Desk Lamp is at 40%.')
+        self.reads_back('on', {'brightness': 250})
+        self.assertIn('NOT CONFIRMED', ha.control('desk lamp', 'set_brightness', '40'))
+        self.reads_back('playing', {'source': 'Netflix'})
+        self.assertEqual(ha.control('Apple TV', 'open_app', 'netflix'), 'Confirmed: Living Room is showing Netflix.')
+        self.reads_back('idle', {'source': 'App Store'})  # the 10-28 "Netflix opened" when nothing opened
+        self.assertIn('NOT CONFIRMED', ha.control('Apple TV', 'open_app', 'netflix'))
+
+    def test_commands_that_cannot_be_read_back_say_only_that_they_were_sent(self):
+        result = ha.control('Apple TV', 'next')
+        self.assertIn('say it was sent, not that it happened', result)
+        self.assertNotIn('Confirmed', result)
+
+    def test_some_devices_confirming_never_hides_one_that_did_not(self):
+        original = ha._api.side_effect
+
+        def api(method, path, payload=None):
+            if path == '/api/states/light.ceiling':
+                return {'state': 'on', 'attributes': {}}  # the ceiling light ignored the command
+            if path == '/api/states/light.desk_lamp':
+                return {'state': 'off', 'attributes': {}}
+            return original(method, path, payload)
+        ha._api.side_effect = api
+        STATES[5]['state'] = 'on'
+        self.addCleanup(STATES[5].__setitem__, 'state', 'off')
+        result = ha.control('lights', 'turn_off')
+        self.assertIn('Confirmed: Desk Lamp is off', result)
+        self.assertIn('NOT CONFIRMED', result)
+        self.assertIn('Ceiling should be off but reports on', result)
+
     def test_control_calls_the_matching_services(self):
-        self.assertEqual(ha.control('desk lamp', 'set_brightness', '40%'), 'Sent set brightness 40% to Desk Lamp.')
+        ha.control('desk lamp', 'set_brightness', '40%')
         ha.control('lights', 'turn_off')
         ha.control('TV', 'set_volume', '30')
         ha.control('Apple TV', 'pause')
@@ -157,7 +221,7 @@ class HomeAssistantTest(unittest.TestCase):
         ])
 
     def test_open_app_launches_the_named_app(self):
-        self.assertEqual(ha.control('Apple TV', 'open_app', 'netflix'), 'Asked Living Room to open Netflix.')
+        ha.control('Apple TV', 'open_app', 'netflix')
         ha.control('Apple TV', 'open_app', 'YouTube')
         ha.control('Apple TV', 'open_app', 'prime')
         ha.control('Apple TV', 'open_app', 'app store')

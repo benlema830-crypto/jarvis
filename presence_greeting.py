@@ -59,12 +59,16 @@ def quiet(now):
     return t >= QUIET_START or t < QUIET_END
 
 
-def should_greet(away_minutes, now, last_greeted, idle_seconds):
+def should_greet(away_minutes, now, last_greeted, idle_seconds, empty_since=None):
     """Why not to greet, or None to greet. `last_greeted` is a timestamp (0 = never)."""
     if away_minutes < MIN_EMPTY_MINUTES:
         return 'room was only briefly empty'
     if quiet(now):
         return 'quiet hours'
+    # The sensor loses someone lying still, so a gap that began overnight is almost always them asleep in
+    # bed. It produced "twenty-seven minutes up before the alarm, sir" to someone the alarm had just woken.
+    if empty_since is not None and quiet(empty_since):
+        return 'the room only looked empty overnight'
     if now.timestamp() - last_greeted < COOLDOWN_MINUTES * 60:
         return 'cooldown'
     if idle_seconds is not None and idle_seconds < RECENT_INPUT_SECONDS:
@@ -93,7 +97,8 @@ def build_prompt(away_minutes, arrived_home, now, recent, briefing='', style=Non
                                [w for s, w in zip(STYLES, WEIGHTS) if s != last_style])[0]
     size = tier(away_minutes, arrived_home)
     where = ("They just got home (their phone arrived home a few minutes ago)." if arrived_home else
-             f"They were out of the bedroom for {_away(away_minutes)}.")
+             f"The bedroom's sensor saw nobody for {_away(away_minutes)}. It can miss someone keeping still, so "
+             "you don't actually know they left, where they went or what they did.")
     said = "\n".join(f"  - {r['text']}" for r in recent[-5:]) or "  (none yet)"
     length = {
         'short': "One sentence. They only stepped out, so no briefing.",
@@ -125,7 +130,8 @@ The register, not lines to copy:
   - "Ah. The room was getting rather quiet without you, sir."
   - "Forty minutes, sir. The world carried on without incident; the research didn't."
   - "Good evening, sir. Nothing caught fire in your absence, which I count as a success."
-Vary the structure and the first word from his recent greetings. Never: "How can I help", "Hope you're doing well", exclamation marks, or chirpiness. Don't invent details, don't mention the sensor, don't ask a closing question, and use no tools."""
+Vary the structure and the first word from his recent greetings. Never: "How can I help", "Hope you're doing well", exclamation marks, or chirpiness. Don't mention the sensor, don't ask a closing question, and use no tools.
+Every fact must come from this message or your records, stated no more strongly than they support. Don't invent details or draw conclusions about what they were doing. Weather here is a forecast, so never say it's raining now or that it's cold out. An item from your records may be out of date: "still waiting on" only if it clearly is. If there's nothing real to remark on, a plain "Welcome back, sir." is the right answer."""
 
 
 class Watcher:
@@ -178,7 +184,8 @@ class Watcher:
         away = max(0, changed - empty_since) / 60 if empty_since is not None else 0
         now = datetime.datetime.fromtimestamp(now_ts)
         idle = self.idle_seconds() if self.idle_seconds else None
-        reason = should_greet(away, now, self.saved.get('last_greeted', 0), idle)
+        began = datetime.datetime.fromtimestamp(empty_since) if empty_since is not None else None
+        reason = should_greet(away, now, self.saved.get('last_greeted', 0), idle, began)
         if reason:
             return reason
         arrived = self._arrived_home(now_ts)

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import knowledge
+import away_jobs
 import memory
 import memory_proposals
 import privacy
@@ -26,6 +27,7 @@ class WorkingMemoryTest(unittest.TestCase):
                                      (working_memory, "HANDOFFS", self.root / "handoffs"),
                                      (memory_proposals, "STORE", self.root / "proposals.json"),
                                      (research, "STORE", self.root / "research.json"),
+                                     (away_jobs, "STORE", self.root / "away_jobs.json"),
                                      (privacy, "STORE", self.root / "privacy.json"),
                                      (memory, "PATH", str(self.root / "memory.json")),
                                      (memory, "RECENT_PATH", str(self.root / "recent.json"))]:

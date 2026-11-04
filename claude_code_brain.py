@@ -23,8 +23,8 @@ import privacy
 HERE = Path(__file__).resolve().parent
 MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
 SERVER = "jarvis"
-STALL_SECONDS = 180   # no message from Claude Code for this long ends the turn
-MAX_TURNS = 20        # model turns (tool rounds) per reply, like Codex's tool cap
+STALL_SECONDS = 240   # no message from Claude Code for this long ends the turn (a direct command can run 150 s)
+MAX_TURNS = 40        # model turns (tool rounds) per reply: direct terminal work takes more than a voice command
 
 
 class LimitReached(RuntimeError):
@@ -86,6 +86,13 @@ class ClaudeCodeBrain:
             return {"content": [{"type": "text", "text": "Tool execution stopped."}], "is_error": True}
         output = self.run_tool(SimpleNamespace(name=name, id=f"cc{self.tool_count}", input=args))
         return {"content": _mcp_content(output.get("content", "")), "is_error": bool(output.get("is_error"))}
+
+    @staticmethod
+    def _builtin_tool(name):
+        import hud
+        import truth_guard
+        truth_guard.note_tool(name)
+        hud.emit("tool", name="web_search" if name == "WebSearch" else "web_fetch", input={})
 
     def _server(self, definitions):
         from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -171,6 +178,10 @@ class ClaudeCodeBrain:
                     raise WouldBillAPI(f"Claude Code would use an API key ({source}).")
             elif isinstance(message, StreamEvent) and message.parent_tool_use_id is None:
                 event = message.event
+                if event.get("type") == "content_block_start":
+                    block = event.get("content_block") or {}
+                    if block.get("name") in ("WebSearch", "WebFetch"):  # built in, so tools.run_tool never sees them
+                        self._builtin_tool(block["name"])
                 if event.get("type") == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
                     text = event["delta"].get("text", "")
                     answer.append(text)
