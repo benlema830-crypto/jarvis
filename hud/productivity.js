@@ -10,7 +10,7 @@
   }; return b; };
   const output = make('pre'); output.id = 'projectToolResult'; output.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:45vh;overflow:auto';
   const project = make('select'); project.setAttribute('aria-label', 'Project');
-  for (const name of ['Jarvis', 'Rocket Frontier']) project.append(make('option', name));
+  for (const name of ['Jarvis', 'Rocket Frontier', "Don't Wake the Giant"]) project.append(make('option', name));
   const post = (path, body) => J.api(path, body, {timeout: path === '/knowledge-search' ? 180000 : 60000});
   function projectText(data) {
     let text = `${data.project} · checked ${data.checked_at || data.created_at}\n`;
@@ -44,7 +44,7 @@
   const select = make('select'); select.id = 'routineSelect'; select.setAttribute('aria-label', 'Named routine');
   const name = make('input'); name.placeholder = 'Routine name'; name.setAttribute('aria-label', 'Routine name'); name.maxLength = 60;
   const routineProject = make('select'); routineProject.setAttribute('aria-label', 'Routine project');
-  for (const value of ['Jarvis', 'Rocket Frontier']) routineProject.append(make('option', value));
+  for (const value of ['Jarvis', 'Rocket Frontier', "Don't Wake the Giant"]) routineProject.append(make('option', value));
   const editor = make('div'); editor.setAttribute('aria-label', 'Routine steps');
   const labels = {open_project:'Open project folder', project_status:'Read project status', tasks:'Show unfinished tasks', focus:'Start Focus', handoff:'Save session handoff'};
   let draftSteps = [];

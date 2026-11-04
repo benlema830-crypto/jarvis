@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 STORE = ROOT / 'data' / 'handoffs'
-PROJECTS = {'Jarvis': ROOT, 'Rocket Frontier': Path.home() / 'Documents' / 'Rocket Frontier'}
+from project_catalog import PROJECTS, canonical
 LOCK = threading.RLock()
 
 
@@ -18,10 +18,11 @@ def now():
 
 
 def project(name):
+    name = canonical(name)
     for key, path in PROJECTS.items():
         if key.casefold() == str(name).strip().casefold():
             return key, path
-    raise ValueError('Choose Jarvis or Rocket Frontier.')
+    raise ValueError('Choose a configured project: ' + ', '.join(PROJECTS))
 
 
 def _git(root, *args):

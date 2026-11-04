@@ -86,7 +86,7 @@
 
   const resumeDialog=make('dialog'),resumeProject=make('select'),resumeBody=make('div');resumeDialog.id='resumeDialog';
   resumeDialog.setAttribute('aria-label','Resume a project');resumeProject.setAttribute('aria-label','Project to resume');
-  for(const name of ['Jarvis','Rocket Frontier'])resumeProject.append(make('option',name));
+  for(const name of ['Jarvis','Rocket Frontier',"Don't Wake the Giant"])resumeProject.append(make('option',name));
   resumeDialog.append(button('Close',()=>resumeDialog.close()),make('h2','Pick up where you left off'),resumeProject,
     button('Restore workspace',async()=>{try{resumeBody.textContent='Reading current project evidence…';applyResume(await J.api('/project-resume',{project:resumeProject.value}));}catch(e){resumeBody.textContent=e.message;}}),resumeBody);
   document.body.append(resumeDialog);
