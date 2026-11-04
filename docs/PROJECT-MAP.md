@@ -34,7 +34,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
 | Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Local-only conversation models; idle until a model is requested |
-| Home Assistant OS (Raspberry Pi 5, separate device) | 80 at `HA_URL` (Wi-Fi 192.168.1.118) | always on | Smart-home devices and automations; runs even when the PC is off |
+| Home Assistant OS (Raspberry Pi 5, separate device) | 80 at `HA_URL` (Ethernet 192.168.0.44) | always on | Smart-home devices and automations; runs even when the PC is off |
 
 ## Source components
 
