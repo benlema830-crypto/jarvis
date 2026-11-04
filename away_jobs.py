@@ -89,7 +89,9 @@ def git(*args, cwd, check=True, timeout=300):
     # Hooks and fsmonitor would run a program from the folder outside the sandbox, so they stay off. Rocket
     # Frontier belongs to the Codex sandbox's Windows account, which git otherwise refuses to read. This allows
     # it for this command only, without changing the owner's git settings.
-    command = ["git", "-c", "safe.directory=*", "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false", *args]
+    # Long paths: Don't Wake the Giant's backups have names that pass Windows' limit once inside a build folder.
+    command = ["git", "-c", "safe.directory=*", "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false",
+               "-c", "core.longpaths=true", *args]
     done = subprocess.run(command, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=timeout, env=clean_env(), creationflags=subprocess.CREATE_NO_WINDOW)
     if check and done.returncode:
@@ -123,7 +125,7 @@ def sandboxed(command, cwd, timeout=CHECK_TIMEOUT):
 
 def slug(text):
     words = re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-")
-    return words[:40].rstrip("-") or "build"
+    return words[:28].rstrip("-") or "build"
 
 
 def short(text, limit=70):
