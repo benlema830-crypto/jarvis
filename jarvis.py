@@ -1268,12 +1268,25 @@ def main():
     import morning_wakeup
 
     def bedroom_speaker_ready():
-        """Whether the Bose is connected right now (re-reads devices so a speaker that connected later counts)."""
+        """Reconnect the Bose if needed (sleep drops Bluetooth), then say whether it's up. Also makes it the
+        Windows default, because Spotify plays on the default output."""
+        import bluetooth_audio
         import presence_greeting
         from voice import find_output
-        if find_output(presence_greeting.SPEAKER) is None:
+        name = presence_greeting.SPEAKER
+        try:
+            bluetooth_audio.connect(name)
+        except Exception as e:
+            print(f"(Couldn't reconnect the speaker: {e})", flush=True)
+        if find_output(name) is None:
             voice.refresh_outputs()
-        return find_output(presence_greeting.SPEAKER) is not None
+        if find_output(name) is None:
+            return False
+        try:
+            bluetooth_audio.set_default(name)
+        except Exception as e:
+            print(f"(Couldn't make the speaker the default output: {e})", flush=True)
+        return True
     if morning_wakeup.start(hud.commands.put, gather_greeting_context, lambda: turns.last_user,
                             speaker_ready=bedroom_speaker_ready):
         print(f"Weekday wake-up armed for {morning_wakeup.WAKE_AT.strftime('%H:%M')}.", flush=True)

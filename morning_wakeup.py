@@ -3,10 +3,13 @@
 The routine, in order (ROUTINE below is the summary Jarvis gives when asked):
   1. 6:35 Home Assistant wakes the PC over Wi-Fi (automation "Jarvis: wake the PC for the morning
      alarm", weekdays, only when the owner's phone is home).
-  2. 6:40 the box fan goes off and the bedroom lights (ceiling group + lamp) come on.
-  3. The alarm tone and the briefing play on the Bose speaker. If the Bose isn't connected they play
-     on the PC's default output and the owner's iPhone gets an alert, so the alarm can't go unheard.
-  4. When the briefing ends, Spotify plays preferences "morning_music" (the "Jarvis Morning" playlist).
+  2. 6:40 the box fan goes off and the bedroom lights (ceiling group + lamp) come on. Until 7:10 the
+     presence automations leave them that way (scripts/bedroom_morning_window.py).
+  3. Jarvis reconnects the Bose (sleep drops Bluetooth) and makes it the Windows default output. The alarm
+     tone and the briefing play on it. If the Bose can't be reached they play on the PC's default output
+     and the owner's iPhone gets an alert, so the alarm can't go unheard.
+  4. When the briefing ends, Spotify plays preferences "morning_music" (the "Jarvis Morning" playlist)
+     on the default output, so on the Bose when it connected.
   5. Every 3 minutes (up to 5 times) a nudge, until they talk to Jarvis, touch the PC or leave the room.
 Each run's results are saved in data/morning-wakeup.json ("last_run") and shown by self_check.
 """
@@ -29,9 +32,10 @@ FAN = 'fan.bedroom_fan'
 LIGHTS = ['light.ceiling_light', 'light.bedroom_lamp']
 PHONE = 'mobile_app_jarvis'      # Home Assistant notify service for the owner's iPhone
 ROUTINE = ("Weekdays (Mon-Fri) at 6:40: Home Assistant wakes the PC at 6:35 if the phone is home; then the fan "
-           "turns off, the bedroom lights turn on, an alarm tone and the morning briefing play on the Bose "
-           "speaker (iPhone alert if the Bose isn't connected), then Spotify plays the Jarvis Morning playlist, "
-           "with up to five nudges three minutes apart until the owner is up.")
+           "turns off and stays off until 7:10 unless asked for, the bedroom lights turn on, Jarvis reconnects the "
+           "Bose speaker, an alarm tone and the morning briefing play on it (iPhone alert if the Bose can't be "
+           "reached), then Spotify plays the Jarvis Morning playlist, with up to five nudges three minutes apart "
+           "until the owner is up.")
 # After the briefing: preferences "morning_music" is a Spotify link or a music command ("play my Morning
 # playlist"); unset means resume whatever Spotify last played.
 DEFAULT_MUSIC = 'resume'

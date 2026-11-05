@@ -1,4 +1,5 @@
 import datetime
+import importlib.util
 import tempfile
 from pathlib import Path
 import unittest
@@ -145,6 +146,74 @@ class MusicTest(unittest.TestCase):
         with mock.patch.object(preferences, 'read', return_value={}),                 mock.patch.object(music, 'perform', return_value='') as perform:
             mw.start_music()
         perform.assert_called_once_with('resume')
+
+
+class MorningWindowTest(unittest.TestCase):
+    """Presence automations must not undo the alarm: no fan on, no lights off, 6:40-7:10 on weekdays."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / 'scripts' / 'bedroom_morning_window.py'
+        spec = importlib.util.spec_from_file_location('bedroom_morning_window', path)
+        cls.script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.script)
+
+    @staticmethod
+    def automation(automation_id, trigger_id, action):
+        return {'id': automation_id, 'description': 'x', 'triggers': [{'trigger': 'state', 'id': trigger_id}],
+                'actions': [{'choose': [
+                    {'conditions': [{'condition': 'trigger', 'id': 'other'}], 'sequence': [{'action': 'noop'}]},
+                    {'conditions': [{'condition': 'trigger', 'id': trigger_id}], 'sequence': [{'action': action}]},
+                ]}]}
+
+    def test_fan_arrival_is_blocked_only_on_its_own_branch_and_applying_twice_changes_nothing(self):
+        before = self.automation(self.script.FAN_ID, 'arrive', 'fan.turn_on')
+        after = self.script.fan_config(before)
+        other, arrive = after['actions'][0]['choose']
+        self.assertIn(self.script.OUTSIDE_WINDOW, arrive['conditions'])
+        self.assertNotIn(self.script.OUTSIDE_WINDOW, other['conditions'])
+        self.assertEqual(self.script.fan_config(after), after)
+        self.assertEqual(len(before['actions'][0]['choose'][1]['conditions']), 1)  # original left untouched
+
+    def test_lights_stay_on_in_the_window_and_are_rechecked_at_its_end(self):
+        after = self.script.lights_config(self.automation(self.script.LIGHTS_ID, 'empty', 'light.turn_off'))
+        self.assertIn(self.script.OUTSIDE_WINDOW, after['actions'][0]['choose'][1]['conditions'])
+        self.assertIn(self.script.LIGHTS_RECHECK, after['triggers'])
+        self.assertEqual(self.script.lights_config(after), after)
+
+    def test_recheck_lands_just_outside_the_window_so_it_can_act(self):
+        self.assertEqual(self.script.LIGHTS_RECHECK['at'], self.script.WINDOW['before'])  # "before" excludes it
+
+    def test_an_unexpected_automation_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.script.fan_config(self.automation('something_else', 'arrive', 'fan.turn_on'))
+        with self.assertRaises(ValueError):
+            self.script.fan_config(self.automation(self.script.FAN_ID, 'arrive', 'light.turn_on'))
+
+
+class ReconnectTest(unittest.TestCase):
+    def run_connect(self, states):
+        import bluetooth_audio
+        waits = []
+        with mock.patch.object(bluetooth_audio, 'connected', side_effect=states), \
+                mock.patch.object(bluetooth_audio, 'request_reconnect') as request:
+            result = bluetooth_audio.connect('Bose', sleep=waits.append)
+        return result, request.call_count, len(waits)
+
+    def test_already_connected_sends_nothing(self):
+        self.assertEqual(self.run_connect([True]), (True, 0, 0))
+
+    def test_stops_as_soon_as_the_speaker_is_up(self):
+        self.assertEqual(self.run_connect([False, False, True]), (True, 2, 2))
+
+    def test_gives_up_when_the_speaker_never_answers(self):
+        self.assertEqual(self.run_connect([False] * 4), (False, 3, 3))
+
+    def test_a_failed_request_is_retried_not_raised(self):
+        import bluetooth_audio
+        with mock.patch.object(bluetooth_audio, 'connected', side_effect=[False, True]), \
+                mock.patch.object(bluetooth_audio, 'request_reconnect', side_effect=OSError('no driver')):
+            self.assertTrue(bluetooth_audio.connect('Bose', sleep=lambda _: None))
 
 
 if __name__ == '__main__':
