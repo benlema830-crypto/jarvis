@@ -86,6 +86,7 @@ You can switch modes by voice too: "Jarvis, turn on your eyes", "turn on hand co
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests     # 200+ inert unit tests
 .venv\Scripts\python.exe tests\check_brain_browser.py      # drives the Brain in headless Chrome against a fake backend
+.venv\Scripts\python.exe -m ruff check .                   # lint for likely bugs, not style (settings in ruff.toml)
 .venv\Scripts\python.exe scripts\verify_project.py         # all inert checks, with a local report
 ```
 

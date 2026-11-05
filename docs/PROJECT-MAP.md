@@ -64,7 +64,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return) |
 | Truthfulness | truth_guard.py (ClaimGate holds an unbacked "I've done it" and makes the brain answer again; agent OUTCOME lines; which tools ran this turn). home_assistant.control reads each device back before reporting |
 | Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_openai_key.py |
-| Checks | scripts/verify_project.py; tests/ (unit tests), tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks) |
+| Checks | scripts/verify_project.py; ruff.toml (lint for likely bugs); tests/ (unit tests), tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks) |
 
 ## Runtime data
 

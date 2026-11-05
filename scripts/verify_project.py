@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     report = {'time_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'checks': []}
     for label, args in [
+            ('lint', ['-m', 'ruff', 'check', '.']),
             ('unit', ['-m', 'unittest', 'discover', '-s', 'tests']),
             ('brain_browser', ['tests/check_brain_browser.py']),
             ('holo_browser', ['tests/check_holo_browser.py'])]:

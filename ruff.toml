@@ -1,0 +1,25 @@
+# Lint for likely bugs, not style. Formatting, import order and broad excepts are left alone on purpose.
+# Run: .venv\Scripts\python.exe -m ruff check .
+target-version = "py312"
+extend-exclude = ["vendor"]  # third-party code; data/ and models/ are already skipped through .gitignore
+
+[lint]
+select = [
+    "F",        # pyflakes: undefined names, unused imports and variables, broken format strings
+    "E9",       # files that don't parse
+    "PLE",      # pylint errors, including invisible characters hidden in source
+    "B006",     # mutable default argument
+    "B008",     # function call in a default argument
+    "B012",     # return/break/continue inside finally, which swallows exceptions
+    "B015",     # comparison whose result is thrown away (usually a missing assert)
+    "B018",     # expression that does nothing
+    "B020",     # loop variable overwrites the thing being looped over
+    "B025",     # duplicate exception in try/except
+    "B030",     # except with something that isn't an exception class
+    "PLW0120",  # for/while else with no break
+    "PLW0127",  # variable assigned to itself
+    "PLW0711",  # except A or B, which only catches A
+    "SIM115",   # file opened outside a with block (doesn't catch a bare open(x).read())
+    "RUF006",   # asyncio task that can be garbage collected mid-run
+    "ASYNC",    # blocking calls inside async functions
+]
