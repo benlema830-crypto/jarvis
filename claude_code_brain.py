@@ -11,7 +11,6 @@ Claude Code reports no API key in use; otherwise the turn is refused rather than
 """
 import asyncio
 import atexit
-import base64
 import re
 import threading
 import time

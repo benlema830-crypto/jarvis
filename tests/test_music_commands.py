@@ -1,5 +1,4 @@
 """Spoken Spotify commands act immediately and silently; only failures are spoken."""
-import json
 import queue
 from types import SimpleNamespace
 import unittest

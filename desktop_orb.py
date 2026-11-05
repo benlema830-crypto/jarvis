@@ -58,7 +58,7 @@ def main():
     else:
         import win32event, win32api, winerror, win32gui, win32con
         from instance_config import MUTEX_NAME
-        mutex=win32event.CreateMutex(None,False,MUTEX_NAME+'_Orb')
+        mutex=win32event.CreateMutex(None,False,MUTEX_NAME+'_Orb')  # noqa: F841 - holding the handle keeps the single-instance lock alive
         if win32api.GetLastError()==winerror.ERROR_ALREADY_EXISTS:
             handle=win32gui.FindWindow(None,'Jarvis Orb')
             if handle:

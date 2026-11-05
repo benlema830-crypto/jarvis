@@ -2,7 +2,6 @@
 import re
 import time
 
-import desktop  # establish physical-pixel DPI awareness first
 import psutil
 import win32api
 import win32con

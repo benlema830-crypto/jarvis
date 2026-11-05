@@ -20,7 +20,6 @@ Preferences: "away_work": {"progress_minutes": 20}; 0 turns off the in-between t
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading

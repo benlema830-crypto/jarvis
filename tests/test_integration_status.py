@@ -102,7 +102,7 @@ class IntegrationTests(unittest.TestCase):
                 oauth.assert_not_called()
                 self.assertEqual(call('POST', '/mcp/oauth', payload={'action': 'status', 'id': 'test'})[0], 200)
                 oauth.assert_called_once_with({'action': 'status', 'id': 'test'})
-            with patch('memory.snapshot',return_value={'facts':[]}) as memory_read, \
+            with patch('memory.snapshot',return_value={'facts':[]}), \
                  patch('memory.edit',return_value={'facts':[]}) as memory_edit, \
                  patch('digests.upsert',return_value={'id':'test'}) as schedule, \
                  patch('artifacts.create',return_value={'name':'test.xlsx'}) as artifact:

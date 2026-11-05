@@ -139,7 +139,6 @@ class BrainRoutingTest(unittest.TestCase):
         self.assertEqual(sum(m['content'].endswith('Mute') for m in brain.messages if m['role'] == 'user'), 1)
 
     def test_local_failure_after_a_tool_ran_does_not_repeat_it(self):
-        import jarvis
         brain = self.brain()
         def local_ask(model, system, history, definitions, run_tool, delta, cancel, keep_alive):
             run_tool(mock.Mock(name='media_control'))

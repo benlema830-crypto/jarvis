@@ -1,6 +1,5 @@
 """Pacing, actual playback timing, workload cleanup and audio recovery without hardware."""
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace

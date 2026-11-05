@@ -66,7 +66,10 @@ def _play_pcm(data: bytes, rate: int = 24000):
 
 
 def set_env(key: str, value: str):
-    lines = open(ENV_PATH, encoding="utf-8").read().splitlines() if os.path.exists(ENV_PATH) else []
+    lines = []
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH, encoding="utf-8") as f:
+            lines = f.read().splitlines()
     for i, line in enumerate(lines):
         if re.match(rf"\s*#?\s*{key}\s*=", line):
             lines[i] = f"{key}={value}"

@@ -1040,11 +1040,13 @@ def start_bridges(ears):
     if ears:
         bridge.transcribe = ears.transcribe
     else:
-        def transcribe(audio, _model=[]):
-            if not _model:
+        loaded = []
+
+        def transcribe(audio):
+            if not loaded:
                 from ears import Transcriber
-                _model.append(Transcriber())
-            return _model[0](audio)
+                loaded.append(Transcriber())
+            return loaded[0](audio)
         bridge.transcribe = transcribe
 
     def on_message(chat, text, was_voice):

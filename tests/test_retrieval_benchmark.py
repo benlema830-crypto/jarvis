@@ -2,7 +2,6 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest import mock
 
 import retrieval_fixture
 

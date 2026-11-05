@@ -96,7 +96,7 @@ def api(path, params=None):
 
 def _clean(text):
     """Drop the invisible padding characters marketing mail stuffs into previews."""
-    return re.sub(r"[­͏​-‏⁠-⁤﻿]", "", text)
+    return re.sub(r"[\u00ad\u034f\u200b-\u200f\u2060-\u2064\ufeff]", "", text)
 
 
 def _headers(message):

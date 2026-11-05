@@ -1,5 +1,4 @@
 """Manual integration check using installed Edge; no real services or credentials."""
-import json
 from pathlib import Path
 import subprocess
 import sys

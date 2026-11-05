@@ -6,7 +6,6 @@ Optional: --screenshot out.png saves a 1660x896 capture of the loaded page.
 """
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -556,7 +555,7 @@ def main():
         with tempfile.TemporaryFile() as log:
             proc=subprocess.Popen(args+[url],stdout=log,stderr=log)
             try:
-                completed=server.done.wait(90)
+                server.done.wait(90)
             finally:
                 try:
                     parent=psutil.Process(proc.pid); children=parent.children(recursive=True)

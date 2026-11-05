@@ -1,6 +1,5 @@
 import collections
 import threading
-import queue
 import unittest
 from unittest import mock
 

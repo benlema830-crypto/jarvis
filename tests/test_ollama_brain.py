@@ -1,8 +1,6 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
-import tempfile
 import threading
 import unittest
 from unittest.mock import ANY, Mock, patch

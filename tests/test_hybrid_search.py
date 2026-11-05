@@ -1,7 +1,6 @@
 """Phase B1: hybrid keyword + semantic vault search with an offline fallback."""
 import json
 from pathlib import Path
-import sqlite3
 import tempfile
 import unittest
 from unittest import mock
