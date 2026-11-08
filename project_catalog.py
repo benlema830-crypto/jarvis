@@ -4,9 +4,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 GIANT = "Don't Wake the Giant"
+KNIGHT = "KnightShow"  # Sir Wendell AI comedy series (content workflow agents)
 PROJECTS = {'Jarvis': ROOT, 'Rocket Frontier': Path.home() / 'Documents' / 'Rocket Frontier',
-            GIANT: Path.home() / 'Documents' / GIANT}
-DEFAULT_SESSIONS = {'Jarvis': 'Jarvis Builder', 'Rocket Frontier': 'Frontier', GIANT: 'Giant Builder'}
+            GIANT: Path.home() / 'Documents' / GIANT, KNIGHT: Path.home() / 'Documents' / KNIGHT}
+DEFAULT_SESSIONS = {'Jarvis': 'Jarvis Builder', 'Rocket Frontier': 'Frontier', GIANT: 'Giant Builder', KNIGHT: 'KnightShow'}
 MIGRATIONS = ROOT / 'data' / 'session-project-migrations.json'
 
 
@@ -17,7 +18,9 @@ def normalize(name):
 def canonical(name):
     key = normalize(name)
     aliases = {'frontier': 'Rocket Frontier', 'jarvis brain': 'Jarvis', 'jarvis blue': 'Jarvis',
-               'dont wake the giant': GIANT}
+               'dont wake the giant': GIANT, 'knight show': KNIGHT, 'knight series': KNIGHT,
+               'knight comedy series': KNIGHT, 'sir wendell': KNIGHT, 'content workflow': KNIGHT,
+               'content workflow agents': KNIGHT}
     for project in PROJECTS:
         if normalize(project) == key:
             return project

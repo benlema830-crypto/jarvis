@@ -863,7 +863,8 @@ def open_agent_session(name: str = "", project: str = "Rocket Frontier", provide
 
     Args:
         name: Short name; blank defaults to a name based on the project and provider.
-        project: Configured project name: Rocket Frontier, Jarvis, or Don't Wake the Giant.
+        project: Configured project name: Rocket Frontier, Jarvis, Don't Wake the Giant, or KnightShow
+            (the Sir Wendell AI comedy series / content workflow agents).
         provider: codex (default) or claude. Keep each provider's session history separate.
     """
     return SESSIONS.open(name, project, provider)
@@ -1448,7 +1449,7 @@ def project_handoff(project: str, action: str = 'status', summary: str = '', unr
     project notes and agent reports are claims, not freshly verified tests.
 
     Args:
-        project: Jarvis, Rocket Frontier, or Don't Wake the Giant.
+        project: Jarvis, Rocket Frontier, Don't Wake the Giant, or KnightShow.
         action: status to recall, or handoff to save.
         summary: Progress reported this session; do not invent completed work.
         unresolved: Known problems or unknowns.
