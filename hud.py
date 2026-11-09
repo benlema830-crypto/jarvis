@@ -33,6 +33,7 @@ import psutil
 import context
 import preferences
 import voice_health
+import response_routing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "hud", "index.html")
@@ -46,7 +47,7 @@ TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
 LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume", "visual-model"}  # not replayed to pages that connect later
 
 # Read by jarvis.py: typed commands (str) and background events (dict)
-commands: queue.Queue = queue.Queue()
+commands: queue.Queue = response_routing.CommandQueue()
 on_stop = None  # set by jarvis.py
 on_voice = None  # set by jarvis.py: switches the speaking voice
 info: dict = {}  # shown on the HUD: voice engine, speech recognition device, model

@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import threading
+import response_routing
 import time
 
 import anthropic
@@ -170,7 +171,7 @@ class Agent:
         self._configure_screen()
         self._cancel.clear()
         self.task, self.steps, self.log = task, 0, []
-        self._thread = threading.Thread(target=self._run, args=(task,), daemon=True)
+        self._thread = threading.Thread(target=response_routing.inherit(self._run), args=(task,), daemon=True)
         self._thread.start()
         hud.emit("agent", running=True, task=task, kind="screen")
         return "Started."

@@ -61,7 +61,7 @@ You can switch modes by voice too: "Jarvis, turn on your eyes", "turn on hand co
 - **Tools you connect:** any Streamable HTTP MCP server (Zapier for Gmail/Google Docs/Sheets/Calendar/Notion, GitHub, Home Assistant…). Every external call asks for your spoken OK.
 - **OAuth sign-in:** compatible public-client MCP servers can use browser approval, encrypted tokens, automatic refresh, and revocation on removal. Pre-registered client IDs and dynamic registration are supported; service-specific acceptance is still required.
 - **Optional local brain:** Ollama models with local weights and tool support can be selected explicitly. Codex remains the daily default; there is no automatic fallback or paid-provider activation. See the [setup guide](docs/SETUP-TOMORROW.md#6-optional-offline-conversation-model).
-- **Phone:** Telegram text or voice notes; he replies by text, and with a voice note when you sent one. "Send me that on Telegram" works too.
+- **Phone:** Telegram text or voice notes; replies are text only, including background task reports, questions and tool follow-ups. Telegram work keeps its originating chat even after another PC turn, without PC speech or chimes. "Send me that on Telegram" works too. Restart Jarvis after updating to load routing changes; already-running workers keep their old behavior.
 - **Switch brains** by voice ("switch your brain to …") or the model pill; changes are validated first.
 - **Memory:** facts you tell him (`remember`/`forget`) plus the last 20 exchanges, carried across restarts.
 

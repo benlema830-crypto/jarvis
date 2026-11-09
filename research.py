@@ -10,6 +10,7 @@ import datetime
 import json
 import re
 import threading
+import response_routing
 import time
 import uuid
 from pathlib import Path
@@ -198,7 +199,7 @@ def start(topic: str, why: str = "", on_done=None, background=True, searches=MAX
         data["runs"].append(run)
         _save(data)
     if background:
-        threading.Thread(target=_work, args=(run, on_done, searches, seconds, cancel), daemon=True,
+        threading.Thread(target=response_routing.inherit(_work), args=(run, on_done, searches, seconds, cancel), daemon=True,
                          name="research-" + run["id"]).start()
     else:
         _work(run, on_done, searches, seconds, cancel)

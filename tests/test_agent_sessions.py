@@ -35,6 +35,20 @@ class FakeConnection:
 
 
 class SessionTest(unittest.TestCase):
+    def test_telegram_session_completion_keeps_origin_after_request_ends(self):
+        import response_routing
+        queue = response_routing.CommandQueue()
+        self.manager.open('Frontier')
+        self.manager.on_done = lambda r: queue.put({'label': 'Finished', 'say': r['report'], 'report': True})
+        with mock.patch.object(sessions, 'Connection', FakeConnection):
+            with response_routing.telegram_turn(101):
+                self.manager.start('Research the next task', 'Frontier', 'research')
+            self.manager.thread.join(timeout=5)
+        self.assertFalse(self.manager.thread.is_alive())
+        report = queue.get_nowait()
+        self.assertEqual(report['telegram'], 101)
+        self.assertIn('recommend', report['say'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

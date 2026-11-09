@@ -22,6 +22,7 @@ import re
 import socket
 import sys
 import threading
+import response_routing
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -754,20 +755,36 @@ def respond(brain: Brain, voice: Voice, text: str, speak=None):
 
 
 def respond_telegram(brain: Brain, voice: Voice, item: dict):
-    """A message from the owner's phone: reply there (as a voice note too, if they sent one)."""
+    """Reply as Telegram text; tools and their workers inherit this destination."""
+    with response_routing.telegram_turn(item["telegram"]):
+        said = []
+        respond(brain, voice, item["prompt"], said.append)
+        send_telegram_reply(item["telegram"], " ".join(said).strip() or "Done.")
+
+
+def send_telegram_reply(chat, reply):
+    """Never fall back to PC speech if Telegram delivery fails."""
     import telegram_bridge
-    said = []
-    respond(brain, voice, item["prompt"], said.append)
-    reply = " ".join(said).strip() or "Done."
-    hud.emit("jarvis", text="(to Telegram) " + reply)
     try:
-        telegram_bridge.BRIDGE.send(item["telegram"], reply)
-        if item.get("voice_reply"):
-            samples = voice.synthesize(reply)
-            if samples.size:
-                telegram_bridge.BRIDGE.send_voice(item["telegram"], samples, RATE)
+        telegram_bridge.BRIDGE.send(chat, reply)
     except Exception as e:
         hud.emit("error", text=f"Telegram reply failed: {type(e).__name__}")
+    else:
+        hud.emit("jarvis", text="(to Telegram) " + reply)
+
+
+def handle_telegram_item(brain, voice, item):
+    """Handle both incoming turns and deferred reports before audio dispatch."""
+    if "telegram" not in item:
+        return False
+    with response_routing.telegram_turn(item["telegram"]):
+        if "say" in item:
+            if "note" in item:
+                brain.note(item["note"], item["say"])
+            send_telegram_reply(item["telegram"], item["say"])
+        else:
+            respond_telegram(brain, voice, item)
+    return True
 
 
 PHONE_PERSONA, PHONE_VOICE = "FRIDAY", "kokoro:bf_emma"
@@ -1313,6 +1330,10 @@ def main():
             turns.count += 1
             if isinstance(item, dict):  # a reminder, finished task, or the agent asking permission
                 hud.emit("event", text=item["label"])
+                if handle_telegram_item(brain, voice, item):
+                    hud.emit("state", state="standby")
+                    turns.idle.set()
+                    continue
                 if item.get("chime"):
                     voice.chime()
                 if "say" in item:  # spoken as-is (an agent question or report)
@@ -1325,12 +1346,9 @@ def main():
                     hud.emit("state", state="listening")
                     turns.idle.set()
                     continue
-                if "telegram" in item or "phone" in item:  # the owner's phone: answer there, not out loud
+                if "phone" in item:  # the owner's phone: answer there, not out loud
                     hud.emit("state", state="thinking")
-                    if "phone" in item:
-                        respond_phone(brain, voice, item)
-                    else:
-                        respond_telegram(brain, voice, item)
+                    respond_phone(brain, voice, item)
                     hud.emit("state", state="standby")
                     turns.idle.set()
                     continue

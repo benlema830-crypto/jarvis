@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import response_routing
 import time
 
 import approvals
@@ -121,7 +122,7 @@ class TerminalWorker:
         self._cancel.clear()
         self.task, self.log = task, []
         resume = self.session_id if continue_previous else None
-        self._thread = threading.Thread(target=self._run, args=(task, resume), daemon=True)
+        self._thread = threading.Thread(target=response_routing.inherit(self._run), args=(task, resume), daemon=True)
         self._thread.start()
         hud.emit("agent", running=True, task=task, kind="terminal")
         return "Started."

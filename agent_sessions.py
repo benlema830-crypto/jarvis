@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import threading
+import response_routing
 import time
 from pathlib import Path
 
@@ -795,7 +796,7 @@ class SessionManager:
             self.milestone(entry, 'Resuming saved task' if resume else 'Connecting to worker')
             self._save()
             self.publish()
-            self.thread = worker.thread = threading.Thread(target=worker._run, args=(task, mode), daemon=True)
+            self.thread = worker.thread = threading.Thread(target=response_routing.inherit(worker._run), args=(task, mode), daemon=True)
             worker.thread.start()
         return f"{entry['name']} started. Jarvis will tell you when it finishes; progress is visible in the session panel."
 

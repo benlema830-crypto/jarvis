@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import threading
+import response_routing
 import time
 import urllib.parse
 import webbrowser
@@ -1037,7 +1038,7 @@ def _after_approval(question, work, label, spoken=None, declined='Not approved. 
         finally:
             _approval_busy.release()
         hud.commands.put({'label': label, **item})
-    threading.Thread(target=wait, daemon=True, name='approval-' + label).start()
+    threading.Thread(target=response_routing.inherit(wait), daemon=True, name='approval-' + label).start()
     return ("Waiting for the user's spoken confirmation; nothing has changed yet. "
             "The outcome will be reported separately; don't claim it happened.")
 
@@ -1230,7 +1231,7 @@ def call_mcp_tool(connection_id: str, tool_name: str, arguments_json: str = "{}"
         finally:
             _mcp_busy.release()
 
-    threading.Thread(target=work, daemon=True).start()
+    threading.Thread(target=response_routing.inherit(work), daemon=True).start()
     return "MCP request queued for user confirmation. No tool has executed yet; its result will arrive separately."
 
 
