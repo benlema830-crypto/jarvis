@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis Console (mockup A)</title>
+<style>
+  :root {
+    --bg: #0d1014; --panel: #141920; --line: #232b36; --text: #e6ebf2; --dim: #8b97a8;
+    --accent: #5cc8ff; --ok: #57d28b; --warn: #f2b84b; --bad: #ff6b6b; --chip: #1b222c;
+    --mono: "Cascadia Code", Consolas, monospace; --sans: "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 99px; background: var(--chip); color: var(--dim); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  header b { letter-spacing: .12em; font-size: 12px; }
+  header .right { margin-left: auto; display: flex; gap: 8px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+  .stream { overflow: auto; padding: 20px 28px; }
+  .turn { max-width: 820px; margin: 0 auto 22px; }
+  .you { color: var(--dim); font-family: var(--mono); font-size: 13px; }
+  .you::before { content: "› "; color: var(--accent); }
+  .say { margin-top: 6px; font-size: 15px; }
+  .receipts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .r { font: 12px var(--mono); padding: 2px 8px; border-radius: 4px; background: var(--chip); border: 1px solid var(--line); }
+  .r.ok { color: var(--ok); } .r.warn { color: var(--warn); border-color: #5a4720; } .r.bad { color: var(--bad); }
+  .card { margin-top: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .card h4 { margin: 0; padding: 8px 12px; font: 600 12px var(--sans); color: var(--dim); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  pre { margin: 0; padding: 10px 12px; font: 12.5px/1.55 var(--mono); overflow: auto; }
+  .add { color: var(--ok); } .del { color: var(--bad); } .ctx { color: var(--dim); }
+  .actions { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+  button { font: 12px var(--sans); color: var(--text); background: var(--chip); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  button.primary { background: #12384d; border-color: #1f5b7a; color: var(--accent); }
+  aside { border-left: 1px solid var(--line); overflow: auto; padding: 14px; background: #0f1318; }
+  aside h3 { margin: 14px 0 8px; font: 600 11px var(--sans); letter-spacing: .1em; color: var(--dim); text-transform: uppercase; }
+  aside h3:first-child { margin-top: 0; }
+  .job { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+  .job .t { display: flex; justify-content: space-between; font-weight: 600; font-size: 13px; }
+  .job .s { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .bar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+  .tile b { display: block; font-size: 13px; } .tile.on b { color: var(--ok); }
+  footer { border-top: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 10px; align-items: center; }
+  .prompt { flex: 1; display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-family: var(--mono); color: var(--dim); }
+  .prompt span { color: var(--accent); }
+  kbd { font: 11px var(--mono); background: var(--chip); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; color: var(--dim); }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { display: none; } .stream { padding: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span><b>JARVIS</b>
+  <span class="pill">listening</span>
+  <span class="pill">first word 0.9 s</span>
+  <div class="right"><span class="pill">2 working</span><span class="pill">1 needs you</span></div>
+</header>
+<main>
+  <section class="stream">
+    <div class="turn">
+      <div class="you">turn the bedroom fan off and tell me if the build passed</div>
+      <div class="say">The fan is off. The build did not pass: two tests fail in the save system.</div>
+      <div class="receipts">
+        <span class="r ok">✓ fan · read back: off</span>
+        <span class="r bad">✗ tests · 39 of 41 pass · re-run by Jarvis</span>
+      </div>
+    </div>
+    <div class="turn">
+      <div class="you">fix the two failing tests</div>
+      <div class="say">Both failed for the same reason: the save path was built before the folder existed. One change fixes them. Tests now pass, 41 of 41.</div>
+      <div class="card">
+        <h4><span>save_system.py</span><span>+3 −1</span></h4>
+<pre><span class="ctx">  def save(self, slot):</span>
+<span class="del">-     path = self.root / f"{slot}.json"</span>
+<span class="add">+     self.root.mkdir(parents=True, exist_ok=True)</span>
+<span class="add">+     path = self.root / f"{slot}.json"</span>
+<span class="add">+     log.debug("saving %s", path)</span></pre>
+        <div class="actions"><button class="primary">Keep</button><button>Undo</button><button>Open file</button></div>
+      </div>
+      <div class="receipts"><span class="r ok">✓ edit applied</span><span class="r ok">✓ tests · 41 of 41 · re-run by Jarvis</span></div>
+    </div>
+    <div class="turn">
+      <div class="you">is the TV on?</div>
+      <div class="say">I can't tell. The TV isn't answering, so I don't know its state.</div>
+      <div class="receipts"><span class="r warn">? tv · no reply in 3 s</span></div>
+    </div>
+  </section>
+  <aside>
+    <h3>Working</h3>
+    <div class="job"><div class="t"><span>Giant Builder</span><span>12 min</span></div><div class="s">Adding the shop screen · step 4 of 7</div><div class="bar"><i style="width:57%"></i></div></div>
+    <div class="job"><div class="t"><span>Research</span><span>3 min</span></div><div class="s">Reading 6 sources</div><div class="bar"><i style="width:30%"></i></div></div>
+    <h3>Needs you</h3>
+    <div class="job"><div class="t"><span>Send the invoice email?</span></div><div class="s">Jarvis drafted it. Sending always asks.</div><div class="actions" style="padding:8px 0 0;border:0"><button class="primary">Send</button><button>Read it</button><button>No</button></div></div>
+    <h3>Home</h3>
+    <div class="tiles">
+      <div class="tile"><b>Off</b>Bedroom fan</div><div class="tile on"><b>On · 100%</b>Ceiling light</div>
+      <div class="tile on"><b>On</b>Air purifier</div><div class="tile"><b>Unknown</b>TV</div>
+    </div>
+    <h3>Today</h3>
+    <div class="tile">No meetings. One reminder at 6:00 pm.</div>
+  </aside>
+</main>
+<footer>
+  <div class="prompt"><span>›</span> Type, or just talk</div>
+  <kbd>Ctrl Alt J</kbd><kbd>Esc stop</kbd>
+</footer>
+</body>
+</html>
