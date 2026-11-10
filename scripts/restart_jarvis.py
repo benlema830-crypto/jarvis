@@ -103,7 +103,12 @@ def stop_jarvis():
         for child in children:
             if child.pid not in keep:
                 targets[child.pid] = child
-    targets.pop(os.getpid(), None)
+    # Never stop this restarter or what started it. The venv's pythonw.exe is a launcher stub that runs
+    # the real interpreter as its child, so when Jarvis starts us the tree is jarvis.py -> pythonw
+    # launcher -> us. The launcher looks like a Jarvis worker, and ending it ends us too: Jarvis stopped
+    # but was never started again (2026-11-09).
+    for pid in _own_lineage():
+        targets.pop(pid, None)
     if not targets:
         log("No Jarvis processes were running.")
         return
@@ -129,6 +134,23 @@ def stop_jarvis():
 # Programs Jarvis runs for himself: the Codex / Claude Code workers, their shells and consoles.
 WORKERS = {"python.exe", "pythonw.exe", "claude.exe", "codex.exe", "node.exe", "conhost.exe", "cmd.exe",
            "powershell.exe", "pwsh.exe", "bash.exe", "sh.exe", "git.exe", "uv.exe", "rg.exe"}
+
+
+def _own_lineage():
+    """This process and its ancestors (e.g. the venv launcher stub), except Jarvis's own scripts, which
+    still have to stop when Jarvis asked for the restart itself."""
+    pids = {os.getpid()}
+    try:
+        parents = psutil.Process().parents()
+    except psutil.Error:
+        return pids
+    for parent in parents:
+        try:
+            if not is_jarvis_process(parent.cmdline()):
+                pids.add(parent.pid)
+        except (psutil.Error, OSError):
+            pids.add(parent.pid)
+    return pids
 
 
 def _is_worker(proc):

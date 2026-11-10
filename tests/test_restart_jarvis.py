@@ -54,6 +54,37 @@ class Stop(unittest.TestCase):
         roblox.terminate.assert_not_called()
         crash.terminate.assert_not_called()
 
+    def test_never_stops_its_own_launcher(self):
+        # jarvis.py -> venv pythonw.exe launcher stub -> this restarter (2026-11-09: it ended its own launcher)
+        def proc(pid, name, children=()):
+            p = mock.Mock(pid=pid)
+            p.name.return_value = name
+            p.children.return_value = list(children)
+            return p
+        me = proc(21, 'pythonw.exe')
+        launcher = proc(20, 'pythonw.exe', [me])
+        jarvis = proc(10, 'python.exe', [launcher, me])
+        with mock.patch.object(restart_jarvis, 'jarvis_processes', return_value=[jarvis]), \
+             mock.patch.object(restart_jarvis, '_own_lineage', return_value={21, 20}), \
+             mock.patch.object(restart_jarvis, '_name', return_value='x'), \
+             mock.patch.object(restart_jarvis.psutil, 'wait_procs', return_value=([], [])), \
+             mock.patch.object(restart_jarvis, 'port_open', return_value=False), \
+             mock.patch.object(restart_jarvis, 'log'):
+            restart_jarvis.stop_jarvis()
+        jarvis.terminate.assert_called_once()
+        launcher.terminate.assert_not_called()
+        me.terminate.assert_not_called()
+
+    def test_own_lineage_spares_launcher_but_not_jarvis(self):
+        launcher = mock.Mock(pid=20)
+        launcher.cmdline.return_value = [r"C:\x\.venv\Scripts\pythonw.exe", str(ROOT / "scripts" / "restart_jarvis.py")]
+        jarvis = mock.Mock(pid=10)
+        jarvis.cmdline.return_value = [r"C:\x\python.exe", "-u", str(ROOT / "jarvis.py")]
+        with mock.patch.object(restart_jarvis.psutil, 'Process') as Process, \
+             mock.patch.object(restart_jarvis.os, 'getpid', return_value=21):
+            Process.return_value.parents.return_value = [launcher, jarvis]
+            self.assertEqual(restart_jarvis._own_lineage(), {21, 20})
+
 
 class Main(unittest.TestCase):
     def test_refuses_to_start_a_second_copy(self):
