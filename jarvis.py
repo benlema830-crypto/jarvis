@@ -40,6 +40,11 @@ from dotenv import load_dotenv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(HERE, ".env"))
+# Paid keys stay in .env but are not loaded: Jarvis runs on the owner's subscriptions and local
+# models only, so no part of him (or anything he starts) can spend API credits by accident.
+PAID_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
+for _key in PAID_KEYS:
+    os.environ[_key] = ""  # blank, not removed, so a later load_dotenv can't put it back
 
 import activity  # noqa: E402
 import approvals  # noqa: E402

@@ -1693,6 +1693,8 @@ def run_tool(block) -> dict:
     """Run one tool_use block and return its tool_result."""
     print(f"  (using {block.name})", flush=True)
     hud.emit("tool", name=block.name, input=block.input)
+    import runtime_metrics
+    began = time.monotonic()
     try:
         import preferences
         if preferences.read().get('subscription_only'):
@@ -1706,6 +1708,7 @@ def run_tool(block) -> dict:
         result = tool.call(block.input)  # validates the input against the tool's schema
         content = result if isinstance(result, list) else str(result)
         truth_guard.note_tool(block.name, ok=True)
+        runtime_metrics.note_tool(block.name, True, time.monotonic() - began)
         from knowledge_events import result_event
         source_event = result_event(block.name, content)
         if source_event is not None:
@@ -1713,6 +1716,8 @@ def run_tool(block) -> dict:
         return {"type": "tool_result", "tool_use_id": block.id, "content": content}
     except Exception as e:
         truth_guard.note_tool(block.name, ok=False)
+        runtime_metrics.note_tool(block.name, False, time.monotonic() - began)
+        print(f"  ({block.name} failed: {type(e).__name__})", flush=True)
         if block.name in ('search_knowledge', 'read_knowledge_note'):
             hud.emit('knowledge', sources=[], status='unavailable')
         return {"type": "tool_result", "tool_use_id": block.id, "content": f"Error: {e}", "is_error": True}

@@ -1,7 +1,10 @@
 """Bounded timing and GPU workload telemetry. No prompts, speech or audio are stored."""
 from collections import deque
 from contextlib import contextmanager
+import json
 import math
+import sys
+from pathlib import Path
 import threading
 import time
 
@@ -12,6 +15,10 @@ _turn = None
 _sequence = 0
 _emit = None
 STAGES = {'recognition', 'synthesis', 'accepted', 'first_text', 'first_audio', 'complete'}
+# One line per finished turn: when each stage happened (ms after the end of speech or the keypress)
+# and which tools ran, with whether each worked. No words are stored.
+LOG = DEFAULT_LOG = Path(__file__).resolve().parent / 'data' / 'turn_stages.jsonl'
+KEEP = 5000
 
 
 def bind(emit):
@@ -27,7 +34,7 @@ def begin_turn(ended_at=None, source='keyboard'):
     with _lock:
         _sequence += 1
         _turn = {'id': _sequence, 'source': source if source in {'voice', 'keyboard'} else 'keyboard',
-                 'started': ended_at, 'stages': {}}
+                 'started': ended_at, 'stages': {}, 'tools': []}
     mark('accepted')
     return _sequence
 
@@ -41,6 +48,42 @@ def mark(stage):
         elapsed = max(0, time.monotonic()-_turn['started'])
         _turn['stages'][stage] = round(elapsed*1000, 1)
         _samples.setdefault(stage, deque(maxlen=60)).append(elapsed*1000)
+        row = _row() if stage == 'complete' else None
+    if row:
+        _save(row)
+
+
+def note_tool(name, ok, seconds):
+    """A tool finished during the current turn (called from tools.run_tool)."""
+    with _lock:
+        if _turn is not None and 'complete' not in _turn['stages'] and len(_turn['tools']) < 200:
+            _turn['tools'].append({'name': str(name)[:60], 'ok': bool(ok), 'ms': round(seconds*1000),
+                                   'at': round(max(0, time.monotonic()-_turn['started'])*1000)})
+
+
+def _row():
+    return {'t': round(time.time(), 2), 'source': _turn['source'], 'stages': dict(_turn['stages']),
+            'tools': list(_turn['tools'])}
+
+
+def _under_test():
+    spec = getattr(sys.modules.get('__main__'), '__spec__', None)
+    return bool(spec and spec.name.startswith('unittest'))
+
+
+def _save(row):
+    if LOG == DEFAULT_LOG and _under_test():
+        return
+    try:
+        with _lock:
+            LOG.parent.mkdir(parents=True, exist_ok=True)
+            with LOG.open('a', encoding='utf-8') as handle:
+                handle.write(json.dumps(row) + '\n')
+            if LOG.stat().st_size > KEEP * 400:
+                lines = LOG.read_text(encoding='utf-8').splitlines()[-KEEP:]
+                LOG.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    except OSError:
+        pass
 
 
 @contextmanager

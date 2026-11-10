@@ -139,7 +139,7 @@ class Blocked(Exception):
 
 class Agent:
     def __init__(self):
-        self.client = anthropic.Anthropic()
+        self.client = None  # made on first use: Jarvis no longer loads an API key at start
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
         self.task = ""
@@ -215,6 +215,8 @@ class Agent:
                     break
                 self.steps += 1
                 import privacy
+                if self.client is None:
+                    self.client = anthropic.Anthropic()
                 response = self.client.beta.messages.create(
                     model=MODEL, max_tokens=16000, system=privacy.redact(system), tools=TOOLS, messages=privacy.payload(messages),
                     betas=BETAS, context_management=CONTEXT_MANAGEMENT, fallbacks="default",
