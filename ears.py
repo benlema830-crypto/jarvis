@@ -36,6 +36,10 @@ VAD_FRAME = 320          # 20 ms frames for webrtcvad
 END_SILENCE = float(os.getenv("JARVIS_END_SILENCE", "1.2"))
 BARGE_END_SILENCE = float(os.getenv("JARVIS_BARGE_END_SILENCE", "0.48"))
 MAX_PHRASE = 15.0
+# After this much silence a small model judges whether the sentence sounds finished (turn_detector.py).
+# If it does, the phrase ends now instead of waiting out the full pause. JARVIS_TURN_DETECTOR=off disables it.
+TURN_CHECKS = (0.32, 0.64)   # seconds of silence at which to ask
+TURN_THRESHOLD = float(os.getenv("JARVIS_TURN_THRESHOLD", "0.6"))
 MIN_SPEECH = 0.3         # shorter bursts are noise, not speech
 PRE_ROLL = 4             # blocks kept from before speech starts, so the first word isn't clipped
 WAKE_MODEL = "hey_jarvis_v0.1"
@@ -148,6 +152,10 @@ class Ears:
         download_models(model_names=[WAKE_MODEL])  # no-op once downloaded
         self.wake = Model(wakeword_models=[WAKE_MODEL], inference_framework="onnx")
         self.vad = webrtcvad.Vad(2)
+        self.turns = None
+        if os.getenv("JARVIS_TURN_DETECTOR", "on").lower() != "off":
+            import turn_detector
+            self.turns = turn_detector.load()
         self.transcribe = Transcriber()
         self.accepting = accepting
         self.on_wake = None       # called from the audio thread when "hey Jarvis" is heard
@@ -274,7 +282,12 @@ class Ears:
             # playback retains a short endpoint so "stop" stays responsive.
             # Once the wake detector cuts playback, allow a full new request.
             end_silence = BARGE_END_SILENCE if phrase_busy and not woke else getattr(self, 'pause_seconds', END_SILENCE)
-            if silence * BLOCK_SECONDS >= end_silence or len(phrase) * BLOCK_SECONDS >= MAX_PHRASE:
+            finished = False
+            if (getattr(self, 'turns', None) is not None and not speech and end_silence > TURN_CHECKS[-1]
+                    and voiced * BLOCK_SECONDS >= MIN_SPEECH
+                    and any(silence == round(check / BLOCK_SECONDS) for check in TURN_CHECKS)):
+                finished = self._sounds_finished(phrase, silence)
+            if finished or silence * BLOCK_SECONDS >= end_silence or len(phrase) * BLOCK_SECONDS >= MAX_PHRASE:
                 if voiced * BLOCK_SECONDS >= MIN_SPEECH:
                     item = (np.concatenate(phrase), woke, wake_max, time.monotonic()-silence*BLOCK_SECONDS)
                     # Speech that overlapped Jarvis's reply must never become a fresh
@@ -288,6 +301,18 @@ class Ears:
                             pass
                     target.put_nowait(item)
                 phrase, woke, wake_max = [], False, 0.0
+
+    def _sounds_finished(self, phrase, silence) -> bool:
+        """Ask the turn model whether the speaker is done. Any failure means "keep waiting"."""
+        try:
+            score = self.turns.probability(np.concatenate(phrase))
+        except Exception as exc:
+            self._log(f"turn check failed ({type(exc).__name__}); using the pause timer from now on")
+            self.turns = None
+            return False
+        done = score >= TURN_THRESHOLD
+        self._log(f"turn check {score:.2f} after {silence * BLOCK_SECONDS:.2f}s of silence: {'finished' if done else 'waiting'}")
+        return done
 
     def _log(self, line: str):
         """Diagnostics in data/ears.log: what was heard, wake scores, voice-lock matches."""

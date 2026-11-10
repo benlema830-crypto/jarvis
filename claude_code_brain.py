@@ -207,7 +207,10 @@ class ClaudeCodeBrain:
         import model_provider
         system = privacy.redact(system)
         self.run_tool, self.cancel, self.tool_count = run_tool, cancel, 0
-        fresh = self.client is None or self.model != model or self.system != system
+        # A changed system prompt alone doesn't restart the session: reconnecting costs about two seconds and
+        # replays the conversation as one block. Jarvis closes this brain himself when the style or privacy
+        # settings change; a newly saved fact reaches the running session through the working-memory brief.
+        fresh = self.client is None or self.model != model
         try:
             if fresh:
                 self._sync(self._disconnect())

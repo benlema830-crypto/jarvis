@@ -307,7 +307,16 @@ The income goal comes after this. Phase 6 is the base it needs: work that runs u
 
 ---
 
-## Decisions I need from you
+## Approved 2026-11-10, with changes
+
+- Plan approved. Paid API paths off from Phase 0.
+- **Console goes inside the existing Jarvis page,** not in place of it. One switch moves between the Console and the 3D model view.
+- **Keep Holo, the graph and the 3D model.** Eyes, Watch, Focus, digests, routines and documents are still deleted.
+- The existing page gets a tidy-up at my discretion: remove buttons that do nothing useful, group related ones.
+
+Where the sections above say the Brain page, graph, holo or orb are deleted, this overrides them.
+
+## Decisions I needed from you (answered above)
 
 1. **Approve the plan,** or tell me what to change.
 2. **Console or Ambient?** I recommend Console.

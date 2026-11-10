@@ -229,6 +229,15 @@ What you know about the user from earlier sessions:
 
 STATE_MARK = "[WORKING STATE - your own records, not the user's words]"
 
+# Said once, when a tool has run this long and Jarvis hasn't spoken yet this turn, so a slow lookup isn't
+# met with silence. Only for the owner's own spoken or typed requests. None of these claim a result.
+WAIT_BEFORE_WORDS = 1.2
+WAITING_WORDS = {"look_at_screen": "Taking a look.", "look_through_camera": "Taking a look.",
+                 "run_command": "Running that now.", "search_text": "Searching.", "find_files": "Searching.",
+                 "search_knowledge": "Checking your notes.", "read_knowledge_note": "Checking your notes.",
+                 "recall_memory": "Let me think back.", "call_mcp_tool": "Working on it.",
+                 "check_email": "Checking your inbox.", "read_email": "Checking your inbox."}
+
 
 class Refused(Exception):
     pass
@@ -405,6 +414,20 @@ class Brain:
                     first.append(time.monotonic() - began)
                 spoken.append(sentence)
                 speak(sentence)
+
+        def waiting(name):
+            """A tool is taking a while and nothing has been said yet: say so, once."""
+            with self._speech_lock:
+                if first or self.cancel.is_set() or gate.held:
+                    return
+                first.append(time.monotonic() - began)
+                sentence = WAITING_WORDS.get(name, "One moment.")
+                spoken.append(sentence)
+                try:
+                    speak(sentence)
+                except Exception:
+                    pass
+        self._tool_wait = waiting if not text.lstrip().startswith("[") else None
         try:
             self._run(deliver)
             if gate.held:  # he was about to report something nothing backs: do it, or say what's actually known
@@ -435,6 +458,19 @@ class Brain:
                 pass
             self._local = None
             self.selection.end()
+
+    def _tool(self, block):
+        """run_tool for the subscription brains, with a few spoken words if it keeps the owner waiting."""
+        notify = getattr(self, '_tool_wait', None)
+        if notify is None:
+            return run_tool(block)
+        timer = threading.Timer(WAIT_BEFORE_WORDS, notify, args=(block.name,))
+        timer.daemon = True
+        timer.start()
+        try:
+            return run_tool(block)
+        finally:
+            timer.cancel()
 
     def _run(self, speak):
         if self._local:
@@ -583,7 +619,7 @@ class Brain:
         voice_health.api_state('requesting')
         try:
             answer = self._codex_brain.ask(self.config['model'], self.system, self.messages,
-                TOOL_DEFS, run_tool, delta, self.cancel)
+                TOOL_DEFS, self._tool, delta, self.cancel)
         except InterruptedError:
             raise Interrupted()
         except Exception:
@@ -611,7 +647,7 @@ class Brain:
         voice_health.api_state('requesting')
         try:
             answer = self._claude_code_brain.ask(self.config['model'], self.system, self.messages,
-                TOOL_DEFS, run_tool, delta, self.cancel)
+                TOOL_DEFS, self._tool, delta, self.cancel)
         except InterruptedError:
             raise Interrupted()
         except claude_code_brain.LimitReached:
