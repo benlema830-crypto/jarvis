@@ -172,7 +172,10 @@
       const data = await J.api('/home', undefined, { timeout: 6000 });
       box.replaceChildren();
       if (data.error) { box.append(make('p', data.error, 'rail-note')); return; }
-      const shown = (data.devices || []).filter(d => ['light', 'switch', 'fan', 'media_player', 'climate'].includes(d.domain)).slice(0, 10);
+      // Whatever is on comes first, so a full house never hides the thing that's running.
+      const live = d => ['on', 'playing'].includes(d.state) ? 0 : 1;
+      const shown = (data.devices || []).filter(d => ['light', 'switch', 'fan', 'media_player', 'climate'].includes(d.domain))
+        .sort((a, b) => live(a) - live(b)).slice(0, 12);
       for (const d of shown) {
         const known = ['on', 'off', 'playing', 'paused', 'idle', 'standby', 'heat', 'cool'].includes(d.state);
         const tile = make('button', null, 'home-tile' + (['on', 'playing'].includes(d.state) ? ' on' : '') + (known ? '' : ' unknown')); tile.type = 'button';
