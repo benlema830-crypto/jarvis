@@ -17,6 +17,8 @@
   let dismissed = store.get('dismissedCards', []), showAll = false;
   const RECENT_HOURS = 18, SHOWN = 3;
   const short = (text, n) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  // Agents write their reports in Markdown; a card shows plain words, so the marks and link targets come out.
+  const plain = text => String(text ?? '').replace(/\[([^\]]*)\]\((?:<[^>]*>|[^)]*)\)/g, '$1').replace(/(\*\*|__|`+|^#+\s*|^\s*[-*]\s+)/gm, '').replace(/[*_]{1,2}(\S[^*_]*\S|\S)[*_]{1,2}/g, '$1');
   const hide = id => { dismissed = [...dismissed.filter(d => d !== id), id].slice(-200); store.set('dismissedCards', dismissed); render(); };
 
   function button(label, action, cls) {
@@ -67,7 +69,7 @@
       if (!['completed', 'failed'].includes(s.status) || !s.report || Date.now() / 1000 - when > RECENT_HOURS * 3600 || dismissed.includes(id)) continue;
       const good = s.status === 'completed';
       cards.push(card(id, 'agent ' + (good ? 'done' : 'failed'), good ? 'Agent finished' : "Agent didn't finish", String(s.name || 'Agent'),
-        'It reports: ' + short(s.report, 170), ['This is the agent’s own account, not something Jarvis checked.', 'note'], [
+        'It reports: ' + short(plain(s.report), 170), ['This is the agent’s own account, not something Jarvis checked.', 'note'], [
           button('Hear the report', () => J.send(`What did the ${s.name} agent report? Say what it claims and what you can confirm.`), 'primary'),
           button('Dismiss', () => hide(id), 'quiet'),
         ]));
@@ -75,8 +77,14 @@
     return cards;
   }
 
+  // Redraw only when what the cards say has changed. Redrawing on every check (every 3 seconds) replayed each
+  // card's entrance and made it twitch, and could swallow a click that landed mid-redraw.
+  let drawn = null;
   function render() {
     const cards = build(), shown = showAll ? cards : cards.slice(0, SHOWN);
+    const now = JSON.stringify([showAll, cards.length, shown.map(c => [c.dataset.card, c.className, c.textContent])]);
+    if (now === drawn) return;
+    drawn = now;
     stack.replaceChildren(...shown);
     if (cards.length > shown.length) stack.append(button(`${cards.length - shown.length} more`, () => { showAll = true; render(); }, 'link more'));
     else if (showAll && cards.length > SHOWN) stack.append(button('show fewer', () => { showAll = false; render(); }, 'link more'));

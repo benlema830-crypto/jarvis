@@ -457,7 +457,11 @@ addEventListener('load', async () => {
     $('cards').querySelector('.more')?.click();
     await wait(() => document.querySelector('#cards [data-card^="agent:Docs"]'), 'finished agent card');
     const agent = document.querySelector('#cards [data-card^="agent:Docs"]');
-    assert(agent.textContent.includes('Wrote the <b>guide</b>') && !agent.querySelector('b'), 'an agent report is shown as text, never as markup');
+    assert(agent.textContent.includes('wrote the <b>guide</b>') && !agent.querySelector('b'), 'an agent report is shown as text, never as markup');
+    assert(agent.textContent.includes('Recommendation: wrote') && agent.textContent.includes('the research note links') && !/\*\*|\]\(|research\.md/.test(agent.textContent), 'Markdown marks and link targets are stripped: ' + agent.textContent);
+    const sameNode = document.querySelector('#cards [data-card^="agent:Docs"]');
+    await J.cards.poll(); await J.cards.poll();
+    assert(document.querySelector('#cards [data-card^="agent:Docs"]') === sameNode, 'a card is not redrawn when nothing changed (no twitching every few seconds)');
     assert(agent.querySelector('.card-proof.note').textContent.includes('own account'), 'an agent report is labelled as its own claim');
     assert(!document.querySelector('#cards [data-card^="agent:Frontier"]'), 'a running agent is not a finished card');
     [...agent.querySelectorAll('button')].find(b => b.textContent === 'Dismiss').click();
@@ -499,6 +503,9 @@ HEALTH = {"startup": "ready", "text_mode": False, "microphone": "Mock mic", "mic
           "processing": True, "listener_alive": True, "output": "Mock speaker", "output_active": True, "listening_mode": "wake",
           "voice_lock": False, "ai_service": "responded", "recognition": {"reason": "none", "at": None}, "speech_pending": False,
           "output_error": False, "input_level": .1, "state": "standby"}
+
+
+FINISHED_AT = __import__("time").time() - 600  # fixed, as a real finished session's time is
 
 
 def serve(with_checks=True):
@@ -543,8 +550,8 @@ def serve(with_checks=True):
                             "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": [{"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Playtest the build", "timeline":[{"label":"Reading source","status":"completed","started_at":123}]},
-                    {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "Wrote the <b>guide</b> and checked the links.",
-                     "updated_at": __import__("time").time() - 600}]}, "/tasks": {"tasks": []},
+                    {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "**Recommendation:** wrote the <b>guide</b> and checked the [research note](</C:/notes/research.md>) links.",
+                     "updated_at": FINISHED_AT}]}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
                 "/workspace": {"folders": []},
                 '/memory': {'revision':'v1','facts':[{'id':'f1','fact':'Likes tea'}],'recent':[],
