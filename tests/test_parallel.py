@@ -165,7 +165,9 @@ class WiringTest(unittest.TestCase):
         self.assertIn("Recommend it", text)
         self.assertIn("uses more of the user's plan", text)
         self.assertIn("fable", tools.TOOLS_BY_NAME["send_agent_task"].to_dict()["input_schema"]["properties"]["model"]["description"])
-        self.assertIn("recommend parallel_agents", jarvis.SYSTEM_PROMPT)
+        self.assertIn("your answer must recommend running the parts as parallel agents", jarvis.SYSTEM_PROMPT)
+        self.assertIn("they should not have to know to ask", jarvis.SYSTEM_PROMPT)
+        self.assertIn("uses more of their plan", jarvis.SYSTEM_PROMPT)
         self.assertIsNone(jarvis.truth_guard.classify("parallel_status", True, "x"))
 
 

@@ -350,6 +350,8 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 
 | Agent models | Jarvis chooses the model for each agent job (`agent_models.py`): Claude Opus 5.5 by default, Sonnet or Haiku for smaller jobs, Codex, or the local qwen3.5 model, each with an effort level. Away jobs stay in the Codex sandbox. | Real jobs through the live Jarvis: he picked Haiku at low effort for a tiny job (6 s, file correct); the local model did one in 96 s (file correct). |
 
+| Parallel agents | `parallel.py`: Jarvis splits a job into 2 to 4 independent parts, runs an agent on each at once and gives one combined answer. He recommends it himself when a job has independent parts. Fable 5.2 added as an agent model for the biggest jobs. | Live: three research agents at once, combined answer in about 25 s. He recommended parallel for a three-part research job and declined it for a small job and for dependent steps. |
+
 Changed from the plan: finished-job reports **stay in the vault**. The graph you chose to keep is built from them, so moving them out would have emptied it.
 
 ### What the measurements corrected
