@@ -318,7 +318,12 @@ class Worker:
             worker.cancel()
         prompt = INSTRUCTIONS.replace("Codex project agent", "Claude Code project agent")
         prompt += f"\nSession: {entry['name']}. Mode: {mode}.\nUser request: {task}"
-        worker._run(prompt, entry.get("thread_id"))
+        try:
+            worker._run(prompt, entry.get("thread_id"))
+        finally:
+            if entry.get("model_choice") == "local":
+                import agent_models
+                agent_models.release_local()
         entry["thread_id"] = worker.session_id
         self._claude_outcome = result.get("outcome")
         return bool(result.get("finished", result.get("ok"))) and not self.cancelled.is_set(), result.get("report", "Claude returned no report.")

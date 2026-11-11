@@ -70,6 +70,16 @@ def local_ready() -> str:
     return ""
 
 
+def release_local() -> bool:
+    """Unload the local model from the graphics card once its job is done. It takes about 10 GB of the 16, which
+    the voice and speech recognition share; left loaded (Ollama keeps it five minutes) it squeezes them."""
+    try:
+        _local("/api/generate", {"model": LOCAL_AGENT, "keep_alive": 0}, timeout=15)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def resolve(model: str = "", effort: str = "") -> dict:
     """Turn what Jarvis asked for into what to run. Raises ValueError with the choices for anything unknown."""
     said = " ".join(str(model or "").lower().split())

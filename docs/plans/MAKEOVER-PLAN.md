@@ -348,6 +348,8 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 | Cards | A waiting question, held updates, finished away jobs and finished agents show as cards with their buttons, beside the 3D model and in the Console. | Browser check covers every card and button. |
 | `do_on_computer` | Back, on the Claude plan instead of the paid API: the same mouse, keyboard and safety code, with Claude Code as the brain. | Two real trials: opened Notepad and typed a line (13 s, 3 calls); clicked Notepad's File menu first try and read it back (8 s). |
 
+| Agent models | Jarvis chooses the model for each agent job (`agent_models.py`): Claude Opus 5.5 by default, Sonnet or Haiku for smaller jobs, Codex, or the local qwen3.5 model, each with an effort level. Away jobs stay in the Codex sandbox. | Real jobs through the live Jarvis: he picked Haiku at low effort for a tiny job (6 s, file correct); the local model did one in 96 s (file correct). |
+
 Changed from the plan: finished-job reports **stay in the vault**. The graph you chose to keep is built from them, so moving them out would have emptied it.
 
 ### What the measurements corrected

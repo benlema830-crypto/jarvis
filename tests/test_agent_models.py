@@ -148,6 +148,15 @@ class DispatchTest(unittest.TestCase):
         self.assertIsNone(self.ran[1]["resume"])
         self.assertEqual(self.ran[1]["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:11435")
 
+    def test_the_local_model_is_unloaded_when_its_job_ends_and_only_then(self):
+        self.manager.open()
+        with mock.patch.object(agent_models, "release_local") as release:
+            self.go()
+            release.assert_not_called()          # a Claude job never touches the local service
+            with mock.patch.object(agent_models, "local_ready", return_value=""):
+                self.go("Tidy a note", model="local")
+            release.assert_called_once()
+
     def test_a_bad_choice_starts_nothing(self):
         self.manager.open()
         self.assertIn("Unknown agent model", self.go(model="gemini"))
