@@ -296,8 +296,8 @@ def self_check(focus: str = "") -> str:
     """Check your own health from live facts: your processes and uptime, whether code changed
     since you started, the voice actually speaking vs the one chosen (and VoiceStudio's state),
     your conversation model, your weekday morning alarm routine and its last run, background work really running (terminal task, agent sessions,
-    computer task), local services, Home Assistant reachability and devices, and errors logged
-    since you started. Read-only and takes about a second.
+    computer task), whether the user is in their room (so whether you would speak or text), local services,
+    Home Assistant reachability and devices, and errors logged since you started. Read-only and takes about a second.
 
     ALWAYS call this before answering anything about your own state: "are you stuck", "what's
     running", "why is your voice different", "is X broken", "did the restart work", or before
@@ -310,6 +310,11 @@ def self_check(focus: str = "") -> str:
     """
     import self_check as checker
     background = []
+    try:
+        import whereabouts
+        background.append(whereabouts.describe())
+    except Exception as e:
+        background.append(f"Where the owner is: unknown ({e})")
     try:
         background.append("Terminal task: " + (TERMINAL.status() if TERMINAL.running else "none running"))
     except Exception as e:

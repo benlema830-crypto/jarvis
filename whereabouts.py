@@ -91,3 +91,21 @@ def can_hear(now=None) -> bool:
     if _value(_read(presence_greeting.PERSON)) not in (None, 'home'):
         return False
     return _value(_read(presence_greeting.SENSOR)) == 'on'
+
+
+def describe(now=None) -> str:
+    """One line of facts for self_check: what the sensors say, and so whether Jarvis would speak or text."""
+    now = now or time.time()
+    idle = _idle()
+    phone, sensor = _read(presence_greeting.PERSON), _read(presence_greeting.SENSOR)
+    seen = {"on": "sees someone", "off": "clear"}.get(_value(sensor), "not readable")
+    since = _seconds_in_state(sensor, now)
+    if _value(sensor) and since is not None:
+        seen += f" for {int(since // 60)} minutes"
+    facts = (f"phone {_value(phone) or 'not readable'}; bedroom sensor {seen}; "
+             f"PC last used {'unknown' if idle is None else f'{int(idle // 60)} minutes ago'}")
+    if out_of_room(idle, now):
+        return f"The owner is out of their room ({facts}): a question or away-work news is texted, updates are held."
+    hears = "updates are spoken" if can_hear(now) or (idle is not None and idle < 300) else "updates are held until they are back at the PC"
+    return f"The owner counts as in their room ({facts}): nothing is texted unless they text first, and {hears}."
+
