@@ -163,7 +163,17 @@
         }
         box.append(card);
       }
-      if (!busy.length) box.append(make('p', 'Nothing running.', 'rail-note'));
+      let jobs = [];
+      try { jobs = (await J.api('/jobs', undefined, { timeout: 4000 })).jobs || []; } catch {}
+      for (const j of jobs) {
+        const card = make('div', null, 'rail-card job ' + String(j.status)), top = make('div', null, 'rail-top');
+        top.append(make('b', 'Away ' + String(j.kind)), make('small', String(j.label) + (j.attempt ? ' · attempt ' + j.attempt : '')));
+        card.append(top, make('p', String(j.what)));
+        if (j.check) card.append(make('small', String(j.check), 'job-check'));
+        if (j.branch) card.append(make('small', 'Branch to review: ' + String(j.branch), 'job-check'));
+        box.append(card);
+      }
+      if (!busy.length && !jobs.length) box.append(make('p', 'Nothing running.', 'rail-note'));
     } catch { box.replaceChildren(make('p', J.online ? 'Could not read the agents.' : 'Jarvis is offline.', 'rail-note')); }
   }
   async function refreshHome() {
@@ -194,9 +204,21 @@
       box.replaceChildren(make('p', clip(data.schedule || 'No calendar connected.', 260)), make('p', clip(data.weather || '', 160), 'muted'));
     } catch { box.replaceChildren(make('p', J.online ? 'Could not read today.' : 'Jarvis is offline.')); }
   }
+  async function refreshHeld() {
+    try {
+      const data = await J.api('/attention', undefined, { timeout: 4000 }), items = data.held || [];
+      el('railHeldBox').hidden = !items.length;
+      el('railHeld').replaceChildren(...items.slice(-8).map(i => {
+        const card = make('div', null, 'rail-card');
+        card.append(make('p', String(i.label)), make('small', new Date((i.t || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' · ' + String(i.why), 'held-why'));
+        return card;
+      }));
+    } catch { el('railHeldBox').hidden = true; }
+  }
+  el('railHeldAsk').onclick = () => J.send('What did I miss?');
   el('railHomeRefresh').onclick = refreshHome;
   const visible = () => document.body.classList.contains('view-console') && !document.hidden;
-  setInterval(() => { if (visible()) refreshWork(); }, 4000);
+  setInterval(() => { if (visible()) { refreshWork(); refreshHeld(); } }, 4000);
   setInterval(() => { if (visible()) refreshHome(); }, 20000);
   setInterval(() => { if (visible()) refreshToday(); }, 300000);
   J.on('receipt', ev => { if (ev.tool === 'home_control' && visible()) setTimeout(refreshHome, 9000); });  // after the server's short cache
@@ -212,7 +234,7 @@
     if (!consoleOn && restoreStage) { restoreStage = false; J.setStage(true, false, false); }
     store.set('view', consoleOn ? 'console' : 'model');
     dispatchEvent(new Event('resize'));
-    if (consoleOn) { refreshWork(); refreshHome(); refreshToday(); stream.scrollTop = stream.scrollHeight; if (focus) el('prompt').focus(); }
+    if (consoleOn) { refreshWork(); refreshHeld(); refreshHome(); refreshToday(); stream.scrollTop = stream.scrollHeight; if (focus) el('prompt').focus(); }
     J.emit('view', consoleOn ? 'console' : 'model');
   }
   J.setView = setView;

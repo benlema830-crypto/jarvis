@@ -443,6 +443,12 @@ addEventListener('load', async () => {
     assert($('railHome').querySelector('.home-tile.unknown b').textContent === 'unknown', 'an unavailable device reads unknown, never off');
     await wait(() => $('railWork').textContent.includes('Frontier') && !$('railWork').textContent.includes('Docs'), 'only running work is listed');
     await wait(() => $('railToday').textContent.includes('Dentist'), 'today');
+    await wait(() => $('railWork').textContent.includes('Add the shop screen'), 'away job on the board');
+    assert($('railWork').textContent.includes('Jarvis re-ran the tests: 41 passed.') && $('railWork').textContent.includes('jarvis/shop-a1'), 'the job shows Jarvis\'s own check and the branch');
+    await wait(() => !$('railHeldBox').hidden && $('railHeld').textContent.includes('Giant Builder finished'), 'held updates listed');
+    const askedBefore = window.posts.filter(p => p.path === '/command').length;
+    $('railHeldAsk').click();
+    await wait(() => window.posts.filter(p => p.path === '/command').length === askedBefore + 1, 'hear them asks Jarvis');
     $('prompt').value = ''; $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     assert($('prompt').value === 'TEST COMMAND', 'up arrow recalls the last typed command: ' + $('prompt').value);
     $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); assert($('prompt').value === '', 'down returns to the draft');
@@ -511,6 +517,9 @@ def serve(with_checks=True):
                 "/home": {"devices": [{"name": "Bedroom Fan", "domain": "switch", "state": "on"}, {"name": "Ceiling Light", "domain": "light", "state": "off"},
                                       {"name": "Living Room TV", "domain": "media_player", "state": "unavailable"}], "error": "", "read_at": 0},
                 "/intel": {"schedule": "Tomorrow 10:30 Dentist.", "weather": "38 and overcast."},
+                "/attention": {"cap": 5, "spoken_today": 5, "held": [{"t": 1794350000, "label": "Giant Builder finished", "why": "today's limit reached"}]},
+                "/jobs": {"jobs": [{"id": "a1", "kind": "build", "status": "done", "label": "Finished", "what": "Add the shop screen",
+                                    "check": "Jarvis re-ran the tests: 41 passed.", "branch": "jarvis/shop-a1", "attempt": 0}]},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
                             "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",

@@ -3,11 +3,16 @@
 The server listens on 127.0.0.1 only; `tailscale serve` publishes it to your own tailnet
 (never Funnel, never the internet). Every request needs the bearer token from
     .venv\\Scripts\\python.exe scripts\\setup_phone.py
-which also restricts access to your Tailscale login when you give one. Like Telegram,
-the phone can't approve risky actions: approvals still need your spoken "yes" at the PC.
+which also restricts access to your Tailscale login when you give one.
+
+Approvals: when Jarvis is waiting for a yes or no, the phone page shows the question with Yes and No buttons
+(owner's decision in the makeover plan, 2026-11-10). The tap is the owner's own answer, checked with the same
+key and Tailscale login as everything else; the AI still never answers for them, and a message typed or spoken
+from the phone still can't approve anything. preferences "phone_approvals": false turns the buttons off.
 
 Endpoints: GET / (chat page), GET /health, POST /ask {"text"} -> {"reply"},
-POST /voice {"text"} -> the reply as a WAV in Jarvis's own voice (text in the X-Jarvis-Reply header).
+POST /voice {"text"} -> the reply as a WAV in Jarvis's own voice (text in the X-Jarvis-Reply header),
+GET /pending -> {"question"} (the open yes/no question, if any), POST /answer {"approve": true|false}.
 """
 import base64
 import hmac
@@ -123,6 +128,31 @@ class Bridge:
             self.fails.append(now)
         return good
 
+    @staticmethod
+    def approvals_on() -> bool:
+        return preferences.read().get("phone_approvals", True) is not False
+
+    def pending(self) -> dict:
+        """The open yes/no question, for the phone page. Questions that take free words stay at the PC."""
+        import approvals
+        if not self.approvals_on() or approvals.waiting() is None or approvals.waiting_for_answer():
+            return {"question": ""}
+        item = approvals._pending or {}
+        return {"question": str(item.get("details") or item.get("question") or "")[:1500]}
+
+    def answer(self, approve) -> dict:
+        """The owner tapped Yes or No. Returns what happened; never raises."""
+        import approvals
+        if type(approve) is not bool:
+            return {"ok": False, "reply": "Send approve as true or false."}
+        if not self.approvals_on():
+            return {"ok": False, "reply": "Approving from the phone is turned off."}
+        if approvals.waiting() is None or approvals.waiting_for_answer():
+            return {"ok": False, "reply": "Nothing is waiting for a yes or no."}
+        print(f"(Phone answered the open question: {'yes' if approve else 'no'})", flush=True)
+        approvals.answer("yes" if approve else "no")
+        return {"ok": True, "reply": "Approved." if approve else "Declined. Nothing was changed."}
+
     def ask(self, text: str, voice=False) -> tuple[str, bytes | None]:
         """(reply text, WAV in Jarvis's voice when asked for and it could be made)."""
         if not self.on_message:
@@ -170,6 +200,10 @@ def make_handler(bridge: Bridge):
                 return self.reply(200, {"ok": True})
             if route in ("/", "/index.html"):  # the page holds no secrets; the token is typed in once
                 return self.reply(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            if route == "/pending":
+                if not bridge.allowed(self.headers):
+                    return self.reply(401, {"error": "key refused"})
+                return self.reply(200, bridge.pending())
             self.reply(404, {"error": "not found"})
 
         def audio(self, text):
@@ -208,10 +242,22 @@ def make_handler(bridge: Bridge):
         def do_POST(self):
             route = self.path.split("?")[0]
             self._body_read = False
-            if route not in ("/ask", "/voice"):
+            if route not in ("/ask", "/voice", "/answer"):
                 return self.refuse(404, "Wrong address. It should end in slash ask, or slash voice.")
             if not bridge.allowed(self.headers):
                 return self.refuse(401, "Jarvis refused the phone key. Check the Authorization header.")
+            if route == "/answer":
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= 200:
+                        raise ValueError
+                    body = self.rfile.read(size)
+                    self._body_read = True
+                    choice = json.loads(body).get("approve")
+                except (ValueError, AttributeError):
+                    return self.refuse(400, "Jarvis couldn't read that answer.")
+                result = bridge.answer(choice)
+                return self.reply(200 if result["ok"] else 409, result)
             spoken = route == "/voice"  # only after the key checked out, so strangers can't make it talk
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
                 return self.refuse(400, "Jarvis needs the request body set to JSON.", spoken)

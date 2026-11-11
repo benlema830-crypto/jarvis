@@ -101,7 +101,7 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
 PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel",
-                 "/home"},
+                 "/home", "/attention", "/jobs"},
          "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control"}}
 
 

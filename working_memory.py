@@ -239,8 +239,14 @@ def brief(now=None, today=None) -> str:
                        "Its ideas, research suggestions and Jarvis improvement proposals are in that note "
                        "(read_knowledge_note); they are proposals until the owner says go.")
 
+    import attention
+    waiting = attention.held()
+
     def compose():
         parts = []
+        if waiting:
+            parts.append(f"{len(waiting)} update{'s are' if len(waiting) != 1 else ' is'} held, not yet told to the "
+                         "owner (held_updates reads them): " + "; ".join(i["label"] for i in waiting[-6:]))
         if work:
             parts.append("Agent work (from agent session records):\n" + "\n".join(work))
         if studies:

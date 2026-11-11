@@ -303,6 +303,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(MANAGER.snapshot())
         elif self.path == "/home":
             self._json(home())
+        elif self.path == "/jobs":
+            import away_jobs
+            try:
+                self._json({"jobs": away_jobs.board()})
+            except Exception:
+                self._json({"jobs": [], "error": "Could not read the away-work queue."})
+        elif self.path == "/attention":
+            import attention
+            self._json(attention.snapshot())
         else:
             self.send_error(404)
 

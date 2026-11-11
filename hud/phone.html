@@ -37,6 +37,10 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 #mic.live{background:var(--danger);border-color:var(--danger)}
 #setup{padding:24px 16px;display:flex;flex-direction:column;gap:12px}
 #setup p{margin:0;color:var(--muted)}
+#ask{margin:12px 16px 0;padding:14px;border:1px solid #f5b83d88;border-radius:14px;background:var(--panel)}
+#ask small{font:600 11px/1 var(--mono);letter-spacing:.14em;color:#f5b83d}
+#ask p{margin:8px 0 12px;white-space:pre-wrap;word-wrap:break-word;max-height:38vh;overflow-y:auto}
+#ask div{display:flex;gap:10px}#ask button{flex:1}
 </style>
 </head>
 <body>
@@ -46,6 +50,11 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
  <p>Paste the phone key that <code>setup_phone.py</code> showed on your PC. It stays on this phone only.</p>
  <input id="key" type="password" autocomplete="off" placeholder="Phone key">
  <button class="primary" id="save">Connect</button>
+</section>
+<section id="ask" hidden aria-live="assertive">
+ <small>JARVIS NEEDS A YES OR NO</small>
+ <p id="askText"></p>
+ <div><button class="primary" id="askYes">Yes</button><button id="askNo">No</button></div>
 </section>
 <main id="log" aria-live="polite"></main>
 <form id="form" hidden>
@@ -88,6 +97,28 @@ async function send(text){
   } catch { add('err', "Can't reach JARVIS. Is Tailscale on and the PC awake?"); }
   ping();
 }
+// A waiting yes/no question shows as a card. The tap is your answer; typing "yes" here does not approve anything.
+let asking = '';
+async function pending(){
+  if (!key || document.hidden) return;
+  try {
+    const r = await fetch('/pending', {headers:{'Authorization':'Bearer ' + key}});
+    if (!r.ok) return;
+    const q = (await r.json()).question || '';
+    if (q !== asking) { asking = q; $('askText').textContent = q; $('ask').hidden = !q; }
+  } catch {}
+}
+async function answer(approve){
+  $('askYes').disabled = $('askNo').disabled = true;
+  try {
+    const r = await fetch('/answer', {method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + key}, body: JSON.stringify({approve})});
+    const data = await r.json();
+    add(r.ok ? 'jarvis' : 'err', data.reply || data.error || 'No reply.');
+  } catch { add('err', "Can't reach JARVIS. Your answer was not sent."); }
+  asking = ''; $('ask').hidden = true; $('askYes').disabled = $('askNo').disabled = false;
+}
+$('askYes').onclick = () => answer(true); $('askNo').onclick = () => answer(false);
+setInterval(pending, 4000); document.addEventListener('visibilitychange', pending);
 document.addEventListener('click', unlock);
 $('form').onsubmit = e => { e.preventDefault(); const t = $('text').value.trim(); if (t) { $('text').value = ''; send(t); } };
 
@@ -102,7 +133,7 @@ if (Rec) {
     rec.start();
   };
 }
-show(); if (key) ping();
+show(); if (key) { ping(); pending(); }
 </script>
 </body>
 </html>

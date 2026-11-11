@@ -451,6 +451,15 @@ def recall_memory(query: str) -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def held_updates() -> str:
+    """Updates that were held instead of spoken (finished agent work, the daily review) because the user was
+    away or today's interruption budget was spent. Returns them and clears the list, so tell the user what
+    they say. Agents' reports are their own claims."""
+    import attention
+    return attention.lines(attention.take()) or "Nothing is being held."
+
+
+@beta_tool(eager_input_streaming=True)
 def search_history(query: str, days: int = 60) -> str:
     """Search what was actually said in earlier conversations with the user (the saved transcripts), by plain
     words. Use it for "what did I say about...", "when did we talk about...", "what did you tell me last week",
@@ -1453,7 +1462,7 @@ def response_style(settings: str = '{}') -> str:
 
 TOOLS = [open_website, show_search_results, home_control, home_status, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, add_calendar_event, get_weather,
-         recent_activity, remember, recall_memory, search_history, correct_memory, update_memory, forget,
+         recent_activity, remember, recall_memory, search_history, held_updates, correct_memory, update_memory, forget,
          performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
          terminal_status, stop_terminal_task, open_agent_session, send_agent_task, message_agent,

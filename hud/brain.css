@@ -422,5 +422,9 @@ body.view-console .stage-slot{width:150px;height:150px}
  .console-rail{display:none}
 }
 @media (max-width:600px){.console{top:60px;bottom:132px;left:8px;right:calc(var(--right-width) + 18px)}.console-stream{padding:12px}.turn-work,.turn-say,.turn-proof{margin-left:8px}}
+.held-why{display:block;color:var(--faint);font:11.5px var(--mono);margin-top:2px}
+.job-check{display:block;margin-top:4px;color:var(--muted);font-size:12px;line-height:1.45}
+.rail-card.job.done{border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.rail-card.job.blocked,.rail-card.job.failed,.rail-card.job.partial{border-color:color-mix(in srgb,var(--amber) 40%,transparent)}
 body.compact-orb .console{display:none}
 .command input:focus-visible{outline:none}

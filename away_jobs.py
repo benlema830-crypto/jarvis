@@ -785,6 +785,34 @@ class AwayQueue:
 QUEUE = AwayQueue()
 
 
+def board(now=None, hours=36) -> list[dict]:
+    """Away jobs for the Console's job board: waiting and running ones, then what finished recently, each with
+    Jarvis's own check of it (the test re-run), kept apart from the agent's word."""
+    now = now or time.time()
+    with QUEUE.lock:
+        QUEUE._load()
+        jobs = [dict(job) for job in QUEUE.jobs]
+    rows = []
+    for job in jobs[::-1]:
+        live = job.get("status") in ("queued", "running")
+        if not live and job.get("finished", 0) < now - hours * 3600:
+            continue
+        check = ""
+        if not live:
+            try:
+                check = QUEUE._check_line(job) or ""
+            except Exception:
+                check = ""
+        rows.append({"id": job.get("id", ""), "kind": job.get("kind", ""), "status": job.get("status", ""),
+                     "label": "Waiting" if job.get("status") == "queued" else "Running" if live
+                     else WORDS.get(job.get("status"), str(job.get("status"))),
+                     "what": short(job.get("request", ""), 110), "check": check[:240],
+                     "branch": job.get("branch", "") if job.get("delivered") else "",
+                     "attempt": job.get("round", 0) if job.get("status") == "running" and job.get("kind") == "build" else 0})
+    rows.sort(key=lambda r: r["status"] not in ("running", "queued"))
+    return rows[:12]
+
+
 def recent_lines(now=None, hours=36):
     """Running and recently finished work, for the working-memory brief."""
     now = now or time.time()
