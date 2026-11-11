@@ -108,7 +108,7 @@
     ['🎵', 'Media & volume', 'Play/pause, skip, per-app volume and speaker choice.', 'Turn Spotify down to 30 percent'],
     ['📅', 'Calendar', 'Reads your published calendar; adds Outlook events.', "What's on my calendar tomorrow?"],
     ['⏰', 'Reminders & timers', 'Spoken reminders that survive restarts.', 'Remind me in 20 minutes to '],
-    ['👁', 'Screen & camera', 'Looks at your screen, or through the camera while EYES is on.', 'What am I looking at?'],
+    ['👁', 'Screen & camera', 'Looks at your screen when you ask.', 'What am I looking at?'],
     ['🎯', 'Focus coach', 'Timed focus on one app; JARVIS calls out drift.', 'Start a 30 minute focus session on '],
     ['🤖', 'Agent sessions', 'Codex project agents for coding and research.', 'Open an agent session in Rocket Frontier'],
     ['💾', 'Memory', 'Remembers facts about you between sessions.', 'Remember that '],
@@ -251,20 +251,13 @@
   };
 
   /* ---------- Model ---------- */
-  const model = dialog('modelDialog', "JARVIS's brain", 'Pick the conversation model. Codex uses your ChatGPT sign-in and plan limits — no API key. Changes are validated with a short test and apply after the current turn. You can also say "Jarvis, switch your brain to …".', true);
+  const model = dialog('modelDialog', "JARVIS's brain", 'Pick the conversation model. Claude runs on your Claude plan and Codex on your ChatGPT plan; neither uses an API key or credits. Changes are validated with a short test and apply after the current turn. You can also say "Jarvis, switch your brain to …".', true);
   const modelStatus = make('p', '', 'muted'), provider = make('select'), choice = make('select'), apply = make('button', 'Validate and apply', 'primary');
   modelStatus.setAttribute('role', 'status'); apply.type = 'button';
-  for (const [id, label] of [['codex', 'Codex / ChatGPT subscription'], ['claude_code', 'Claude / Claude subscription'], ['ollama', 'Ollama / local models'], ['anthropic', 'Anthropic / Claude API (credits)'], ['openai', 'OpenAI API']]) { const o = make('option', label); o.value = id; provider.append(o); }
+  for (const [id, label] of [['claude_code', 'Claude / your Claude plan'], ['codex', 'Codex / your ChatGPT plan']]) { const o = make('option', label); o.value = id; provider.append(o); }
   const modelForm = make('div', null, 'form'); modelForm.append(make('label', 'Provider'), provider, make('label', 'Model'), choice, apply, modelStatus);
   model.body.append(modelForm);
   let modelData = null, modelBusy = false;
-  // API cost per conversation, relative to Haiku (published prices, with prompt caching)
-  const CLAUDE_LABELS = {
-    'claude-haiku-5-5': 'Haiku 5.5 · fastest, cheapest',
-    'claude-sonnet-5-5': 'Sonnet 5.5 · smarter · ~20× Haiku cost',
-    'claude-opus-5-5': 'Opus 5.5 · smartest everyday · ~35× Haiku cost',
-    'claude-fable-5-1': 'Fable 5.1 · most capable, slowest · ~85× Haiku cost',
-  };
   // On the Claude plan there's no per-use cost; bigger models use up the plan's limits faster.
   const PLAN_LABELS = {
     'claude-opus-5-5': 'Opus 5.5 · smartest · on your Claude plan',
@@ -273,17 +266,16 @@
   };
   function choices() {
     const previous = choice.value; choice.replaceChildren();
-    const labels = provider.value === 'anthropic' ? CLAUDE_LABELS : provider.value === 'claude_code' ? PLAN_LABELS : {};
+    const labels = provider.value === 'claude_code' ? PLAN_LABELS : {};
     for (const id of modelData?.models?.[provider.value] || []) { const o = make('option', labels[id] || id); o.value = id; choice.append(o); }
     if ([...choice.options].some(o => o.value === previous)) choice.value = previous;
     apply.disabled = !modelData?.ready || !!modelData?.pending || modelData?.validating || !choice.value || modelBusy;
   }
   function renderModel(value, first) {
     modelData = value;
-    for (const o of provider.options) o.disabled = !!value.subscription_only && !['codex', 'claude_code', 'ollama'].includes(o.value);
     if (first) { provider.value = value.active.provider; choices(); choice.value = value.active.model; } else choices();
     const pending = value.pending ? ` Pending: ${value.pending.model}${value.validating ? ' (validating…)' : ' (after this turn)'}.` : '';
-    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (value.subscription_only ? ' Paid API providers are off.' : '') + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code, not API credits. If the plan limit is reached, Jarvis says so and uses API credits until it resets.' : '') + (provider.value === 'ollama' ? ' Local models require Ollama and JARVIS_OLLAMA_ENABLED=1. Models must be installed and support tools. No automatic fallback.' : '');
+    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code. If the plan limit is reached, Jarvis says so and stops; he never falls back to API credits.' : ' Uses your ChatGPT plan through Codex. If the plan limit is reached, Jarvis says so and stops.');
     el('modelName').textContent = value.active.model;
   }
   async function refreshModel(first) {

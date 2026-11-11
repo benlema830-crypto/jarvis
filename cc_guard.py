@@ -144,6 +144,80 @@ def decide(tool: str, tool_input: dict) -> tuple[str, str]:
     return "allow", ""
 
 
+# Files whose contents must never go to a model provider, whichever tool asks (direct_tools.py uses this too).
+SECRET_FILE = re.compile(r"(?:^|[\\/\s'\"=])(?:\.env(?:\.[\w-]+)?(?<!\.example)|[\w-]*\.(?:dpapi|enc|pem|key|pfx|kdbx)|id_(?:rsa|ed25519|ecdsa)"
+                         r"|credentials\.json|auth\.json|\.credentials\.json|\.git-credentials|\.npmrc|\.pypirc)(?=$|[\s'\";|,)])", re.I)
+
+# Set by terminal.py for an agent working with nobody at the PC (an away job on Claude): the one folder it works in.
+UNATTENDED_ROOT = "JARVIS_UNATTENDED_ROOT"
+NOBODY_HERE = "nobody is here to approve it. Don't look for another way: leave it undone and say so in your report."
+# A full path: quoted (it may hold spaces, as "Jarvis Builds" does) or bare.
+_ABSOLUTE = re.compile(r"'([A-Za-z]:[\\/][^']*)'|\"([A-Za-z]:[\\/][^\"]*)\"|(?<![\w'\"])([A-Za-z]:[\\/][^\s'\"|;&<>)]*)")
+_ELSEWHERE = re.compile(r"(?:^|[\s'\"=(])(?:~|\.\.(?:[\\/]|$|\s)|\$HOME\b|\$env:|%[A-Za-z_]+%|/[A-Za-z]/)", re.I)
+_CHANGE_FOLDER = re.compile(r"(?:^|[;&|\n(]|\b)\s*(?:cd|chdir|Set-Location|sl|pushd|Push-Location)\b\s+([^;&|\n]+)", re.I)
+
+
+def _leaves(text, root) -> bool:
+    """The text names somewhere outside `root`: an absolute path elsewhere, or one that can't be judged (~, ..,
+    an environment variable)."""
+    if _ELSEWHERE.search(text):
+        return True
+    for groups in _ABSOLUTE.findall(text):
+        try:
+            path = os.path.realpath(next(g for g in groups if g))
+        except (OSError, ValueError):
+            return True
+        if not _inside(path, root):
+            return True
+    return False
+
+
+def unattended(tool: str, tool_input: dict, root: str) -> tuple[str, str]:
+    """The verdict for an agent with nobody at the PC: ('allow' | 'blocked', detail). There is no "ask".
+
+    It may read, search, browse, run commands and create or change files, like any agent. What differs:
+      - whatever would need the owner's yes is refused instead of asked (installing, system settings, publishing,
+        destructive git, hidden commands);
+      - its file tools write only inside its own folder;
+      - deleting is allowed only inside its own folder, and it can't move its shell out of that folder;
+      - credentials files can't be read or named in a command.
+    This judges what the agent asks to do; it is not a sandbox. A program the agent writes and runs can still
+    reach the rest of the PC. The private folder, the environment with no tokens in it, and these rules are
+    the protection, and the Codex sandbox remains the stricter choice."""
+    verdict, detail = decide(tool, tool_input)
+    if verdict == "blocked":
+        return verdict, detail
+    root = os.path.realpath(root)
+    # Only where a file is named, never what is written into one: a README may say "copy .env.example to .env".
+    named = " ".join(str(tool_input.get(key) or "") for key in ("command", "file_path", "notebook_path", "path", "pattern", "glob"))
+    if tool in SHELL_TOOLS | FILE_TOOLS and SECRET_FILE.search(" " + named):
+        return "blocked", "Credentials files are off-limits."
+    if tool in WRITE_TOOLS:
+        target = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+        try:
+            inside = bool(target) and _inside(os.path.realpath(os.path.abspath(target)), root)
+        except (OSError, ValueError):
+            inside = False
+        if not inside:
+            return "blocked", f"You may create and change files only inside {root}. Read elsewhere, write here."
+        return "allow", ""
+    if tool in SHELL_TOOLS:
+        command = str(tool_input.get("command", ""))
+        for target in _CHANGE_FOLDER.findall(command):
+            if _leaves(" " + target.strip().strip("'\""), root) and not plain_read_command(command):
+                return "blocked", f"Stay in {root}: don't change to another folder. Use full paths to read elsewhere."
+        if verdict == "approval":
+            if detail == "delete" and not _leaves(command, root):
+                return "allow", ""  # tidying its own folder is ordinary work
+            if detail == "delete":
+                return "blocked", (f"You may delete only inside {root}, named by a path relative to it or a full path "
+                                   f"under it. Anything else needs the owner's approval, and {NOBODY_HERE}")
+            return "blocked", f"That ({detail}) needs the owner's approval, and {NOBODY_HERE}"
+    elif verdict == "approval":
+        return "blocked", f"That ({detail}) needs the owner's approval, and {NOBODY_HERE}"
+    return "allow", ""
+
+
 def _load(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as f:
@@ -177,6 +251,12 @@ def deny(reason: str):
 def main():
     call = json.load(sys.stdin)
     tool, tool_input, session = call.get("tool_name", ""), call.get("tool_input") or {}, call.get("session_id", "")
+    root = os.environ.get(UNATTENDED_ROOT, "").strip()
+    if root:  # nobody to ask: refuse or run, never pause
+        verdict, detail = unattended(tool, tool_input, root)
+        if verdict == "blocked":
+            deny(f"BLOCKED: {detail}")
+        sys.exit(0)
     verdict, detail = decide(tool, tool_input)
     if verdict == "blocked":
         deny(f"BLOCKED: {detail} Don't try another way; tell the user it's off-limits.")

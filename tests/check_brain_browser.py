@@ -329,10 +329,10 @@ addEventListener('load', async () => {
 
     stage('model'); $('modelPill').click(); await wait(() => $('modelDialog').textContent.includes('Active: codex'), 'model status');
     const provider = $('modelDialog').querySelector('select');
-    assert([...provider.options].find(o => o.value === 'openai').disabled, 'paid API blocked');
-    assert(![...provider.options].find(o => o.value === 'ollama').disabled, 'local provider allowed');
-    provider.value = 'ollama'; provider.dispatchEvent(new Event('change'));
-    assert($('modelDialog').querySelectorAll('select')[1].value === 'local:test', 'local model listed');
+    assert([...provider.options].map(o => o.value).join() === 'claude_code,codex', 'only the two plans are offered');
+    assert(!/API credits until|Anthropic|OpenAI API|Ollama/.test($('modelDialog').textContent), 'no paid or removed brains mentioned');
+    provider.value = 'claude_code'; provider.dispatchEvent(new Event('change'));
+    assert($('modelDialog').querySelectorAll('select')[1].value === 'claude-opus-5-5', 'plan model listed');
     $('modelDialog').close();
 
     stage('holo mode'); assert(document.querySelectorAll('.mode').length === 1, 'only the HOLO mode is left');
@@ -547,7 +547,7 @@ def serve(with_checks=True):
                 "/jobs": {"jobs": [{"id": "a1", "kind": "build", "status": "done", "label": "Finished", "what": "Add the shop screen",
                                     "check": "Jarvis re-ran the tests: 41 passed.", "branch": "jarvis/shop-a1", "attempt": 0}]},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
-                            "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
+                            "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "claude_code": ["claude-opus-5-5"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": [{"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Playtest the build", "timeline":[{"label":"Reading source","status":"completed","started_at":123}]},
                     {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "**Recommendation:** wrote the <b>guide</b> and checked the [research note](</C:/notes/research.md>) links.",

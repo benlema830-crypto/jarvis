@@ -28,12 +28,12 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Process | Port | Started by | Role |
 | --- | --- | --- | --- |
 | `jarvis.py` (the assistant) | 7778 (classic HUD + event stream) | `open_brain.py`, `run.bat` | Ears, voice, brain, tools, Telegram bridge, HOLO watcher, calendar heads-ups |
-| `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Brain page, the graph data, Eyes frames and Watch/Focus sessions; proxies chat/status to 7778 |
+| `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Jarvis page (3D model, graph, Console) and the graph data; proxies chat/status to 7778 |
 | `desktop_orb.py` | Uses 7781 | Jarvis Orb desktop shortcut / More menu | Native WebView2 orb; always on top when compact, expands to full Brain workspace |
 | VoiceStudio app | 3900 | the user / Jarvis on voice warm-up | Default voices (VoiceStudio profiles), GPU synthesis |
 | `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |
-| Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Local-only conversation models; idle until a model is requested |
+| Isolated `ollama.exe serve` (optional) | 11435 | `start-local-model.bat` | Vault search by meaning, and the local agent model (`qwen3.5-agent`); idle until asked for |
 | Home Assistant OS (Raspberry Pi 5, separate device) | 80 at `HA_URL` (Ethernet 192.168.0.44) | always on | Smart-home devices and automations; runs even when the PC is off |
 
 ## Source components
@@ -41,43 +41,42 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Area | Files |
 | --- | --- |
 | Main loop, prompt, turn handling | jarvis.py |
-| Conversation providers | codex_brain.py (Codex + live web search), ollama_brain.py (optional local models), router.py (quick requests -> local qwen3:4b-instruct, else the selected brain), model_provider.py, model_credentials.py |
-| Tools the AI can call | tools.py (registry), plus tasks.py, documents.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
+| Conversation brains | claude_code_brain.py (Claude on the owner's Claude plan, the default), codex_brain.py (Codex on the ChatGPT plan), model_provider.py (which one talks). There is no paid API path: the API, local chat and router code was removed on 2026-11-10 |
+| Tools the AI can call | tools.py (registry), plus tasks.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
 | Voice and hearing | voice.py, voicestudio_voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
-| Project continuity and routines | project_memory.py, routines.py, hud/productivity.js |
-| Digests, privacy and file tools | digests.py, privacy.py, artifacts.py, hud/automation.js |
+| Project continuity | project_memory.py, hud/productivity.js |
+| Privacy | privacy.py (redaction before anything goes to a model), hud/automation.js |
 | Response preferences | response_settings.py, jarvis.py next-turn refresh, tools.py response_style, hud/automation.js |
-| Brain page | hud/brain.html, hud/brain.css, hud/brain.js (graph, inspector, reactor, chat), hud/panels.js (dialogs), hud/modes.js (Eyes/Watch/Holo/Focus) |
-| Brain server | brain.py, graph_organization.py (project neighborhoods, display labels and relationship evidence), eyes.py, visual_modes.py, integration_status.py, workspace.py |
+| Jarvis page | hud/brain.html, hud/brain.css, hud/brain.js (3D model, graph, inspector, chat), hud/console.js (the Console view: turns, tools and receipts), hud/cards.js (cards with their buttons), hud/panels.js (dialogs), hud/modes.js (Holo hand control) |
+| Brain server | brain.py, graph_organization.py (project neighborhoods, display labels and relationship evidence), integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
-| Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex) |
-| Research | research.py (start_research: background Codex web research -> Research/ in the vault), digests.py (scheduled) |
+| Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex), heartbeat.py (half-hourly plain checks and the owner's checklist), attention.py (say it now or hold it; five unprompted updates a day), presence_greeting.py, morning_wakeup.py |
+| Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
 | Email | gmail.py (read-only Gmail API, DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
-| Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), memory_proposals.py (journal proposes, owner approves; Decisions/Decision log.md) |
+| Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
-| Agents | agent_sessions.py, terminal.py, agent.py, cc_guard.py, approvals.py, task_effort.py (learned per-task effort) |
+| Agents | agent_sessions.py (sessions and workers), terminal.py (a Claude Code run), agent.py (the screen agent), agent_models.py (which model a job runs on), parallel.py (several agents on one job, with an optional lead), cc_guard.py (what an agent may do), approvals.py, task_effort.py (learned per-task effort) |
 | Direct terminal | direct_tools.py (run_command, read_file, search_text, edit_file, write_file: the conversation's own shell and file tools, through cc_guard) |
-| Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return) |
-| Truthfulness | truth_guard.py (ClaimGate holds an unbacked "I've done it" and makes the brain answer again; agent OUTCOME lines; which tools ran this turn). home_assistant.control reads each device back before reporting |
-| Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_openai_key.py |
-| Checks | scripts/verify_project.py; ruff.toml (lint for likely bugs); tests/ (unit tests), tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks) |
+| Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return; Codex by default, Claude Fable 5.2 when asked) |
+| Truthfulness | truth_guard.py (a receipt for every action; ClaimGate holds an unbacked "I've done it" and makes the brain answer again; agent OUTCOME lines; which tools ran this turn). home_assistant.control reads each device back before reporting |
+| Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_phone.py |
+| Checks | scripts/run_tests.py (the unit tests, and proof they left data/ alone); scripts/verify_project.py; ruff.toml (lint for likely bugs); tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks); scripts/measure.py (speed scorecard); docs/reviews/ (code reviews) |
 
 ## Runtime data
 
 `data/` is git-ignored and holds memories, preferences, logs, encrypted credentials
-(OpenAI key, MCP tokens, Telegram token), voice identity, reports and backups.
+(MCP tokens, Telegram and phone tokens), voice identity, reports and backups.
 `data/backups/pre-polish-ui-2026-10-21.zip` keeps the previous Brain UI scripts.
 Documents JARVIS writes go to `Documents\JARVIS Documents`; to-dos live in the vault's `Tasks.md`.
 The isolated Ollama runtime, weights, log, and synthetic inference report live in
 `data/local-brain/`. OAuth credentials share the encrypted MCP store in `data/`;
 pending authorization codes and PKCE verifiers are never saved to disk.
 
-Project handoffs are dated JSON entries in `data/handoffs/`. Named routine definitions live
-in `data/routines.json`; approval tokens stay in memory and expire. The local semantic index is
+Project handoffs are dated JSON entries in `data/handoffs/`. The local semantic index is
 `data/vault-vectors.sqlite3`, rebuilt incrementally from the selected vault with the installed
 `embeddinggemma:300m` model. These files contain personal context and are not committed.
 
@@ -85,10 +84,9 @@ Response preferences live in `data/response-settings.json`. The development cont
 Linux port and the 58-item improvement backlog is `docs/plans/CLAUDE-LINUX-HANDOFF.txt`.
 Git excludes personal data, voices and models; the handoff documents separate migration requirements.
 
-`data/digests.json` stores schedules and attempts; `data/digests/` stores silent reports.
 `data/privacy.json` stores selected text filters; `memory.json.epoch` invalidates pre-edit model context.
-The Brain process owns the digest scheduler. XLSX/PDF/PPTX outputs live alongside Word documents in
-`Documents/JARVIS Documents`; no Office process or account is required to create them.
+`data/attention.json` holds the updates being held and today's count; `data/parallel/` keeps long agent
+reports whole for a parallel job's lead to read.
 
 ## Don't Wake the Giant (added 2026-11-02)
 
@@ -143,3 +141,33 @@ DPAPI tests always fail in the sandbox. Failures go back to the agent, for up to
 
 A project needs git and at least one commit to get a private copy, or it's refused. A copy is made from the last commit,
 so uncommitted files aren't in it; Jarvis says so at the start and the end.
+
+## Parallel work and its lead (2026-11-11)
+
+`parallel_agents` splits one job into 2 to 4 parts and runs an agent on each at once (`parallel.py`). All or
+nothing, one parallel job at a time, and parts that change files each need their own folder.
+
+A big job can be given a lead (`lead="fable"`, or `"opus"`). The lead is one agent conversation, the
+`Parallel Lead` session, used twice. First it plans: it reads Jarvis's draft split and the folder and returns the
+split to run as JSON, with a full brief, a model and an effort for each part, or the advice not to split. Then
+the parts run on the models it named. Last it gets every report with what Jarvis observed each agent do, checks
+what a quick look can settle, and writes the one answer the owner hears. It only reads, and it is not running
+while the parts are, so it takes no agent slot.
+
+If the lead fails at either step the job carries on without it: Jarvis's own split runs, and Jarvis's own brain
+combines the reports (`merge_turn`). If that turn fails too, the reports are read out as written.
+
+## Fable for away work (2026-11-11)
+
+`queue_away_job(model="fable")` runs an away job on Claude Fable 5.2 instead of Codex. The owner asked for it
+to have files and tools, not web reading only. A Fable build goes through every step of the build pipeline. Fable
+research is a full agent in an empty folder of its own: web, the owner's files to read, commands, files it
+writes there, and a `REPORT.md` that is saved to the vault under Research.
+
+Claude Code has no sandbox on this PC, so the protection is `cc_guard.unattended`, switched on by
+`JARVIS_UNATTENDED_ROOT` in the agent's environment: whatever would need a yes is refused rather than asked, the
+file tools write only inside the job's folder, deleting stays inside it, the shell can't be moved out of it,
+credentials files can't be read, and the environment carries no tokens and no connected services. Tested with a
+real agent on 2026-11-11: an outside write, a `git push` and an outside delete were each refused. These rules
+judge what the agent asks to do. A program it writes and runs is not held by them, so Codex in its sandbox
+stays the default and the stricter choice.

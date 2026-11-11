@@ -68,8 +68,10 @@ def record_turn(user: str, assistant: str, privacy_since=None):
     `privacy_since` is the privacy_revision() from when the turn started. If a forget,
     correction or privacy change happened during the turn, the exchange itself may
     repeat the removed wording, so only a placeholder is kept."""
-    if user.startswith(("[STARTUP]", "[REMINDER DUE]", "[BRIEFING]", "[FOCUS", "[EYES CHECK]", "[HOLO]")):
+    if user.startswith(("[STARTUP]", "[REMINDER DUE]", "[BRIEFING]", "[HOLO]")):
         return
+    if user.startswith("[HEARTBEAT]") and "(quiet)" in assistant.lower():
+        return  # an hourly check that found nothing: 20 of these would push every real exchange out of the list
     with transaction():
         if privacy_since is not None and privacy_since != privacy_revision():
             user, assistant = INVALIDATED_TURN, ""

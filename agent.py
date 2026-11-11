@@ -446,8 +446,11 @@ class Agent:
     def _powershell(self, script: str, purpose: str) -> list[dict]:
         self.log.append(f"PowerShell: {purpose}")
         hud.emit("tool", name="agent powershell", input={"purpose": purpose, "script": script[:300]})
-        # Same rules as Claude's terminal tasks: cc_guard pauses only risky scripts.
-        verdict, detail = ("allow", "") if read_only(script) else cc_guard.decide("PowerShell", {"command": script})
+        # Same rules as Claude's terminal tasks: cc_guard pauses only risky scripts. A script that plainly only
+        # reads skips the question, but never the off-limits check: "Get-Content" on Teams data is still refused.
+        verdict, detail = cc_guard.decide("PowerShell", {"command": script})
+        if verdict == "approval" and read_only(script):
+            verdict = "allow"
         if verdict == "blocked":
             return [{"type": "text", "text": f"BLOCKED: {detail} Don't try another way; tell the user it's off-limits."}]
         if verdict == "approval":
@@ -455,9 +458,11 @@ class Agent:
             if not approved:
                 return self._verdict(approved, said)
         try:
+            import direct_tools
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180, cwd=HOME,
+                env=direct_tools._clean_env(),  # like Jarvis's own commands: no tokens or keys in a script's reach
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             out = (proc.stdout + ("\n" + proc.stderr if proc.stderr.strip() else "")).strip()

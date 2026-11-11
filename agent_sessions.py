@@ -309,6 +309,8 @@ class Worker:
         worker.session_id = entry.get("thread_id")
         worker.model = entry.get("model") or terminal.MODEL
         worker.fixed_effort, worker.env_extra = entry.get("effort", ""), dict(entry.get("agent_env") or {})
+        if entry.get("unattended"):
+            worker.unattended_root = entry["cwd"]  # nobody to ask: cc_guard refuses instead (see terminal.py)
         def save_session(session_id):
             with self.lock:
                 entry["thread_id"] = session_id
@@ -599,8 +601,8 @@ class Worker:
             if not self.pause_requested.is_set():
                 try:
                     working_memory.record_result(entry["project"], entry["name"], task, ok, report)
-                except OSError as error:
-                    print(f"(project log not written: {error})", flush=True)
+                except Exception as error:  # a record that can't be written must not cost the owner the report below
+                    print(f"(project log not written: {error!r})", flush=True)
             if self.manager.on_done and not self.pause_requested.is_set():
                 self.manager.on_done({"name": entry["name"], "task": task, "ok": ok, "report": report,
                                       "outcome": outcome, "evidence": evidence})
@@ -722,15 +724,20 @@ class SessionManager:
             self.publish()
         return f"{self.entries[key]['name']} is ready in {project_name}. Its session is shown in Jarvis. No task has started yet."
 
-    def prepare_unattended(self, name, project, folder):
-        """Point a session at a build's private copy, for work with nobody around (away_jobs). "" when ready."""
+    def prepare_unattended(self, name, project, folder, model=""):
+        """Point a session at a job's private folder, for work with nobody around (away_jobs). "" when ready.
+
+        `model` blank means Codex in its sandbox, the strict choice. A Claude model (the owner's call, for Fable)
+        works in the same folder under cc_guard's unattended rules instead: refused rather than asked, file
+        writes kept to the folder, no tokens in its environment. That is a guard, not a sandbox."""
         with self.lock:
             self._load()
             key = name.casefold()
             if key in self.workers:
                 return f"{name} is still working."
             entry = self.entries.setdefault(key, {"name": name, "status": "ready", "task": "", "report": "", "progress": "Ready for a task."})
-            entry.update(project=project, cwd=str(folder), provider="codex", thread_id=None, unattended=True)
+            entry.update(project=project, cwd=str(folder), provider="codex", thread_id=None, unattended=True,
+                         unattended_model=model or "codex")
             self._save()
             self.publish()
         return ""
@@ -746,6 +753,11 @@ class SessionManager:
             seen = worker.seen
             return {"commands": seen["commands"], "failed_commands": seen["failed_commands"], "files": len(seen["files"]),
                     "checks": seen["checks"], "failed_checks": seen["failed_checks"], "latest": str(self.entries[key].get("progress", ""))}
+
+    def home_folder(self, key):
+        """The folder a session's fresh task runs in when none is given: its project's own folder."""
+        entry = self.entries[key]
+        return str(project_catalog.PROJECTS.get(entry.get("project"), entry["cwd"]))
 
     def _conflict(self, key, entry, mode):
         """Why this can't start beside what's already running, or None. Reading never clashes; two agents
@@ -780,11 +792,13 @@ class SessionManager:
                 return "Open a named agent session first."
             entry = self.entries[key]
             import agent_models
-            try:  # an unattended (away) session always runs in Codex's sandbox: nobody is there to answer it
-                plan = agent_models.resolve("codex" if entry.get("unattended") else
+            try:  # an unattended (away) session runs on what its job was queued with, never on a per-task choice
+                plan = agent_models.resolve(entry.get("unattended_model") or "codex" if entry.get("unattended") else
                                             (entry.get("model_choice", "") if resume and not model else model), effort)
             except ValueError as error:
                 return str(error)
+            if entry.get("unattended") and plan["choice"] == "local":
+                return "The local model can't work unattended. Queue it on Codex or Fable."
             if plan["provider"] == "claude" and not terminal._claude_exe():
                 return "Claude Code isn't installed on this PC. Choose codex."
             if plan["provider"] == "codex" and not executable():
@@ -795,15 +809,15 @@ class SessionManager:
                     return f"No such folder: {folder}"
                 if not fresh:
                     return "A folder can only be chosen for a fresh task."
-            conflict = self._conflict(key, dict(entry, cwd=str(Path(folder).expanduser()) if folder else entry["cwd"]), mode)
+            # Where it will really run, settled before the clash check. A fresh task goes back to the project's
+            # folder; checking the folder left over from the session's last task let two agents write in one.
+            cwd = str(Path(folder).expanduser()) if folder else self.home_folder(key) if fresh else entry["cwd"]
+            conflict = self._conflict(key, dict(entry, cwd=cwd), mode)
             if conflict:
                 return conflict
-            if folder:
-                entry["cwd"] = str(Path(folder).expanduser())
+            entry["cwd"] = cwd
             if fresh:
                 entry["thread_id"] = None
-                if not folder:
-                    entry["cwd"] = str(project_catalog.PROJECTS.get(entry["project"], entry["cwd"]))
             switched = entry.get("provider", "codex") != plan["provider"] or \
                 (plan["choice"] == "local") != (entry.get("model_choice") == "local")
             if switched:
@@ -812,7 +826,8 @@ class SessionManager:
                          effort=plan["effort"], agent_env=plan["env"], model_words=agent_models.spoken(plan))
             self.selected = key
             worker = self._begin(key)
-            entry.update(task=task, mode=mode, status="running", progress=f"Connecting to {plan['words']}…", report="", outcome="", evidence="")
+            entry.update(task=task, mode=mode, status="running", progress=f"Connecting to {plan['words']}…", report="", outcome="", evidence="",
+                         started_at=time.time())
             if not resume:
                 entry['timeline'] = []
                 entry['changed_files'] = []
@@ -909,8 +924,8 @@ class SessionManager:
             head += f", outcome {entry['outcome']}"
         lines = [head + "."]
         timeline = entry.get("timeline") or []
-        if running:
-            begun = timeline[0].get("started_at", now) if timeline else now
+        if running:  # the timeline keeps only its newest steps, so its first entry isn't the start of a long task
+            begun = entry.get("started_at") or (timeline[0].get("started_at", now) if timeline else now)
             lines.append(f"Running for {max(0, now - begun) / 60:.0f} minutes, {len(timeline)} recorded steps. There is no "
                          "estimate of time remaining or how close it is to done: if asked, say so rather than guess.")
         if entry.get("task"):

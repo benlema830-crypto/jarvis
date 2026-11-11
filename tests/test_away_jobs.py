@@ -22,15 +22,17 @@ class FakeSessions:
 
     def __init__(self):
         self.running, self.started, self.prepared, self.cancelled = False, [], [], []
+        self.models = []
         self.reply = None
         self.facts = {"commands": 3, "failed_commands": 1, "files": 2, "checks": 1, "failed_checks": 0, "latest": "running tests"}
 
-    def prepare_unattended(self, name, project, folder):
+    def prepare_unattended(self, name, project, folder, model=""):
         self.prepared.append((name, project, str(folder)))
+        self.models.append(model)
         return ""
 
-    def start(self, task, name="", mode="research", resume=False, fresh=False, folder=""):
-        self.started.append(dict(task=task, name=name, mode=mode, fresh=fresh, folder=folder))
+    def start(self, task, name="", mode="research", resume=False, fresh=False, folder="", effort=""):
+        self.started.append(dict(task=task, name=name, mode=mode, fresh=fresh, folder=folder, effort=effort))
         if self.reply:
             return self.reply
         self.running = True
@@ -92,6 +94,118 @@ class Base(unittest.TestCase):
         self.sessions.running = False
         return self.queue.session_done({"name": away_jobs.SESSION, "task": "x", "ok": outcome in ("done", "partial"),
                                         "report": report, "outcome": outcome, "evidence": "Jarvis observed: 3 commands."})
+
+
+REPORT = """## Spoken summary
+Workflow automation for local businesses is the one to try first, sir.
+## Key findings
+- It needs no audience. https://example.com/a
+## What this means for the owner
+It fits ten hours a week.
+## Recommendation
+Start with two paying pilots. The strongest argument against is slow sales.
+## Open questions
+None.
+## Sources
+https://example.com/a
+"""
+
+
+class FableTest(Base):
+    """A job queued on Claude Fable 5.2 runs as a full agent, with files and tools, in a folder of its own."""
+
+    def setUp(self):
+        super().setUp()
+        import knowledge
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        for patcher in (mock.patch.object(knowledge, "VAULT", self.vault), mock.patch("research._owner", return_value="Works ten hours a week.")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def add_research(self, request="which AI business should I start", **kwargs):
+        job = self.queue.add(request, "research", model="fable", **kwargs)
+        self.queue.tick()
+        return job
+
+    def test_fable_research_is_an_agent_in_its_own_folder_not_a_web_only_run(self):
+        with mock.patch("research.start") as web_only:
+            job = self.add_research(why="income")
+        web_only.assert_not_called()
+        folder = Path(job["workspace"])
+        self.assertTrue(folder.is_relative_to(self.root / "builds"))
+        self.assertEqual(self.sessions.models, ["fable"])
+        started = self.sessions.started[0]
+        self.assertEqual((started["mode"], started["fresh"], started["folder"], started["effort"]), ("work", True, str(folder), "high"))
+        for expected in ("which AI business should I start", "Why they want it: income", "Works ten hours a week.", "REPORT.md",
+                         "## Recommendation", "Read anywhere; write only here", "run commands", str(self.vault)):
+            self.assertIn(expected, started["task"])
+        self.assertIn("Started on Claude Fable 5.2", self.texts[0])
+        self.assertIn("writes only there", self.texts[0])
+
+    def test_its_report_goes_to_the_vault_and_the_summary_is_what_is_told(self):
+        job = self.add_research()
+        self.agent_finishes(job, report="I recommend workflow automation.", files={"REPORT.md": REPORT, "numbers.csv": "a,b\n"})
+        self.assertEqual(job["status"], "done")
+        note = self.vault / job["vault_note"]
+        content = note.read_text(encoding="utf-8")
+        self.assertIn("Claude Fable 5.2 working unattended with the web, files and tools", content)
+        self.assertIn("## Recommendation", content)
+        self.assertIn("not checked by Jarvis", content)
+        self.assertIn("Workflow automation for local businesses is the one to try first", self.texts[-1])
+        self.assertIn(job["vault_note"], self.texts[-1])
+        self.assertIn("Its working files are in", self.texts[-1])
+        self.assertNotIn("re-ran its tests", self.texts[-1])            # research isn't judged by tests
+        self.sandbox.assert_not_called()
+
+    def test_done_without_a_report_goes_back_then_counts_as_partial(self):
+        job = self.add_research()
+        self.agent_finishes(job, files={"notes.txt": "thoughts\n"})
+        self.queue.tick()
+        self.assertEqual(job["status"], "running")                       # sent back for the report
+        self.assertIn("REPORT.md is missing", self.sessions.started[-1]["task"])
+        for n in range(away_jobs.MAX_ROUNDS):
+            if job["status"] != "running":
+                break
+            self.agent_finishes(job, files={"notes.txt": f"more {n}\n"})
+            self.queue.tick()
+        self.assertEqual(job["status"], "partial")
+        self.assertNotIn("vault_note", job)
+
+    def test_a_fable_build_keeps_every_step_of_the_build_pipeline(self):
+        job = self.queue.add("make the widget", "build", project=str(self.repo), model="Fable 5.2")
+        self.queue.tick()
+        self.assertEqual(self.sessions.models, ["fable"])
+        self.assertIn("You can search and read the web", self.sessions.started[0]["task"])
+        self.assertIn("private copy", self.texts[0])
+        self.agent_finishes(job, files={"widget.py": "x = 1\n", "tests/test_widget.py": "import unittest\n"})
+        self.assertEqual(job["status"], "done")
+        self.assertTrue(self.sandbox.called)                             # Jarvis still re-runs the tests himself
+        self.assertIn(job["branch"], git(self.repo, "branch", "--list", job["branch"]))
+        self.assertEqual(git(self.repo, "rev-parse", "--abbrev-ref", "HEAD"), "main")   # delivered as a branch, never merged
+
+    def test_codex_stays_the_default_and_other_models_are_refused(self):
+        job = self.add_build()
+        self.assertEqual((job["model"], self.sessions.models), ("", [""]))
+        self.assertIn("You have no web browsing tool", self.sessions.started[0]["task"])
+        self.assertEqual(self.sessions.started[0]["effort"], "")
+        with self.assertRaises(ValueError) as refused:
+            self.queue.add("something else to build", "build", model="haiku")
+        self.assertIn("Codex (leave the model blank) or on fable", str(refused.exception))
+
+    def test_one_agent_job_at_a_time_and_stop_reaches_it(self):
+        first = self.add_research()
+        second = self.add_build()
+        self.assertEqual((first["status"], second["status"]), ("running", "queued"))
+        self.assertEqual(self.queue.stop(), 2)
+        self.assertEqual(self.sessions.cancelled, [away_jobs.SESSION])
+
+    def test_claude_codes_time_limit_message_carries_on_like_codexs(self):
+        job = self.add_research()
+        self.agent_finishes(job, outcome="failed", report="The task ran out of time after 30 minutes.")
+        self.queue.tick()
+        self.assertEqual(job["status"], "running")
+        self.assertEqual(job["round"], 2)
 
 
 class BuildTest(Base):

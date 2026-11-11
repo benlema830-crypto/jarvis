@@ -85,13 +85,40 @@ def held() -> list[dict]:
 
 
 def take() -> list[dict]:
-    """The held updates, removed from the list: they are about to be delivered."""
+    """The held updates, handed over to be told to the owner. They move to an "offered" list rather than vanish:
+    delivered() drops them once the greeting or briefing carrying them was said, and restore() puts them back
+    if that turn failed (a plan limit, a lost connection), so a failure can't silently lose them."""
     with _lock:
         data = _load()
         items, data["held"] = data["held"], []
         if items:
+            data["offered"] = _offered(data) + items
             _save(data)
         return items
+
+
+def _offered(data) -> list[dict]:
+    return [i for i in data.get("offered") or [] if isinstance(i, dict)] if isinstance(data.get("offered"), list) else []
+
+
+def delivered():
+    """The updates last taken were told to the owner."""
+    with _lock:
+        data = _load()
+        if _offered(data):
+            data["offered"] = []
+            _save(data)
+
+
+def restore() -> int:
+    """The updates last taken never reached the owner: hold them again. Returns how many."""
+    with _lock:
+        data = _load()
+        items = _offered(data)
+        if items:
+            data["held"], data["offered"] = (items + data["held"])[-MAX_HELD:], []
+            _save(data)
+        return len(items)
 
 
 def lines(items) -> str:
@@ -100,8 +127,12 @@ def lines(items) -> str:
         return ""
     rows = [f"- {time.strftime('%H:%M', time.localtime(i.get('t', 0)))} {i['label']}"
             + (f": {i['text'][:260]}" if i.get("text") else "") for i in items]
-    return (f"{len(items)} update{'s' if len(items) != 1 else ''} held while the owner was away or busy (agents' "
+    return (f"{len(items)} update{'s' if len(items) != 1 else ''} {MARK} (agents' "
             "reports are their own claims):\n" + "\n".join(rows))
+
+
+# In every prompt that carries held updates, so the main loop knows which turn delivers them.
+MARK = "held while the owner was away or busy"
 
 
 def snapshot() -> dict:

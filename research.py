@@ -139,14 +139,18 @@ def _owner():
 
 
 def _write(topic, why, text, sources, used):
-    day = datetime.date.today().isoformat()
     cited = list({s["url"]: s for s in sources if s.get("url") and s["url"] in text}.values())[:20]
     links = "\n".join(f"- [{s.get('title') or s['url']}]({s['url']})" for s in cited) or "- None corroborated."
-    body = (f"---\ntype: research\ndate: {day}\nsearches: {used}\nsource: Codex web research; findings cite "
-            f"web pages, which may be wrong or dated\n---\n\n# {topic[:150]}\n\n"
-            + (f"Requested because: {why}\n\n" if why else "")
-            + privacy.redact(text.strip())
-            + f"\n\n## Links the search actually returned\n{links}\n")
+    return save_note(topic, why, privacy.redact(text.strip()) + f"\n\n## Links the search actually returned\n{links}\n",
+                     f"searches: {used}\nsource: Codex web research; findings cite web pages, which may be wrong or dated")
+
+
+def save_note(topic, why, text, front):
+    """Create the Research note for a finished report and return its vault path. `front` is extra frontmatter
+    lines saying who did the research and how far to trust it. Also used for research an away agent wrote."""
+    day = datetime.date.today().isoformat()
+    body = (f"---\ntype: research\ndate: {day}\n{front}\n---\n\n# {topic[:150]}\n\n"
+            + (f"Requested because: {why}\n\n" if why else "") + text)
     base = note_name(topic, day)
     for n in range(1, 20):
         relative = base if n == 1 else base[:-3] + f" ({n}).md"

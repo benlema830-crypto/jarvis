@@ -30,9 +30,8 @@ MAX_READ_LINES = 600
 MAX_MATCHES = 80
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "models", "vendor", ".cache", "AppData"}
 
-# Files whose contents must never go to a model provider, whichever tool asks.
-SECRET_FILE = re.compile(r"(?:^|[\\/\s'\"=])(?:\.env(?:\.[\w-]+)?(?<!\.example)|[\w-]*\.(?:dpapi|enc|pem|key|pfx|kdbx)|id_(?:rsa|ed25519|ecdsa)"
-                         r"|credentials\.json|auth\.json|\.credentials\.json|\.git-credentials|\.npmrc|\.pypirc)(?=$|[\s'\";|,)])", re.I)
+# Files whose contents must never go to a model provider, whichever tool asks. One rule, kept in cc_guard.
+SECRET_FILE = cc_guard.SECRET_FILE
 SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.I)
 SECRET_REFUSAL = "That's a credentials file. Its contents can't be read into the conversation."
 AFTER_UNTRUSTED = "after untrusted text"  # always asks, whatever the auto_approve setting
@@ -178,11 +177,19 @@ def _python_search(pattern, root, glob):
     return found
 
 
+def _match_path(line):
+    """The file part of a "path:line: text" match (the path itself has a colon after the drive letter)."""
+    found = re.match(r"(.+?):\d+:", line)
+    return found.group(1) if found else line
+
+
 def search_text(pattern, folder="", glob=""):
     pattern = str(pattern or "")
     if not pattern:
         raise ValueError("Give a pattern to search for.")
     root = _resolve(folder, HOME)
+    if SECRET_FILE.search(" " + str(root)):  # naming the file itself would otherwise search it line by line
+        raise ValueError(SECRET_REFUSAL)
     _guard("Grep", {"path": str(root), "pattern": pattern}, f"Search {root}", read_only=True)
     if not root.exists():
         raise ValueError(f"No such folder: {root}")
@@ -204,6 +211,9 @@ def search_text(pattern, folder="", glob=""):
                                    creationflags=subprocess.CREATE_NO_WINDOW).stdout.splitlines()
         except subprocess.TimeoutExpired:
             return f"The search of {root} took over 30 seconds and was stopped. Search a smaller folder."
+        # The three globs above cover the common cases; this applies the full rule read_file uses, so a match
+        # inside .env.local, a .pem or credentials.json never reaches the conversation either.
+        lines = [line for line in lines if not SECRET_FILE.search(" " + _match_path(line))]
     else:
         lines = _python_search(pattern, root, glob)
     if not lines:
