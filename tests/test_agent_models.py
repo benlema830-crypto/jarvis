@@ -37,7 +37,7 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(agent_models.resolve("opus", "normal")["effort"], "")
 
     def test_unknown_models_and_efforts_are_refused_with_the_choices(self):
-        with self.assertRaisesRegex(ValueError, "opus, sonnet, haiku, codex, local"):
+        with self.assertRaisesRegex(ValueError, "opus, fable, sonnet, haiku, codex, local"):
             agent_models.resolve("gemini")
         with self.assertRaisesRegex(ValueError, "low, medium or high"):
             agent_models.resolve("opus", "maximum")

@@ -693,6 +693,8 @@ def terminal_task(task: str, continue_previous: bool = False, folder: str = "", 
         folder: Folder to work in, when it isn't Jarvis itself. Ignored when continuing a previous task.
         model: Which model does the work. You choose, per task:
             "opus" (Claude Opus 5.5) for most tasks; leave blank for this default.
+            "fable" (Claude Fable 5.2, the most capable) for the biggest or hardest jobs: a large build, a deep
+            investigation, or something Opus got stuck on. It is slower and uses more of the plan.
             "sonnet" for routine, clearly specified jobs where speed matters more than depth.
             "haiku" for a one-step chore.
             "codex" when the user asks for Codex or ChatGPT, when the code or files shouldn't be trusted (it
@@ -826,6 +828,8 @@ def send_agent_task(task: str, name: str = "", mode: str = "research", model: st
         mode: research or work.
         model: Which model does the work. You choose, per task:
             "opus" (Claude Opus 5.5) for most tasks; leave blank for this default.
+            "fable" (Claude Fable 5.2, the most capable) for the biggest or hardest jobs: a large build, a deep
+            investigation, or something Opus got stuck on. It is slower and uses more of the plan.
             "sonnet" for routine, clearly specified jobs where speed matters more than depth.
             "haiku" for a one-step chore.
             "codex" when the user asks for Codex or ChatGPT, when the code or files shouldn't be trusted (it
@@ -840,6 +844,41 @@ def send_agent_task(task: str, name: str = "", mode: str = "research", model: st
     if SESSIONS.is_running(name) or (not name.strip() and SESSIONS.selected in SESSIONS.workers):
         return SESSIONS.message(task, name)
     return SESSIONS.start(task, name, mode, model=model, effort=effort)
+
+
+@beta_tool(eager_input_streaming=True)
+def parallel_agents(goal: str, parts: list[dict], mode: str = "research", project: str = "Jarvis") -> str:
+    """Split one job into 2 to 4 independent parts and run an agent on each at the same time. Their reports come
+    back together and you give the user one combined answer, so don't poll.
+
+    Good for: several topics to research, the same question checked in several places, separate projects or
+    folders, independent reviews of one thing. Not for: small jobs, steps where one depends on another's
+    result, or several changes in the same folder (parts that change files each need their own folder, or it
+    is refused). It finishes sooner but uses more of the user's plan, so say so when you recommend it.
+
+    Recommend it when a request clearly has independent parts that would each take an agent minutes: say in
+    one sentence how you would split it and that it uses more of the plan, and start it when the user agrees.
+    If they already asked for it to be done in parallel or as fast as possible, just start it.
+
+    Args:
+        goal: The whole job in one or two sentences, as the user put it. Used to combine the answers.
+        parts: One entry per agent, each {"task": complete instructions that stand on their own, "model": as in
+            send_agent_task (blank for Claude Opus 5.5), "effort": low, medium, high or blank, "folder": where it
+            works (optional; required to differ between parts when mode is work)}.
+        mode: research (look, read, investigate; changes nothing) or work (make changes).
+        project: Configured project the agents belong to; Jarvis unless the work is in another project.
+    """
+    import parallel
+    if TERMINAL.running:
+        return "The separate terminal task is still running. Wait or stop it first."
+    return parallel.GROUPS.start(SESSIONS, goal, parts, mode, project)
+
+
+@beta_tool(eager_input_streaming=True)
+def parallel_status() -> str:
+    """How a running parallel job is going: which parts have finished. Only when the user asks."""
+    import parallel
+    return parallel.GROUPS.status()
 
 
 @beta_tool(eager_input_streaming=True)
@@ -1472,7 +1511,7 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
          terminal_status, stop_terminal_task, open_agent_session, send_agent_task, message_agent,
-         agent_session_status, list_agent_sessions, stop_agent_session, move_app_window, list_app_windows,
+         agent_session_status, list_agent_sessions, stop_agent_session, parallel_agents, parallel_status, move_app_window, list_app_windows,
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          run_command, read_file, search_text, edit_file, write_file,
          search_knowledge, read_knowledge_note, create_knowledge_note, update_knowledge_note,

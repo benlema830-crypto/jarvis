@@ -1,6 +1,8 @@
 """Which model an agent runs on. Jarvis chooses per task; this is the menu and the plumbing.
 
   opus    Claude Opus 5.5 on the owner's Claude plan. The default: most work goes here.
+  fable   Claude Fable 5.2, the most capable. For the biggest and hardest jobs: a large build, a deep
+          investigation, something Opus got stuck on. Slower, and it uses more of the plan.
   sonnet  Claude Sonnet 5.5. Routine, well-defined jobs where a quicker answer is worth more than depth.
   haiku   Claude Haiku 5.5. One-step chores.
   codex   Codex on the owner's ChatGPT plan. Runs inside Codex's sandbox, and can take a message while it works.
@@ -22,7 +24,8 @@ import urllib.request
 import preferences
 
 DEFAULT = "opus"
-CLAUDE = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+CLAUDE = {"opus": "claude-opus-5-5", "fable": "claude-fable-5-2", "sonnet": "claude-sonnet-5-5",
+          "haiku": "claude-haiku-5-5"}
 CHOICES = (*CLAUDE, "codex", "local")
 EFFORTS = ("low", "medium", "high")
 LOCAL_URL = "http://127.0.0.1:11435"
@@ -32,9 +35,10 @@ LOCAL_CONTEXT = 32768              # at Ollama's default (4096) it lost the task
 # What people say, mapped to a choice. Anything else is refused with the list, never guessed.
 ALIASES = {"": "", "auto": "", "default": "", "claude": "opus", "opus 5.5": "opus", "claude opus": "opus",
            "claude-opus-5-5": "opus", "sonnet 5.5": "sonnet", "claude sonnet": "sonnet", "claude-sonnet-5-5": "sonnet",
+           "fable 5.2": "fable", "claude fable": "fable", "claude-fable-5-2": "fable", "mythos": "fable",
            "haiku 5.5": "haiku", "claude haiku": "haiku", "claude-haiku-5-5": "haiku", "gpt": "codex", "chatgpt": "codex",
            "openai": "codex", "qwen": "local", "ollama": "local", "offline": "local", "local model": "local"}
-WORDS = {"opus": "Claude Opus 5.5", "sonnet": "Claude Sonnet 5.5", "haiku": "Claude Haiku 5.5", "codex": "Codex",
+WORDS = {"opus": "Claude Opus 5.5", "fable": "Claude Fable 5.2", "sonnet": "Claude Sonnet 5.5", "haiku": "Claude Haiku 5.5", "codex": "Codex",
          "local": "the local model"}
 
 

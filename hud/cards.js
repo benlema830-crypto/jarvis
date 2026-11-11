@@ -66,7 +66,7 @@
     }
     for (const s of state.sessions) {
       const when = s.updated_at || 0, id = `agent:${s.name}:${Math.round(when)}`;
-      if (!['completed', 'failed'].includes(s.status) || !s.report || Date.now() / 1000 - when > RECENT_HOURS * 3600 || dismissed.includes(id)) continue;
+      if (s.group || !['completed', 'failed'].includes(s.status) || !s.report || Date.now() / 1000 - when > RECENT_HOURS * 3600 || dismissed.includes(id)) continue;
       const good = s.status === 'completed';
       cards.push(card(id, 'agent ' + (good ? 'done' : 'failed'), good ? 'Agent finished' : "Agent didn't finish", String(s.name || 'Agent'),
         'It reports: ' + short(plain(s.report), 170), ['This is the agent’s own account, not something Jarvis checked.', 'note'], [

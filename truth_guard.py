@@ -55,7 +55,7 @@ _LOOKED = re.compile(r"\bI(?:'ve|’ve| have)?(?: just| now| already| also)? "
 # Tools that only look. Everything else changes something, and only those can back "I've done it".
 READ_TOOLS = frozenset({
     "home_status", "list_apps", "find_files", "read_clipboard", "look_at_screen",
-    "self_check", "system_status", "get_schedule", "search_history", "held_updates", "get_weather", "recent_activity", "recall_memory",
+    "self_check", "system_status", "get_schedule", "search_history", "held_updates", "parallel_status", "get_weather", "recent_activity", "recall_memory",
     "performance_report", "list_reminders", "agent_status", "terminal_status",
     "list_app_windows", "agent_session_status", "list_agent_sessions", "search_knowledge", "read_knowledge_note",
     "read_file", "search_text", "list_mcp_tools", "list_tasks", "check_email", "read_email", "research_status",
