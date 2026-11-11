@@ -1471,9 +1471,10 @@ def queue_away_job(request: str, kind: str = "build", project: str = "", why: st
             "fable" when the job needs the most capable model's judgment: a hard build, or research that should
             weigh options against what the user has told you and end on one recommendation it can defend. Claude
             Fable 5.2 then works as a full agent in a folder of its own: it can use the web, read the user's files,
-            run commands and write files there. It is slower and uses more of the Claude plan. It is held by rules,
-            not a sandbox: it is refused anything that would need the user's yes and writes only in its folder, but
-            that is weaker than Codex's sandbox, so say that in a few words when you choose it.
+            run commands and write files there. It is slower and uses more of the Claude plan. It runs inside a
+            Linux sandbox on this PC, where only its own folder is shared in (and the user's Documents to read, for
+            research). If that sandbox isn't ready it is held by rules only, which is weaker than Codex's sandbox.
+            The result of this tool says which applies: pass that on in a few words.
     """
     import away_jobs
     if truth_guard.tainted():
@@ -1482,8 +1483,13 @@ def queue_away_job(request: str, kind: str = "build", project: str = "", why: st
     job = away_jobs.QUEUE.add(request, kind, project, why, model)
     reply = f"Queued (id {job['id']}), starting now. It runs by itself and texts the user. Don't claim any results yet."
     if job.get("model"):
-        reply += (f" It runs on {away_jobs.FABLE_WORDS} with files and tools, in its own folder, under rules rather "
-                  "than the Codex sandbox.")
+        try:
+            why_not = away_jobs.QUEUE.sandbox_problem()
+        except Exception as error:
+            why_not = f"the Linux sandbox couldn't be checked ({error})"
+        reply += f" It runs on {away_jobs.FABLE_WORDS} with files and tools, in its own folder, "
+        reply += (f"under rules rather than a sandbox, because {why_not}. Tell the user that." if why_not else
+                  "inside the Linux sandbox: only that folder is shared with this PC.")
     if job["dirty"]:
         reply += (f" Tell the user: the private copy is made from {job['project']}'s last commit, so their "
                   f"{job['dirty']} uncommitted files won't be in it.")

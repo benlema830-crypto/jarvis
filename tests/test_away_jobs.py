@@ -22,13 +22,14 @@ class FakeSessions:
 
     def __init__(self):
         self.running, self.started, self.prepared, self.cancelled = False, [], [], []
-        self.models = []
+        self.models, self.sandboxes = [], []
         self.reply = None
         self.facts = {"commands": 3, "failed_commands": 1, "files": 2, "checks": 1, "failed_checks": 0, "latest": "running tests"}
 
-    def prepare_unattended(self, name, project, folder, model=""):
+    def prepare_unattended(self, name, project, folder, model="", sandbox=None):
         self.prepared.append((name, project, str(folder)))
         self.models.append(model)
+        self.sandboxes.append(sandbox)
         return ""
 
     def start(self, task, name="", mode="research", resume=False, fresh=False, folder="", effort=""):

@@ -55,6 +55,13 @@ UNATTENDED_RULES = RULES.replace(_ASKING, (
     "(deleting or writing outside your folder, machine-wide installs, system or security settings, publishing or "
     "deploying, sending messages, purchases, signing in) is refused. Never look for a workaround: leave it undone, "
     "carry on with the rest, and say in your report what is waiting on the owner."))
+# The same again for a run inside the Linux sandbox (wsl_sandbox.py), where the first line would be untrue.
+SANDBOX_RULES = UNATTENDED_RULES.replace(
+    "on their Windows PC.",
+    "inside a Linux sandbox on their PC (Ubuntu, an ordinary user, no sudo). Only your own folder is shared with "
+    "their Windows PC, plus whatever your task says you may read under /owner. Windows programs can't run here, "
+    "and shell commands reach only package sites (PyPI, GitHub, npm): use your web tools to read anything else.")
+assert SANDBOX_RULES != UNATTENDED_RULES
 AWAY_ANSWER = ("The owner is away and can't answer, so the answer is no. Don't do it. Carry on with everything "
                "else, then finish with your spoken report, saying what you left undone and why.")
 
@@ -131,6 +138,9 @@ class TerminalWorker:
         # switches cc_guard to refusing instead of asking, strips tokens from the environment, drops connected
         # services, and stops the run from putting questions to an empty room.
         self.unattended_root = ""
+        # With unattended_root: run inside the Linux sandbox instead of on Windows (wsl_sandbox.py). None means
+        # no; a dict means yes, and its "read_only" lists the owner's folders to share in for reading.
+        self.sandbox: dict | None = None
 
     @property
     def running(self) -> bool:
@@ -165,6 +175,13 @@ class TerminalWorker:
         if proc and proc.poll() is None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
                            creationflags=subprocess.CREATE_NO_WINDOW)
+            if self._sandboxed:
+                import wsl_sandbox
+                wsl_sandbox.stop()  # ending wsl.exe on Windows doesn't promise the Linux side has ended
+
+    @property
+    def _sandboxed(self) -> bool:
+        return bool(self.unattended_root) and self.sandbox is not None
 
     def _run(self, task: str, session: str | None):
         started = time.time()
@@ -239,6 +256,8 @@ class TerminalWorker:
         """Run Claude Code once; streams its steps to the HUD and returns the final result."""
         import privacy
         prompt = privacy.redact(prompt)
+        if self._sandboxed:
+            return self._claude_in_sandbox(prompt, session)
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)  # use the user's Claude login, not Jarvis's API key
         env.pop("CLAUDECODE", None)
@@ -267,6 +286,25 @@ class TerminalWorker:
             cmd, cwd=self.cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW,
         )
+        return self._follow()
+
+    def _claude_in_sandbox(self, prompt: str, session: str | None) -> dict:
+        """The same run, inside the Linux sandbox: only this job's folder is shared in (see wsl_sandbox.py)."""
+        import wsl_sandbox
+        try:
+            folder = wsl_sandbox.prepare(self.unattended_root, (self.sandbox or {}).get("read_only", ()))
+            self._proc = wsl_sandbox.launch(
+                cwd=folder, prompt=prompt, rules=SANDBOX_RULES.format(off_limits=worksafe.blocked_apps()),
+                model=self.model or "", effort=self.effort or "", resume=session or "",
+                permission_mode="plan" if self.research else "bypassPermissions")
+            return self._follow()
+        except RuntimeError as error:
+            return {"is_error": True, "result": f"The Linux sandbox couldn't be used: {error}"}
+        finally:
+            wsl_sandbox.stop()  # nothing the agent started outlives its run, and the shares go with it
+
+    def _follow(self) -> dict:
+        """Read a started run's events to its end: steps to the HUD, the billing guard, and the final result."""
         if self._cancel.is_set():
             self._kill()
         result: dict = {}

@@ -1,0 +1,39 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/.claude/.credentials.json", "~/.claude.json"]
+    },
+    "network": {
+      "strictAllowlist": true,
+      "allowedDomains": [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "registry.npmjs.org"
+      ]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.claude.json)",
+      "Edit(~/.claude/**)",
+      "Edit(~/.claude.json)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep",
+        "hooks": [{"type": "command", "command": "/usr/bin/python3 /opt/jarvis/cc_guard.py"}]
+      }
+    ]
+  }
+}

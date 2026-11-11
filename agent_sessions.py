@@ -311,6 +311,7 @@ class Worker:
         worker.fixed_effort, worker.env_extra = entry.get("effort", ""), dict(entry.get("agent_env") or {})
         if entry.get("unattended"):
             worker.unattended_root = entry["cwd"]  # nobody to ask: cc_guard refuses instead (see terminal.py)
+            worker.sandbox = entry.get("sandbox")  # set: the run happens inside the Linux sandbox (wsl_sandbox.py)
         def save_session(session_id):
             with self.lock:
                 entry["thread_id"] = session_id
@@ -724,12 +725,15 @@ class SessionManager:
             self.publish()
         return f"{self.entries[key]['name']} is ready in {project_name}. Its session is shown in Jarvis. No task has started yet."
 
-    def prepare_unattended(self, name, project, folder, model=""):
+    def prepare_unattended(self, name, project, folder, model="", sandbox=None):
         """Point a session at a job's private folder, for work with nobody around (away_jobs). "" when ready.
 
         `model` blank means Codex in its sandbox, the strict choice. A Claude model (the owner's call, for Fable)
         works in the same folder under cc_guard's unattended rules instead: refused rather than asked, file
-        writes kept to the folder, no tokens in its environment. That is a guard, not a sandbox."""
+        writes kept to the folder, no tokens in its environment. That is a guard, not a sandbox.
+
+        `sandbox` (a dict, see terminal.TerminalWorker.sandbox) puts that Claude agent inside the Linux sandbox
+        instead, where only this folder is shared in. The caller checks wsl_sandbox.problem() first."""
         with self.lock:
             self._load()
             key = name.casefold()
@@ -737,7 +741,7 @@ class SessionManager:
                 return f"{name} is still working."
             entry = self.entries.setdefault(key, {"name": name, "status": "ready", "task": "", "report": "", "progress": "Ready for a task."})
             entry.update(project=project, cwd=str(folder), provider="codex", thread_id=None, unattended=True,
-                         unattended_model=model or "codex")
+                         unattended_model=model or "codex", sandbox=sandbox if model else None)
             self._save()
             self.publish()
         return ""

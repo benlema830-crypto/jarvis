@@ -59,11 +59,11 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
-| Agents | agent_sessions.py (sessions and workers), terminal.py (a Claude Code run), agent.py (the screen agent), agent_models.py (which model a job runs on), parallel.py (several agents on one job, with an optional lead), cc_guard.py (what an agent may do), approvals.py, task_effort.py (learned per-task effort) |
+| Agents | agent_sessions.py (sessions and workers), terminal.py (a Claude Code run), agent.py (the screen agent), agent_models.py (which model a job runs on), parallel.py (several agents on one job, with an optional lead), cc_guard.py (what an agent may do), wsl_sandbox.py and sandbox/ (the Linux sandbox an unattended Claude agent runs in), approvals.py, task_effort.py (learned per-task effort) |
 | Direct terminal | direct_tools.py (run_command, read_file, search_text, edit_file, write_file: the conversation's own shell and file tools, through cc_guard) |
 | Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return; Codex by default, Claude Fable 5.2 when asked) |
 | Truthfulness | truth_guard.py (a receipt for every action; ClaimGate holds an unbacked "I've done it" and makes the brain answer again; agent OUTCOME lines; which tools ran this turn). home_assistant.control reads each device back before reporting |
-| Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_phone.py |
+| Setup scripts | scripts/setup_telegram.py, scripts/setup_holo.ps1, scripts/setup_local_brain.py, scripts/setup_phone.py, scripts/setup_wsl_sandbox.py |
 | Checks | scripts/run_tests.py (the unit tests, and proof they left data/ alone); scripts/verify_project.py; ruff.toml (lint for likely bugs); tests/check_brain_browser.py, tests/check_holo_browser.py (inert browser checks); scripts/measure.py (speed scorecard); docs/reviews/ (code reviews) |
 
 ## Runtime data
@@ -164,10 +164,38 @@ to have files and tools, not web reading only. A Fable build goes through every 
 research is a full agent in an empty folder of its own: web, the owner's files to read, commands, files it
 writes there, and a `REPORT.md` that is saved to the vault under Research.
 
-Claude Code has no sandbox on this PC, so the protection is `cc_guard.unattended`, switched on by
+Claude Code has no sandbox on Windows. Without one, the protection is `cc_guard.unattended`, switched on by
 `JARVIS_UNATTENDED_ROOT` in the agent's environment: whatever would need a yes is refused rather than asked, the
 file tools write only inside the job's folder, deleting stays inside it, the shell can't be moved out of it,
 credentials files can't be read, and the environment carries no tokens and no connected services. Tested with a
 real agent on 2026-11-11: an outside write, a `git push` and an outside delete were each refused. These rules
-judge what the agent asks to do. A program it writes and runs is not held by them, so Codex in its sandbox
-stays the default and the stricter choice.
+judge what the agent asks to do. A program it writes and runs is not held by them.
+
+## The Linux sandbox for Fable away jobs (2026-11-11)
+
+Claude Code does have a sandbox on Linux, and Windows can run a small Linux (WSL2). The owner asked for it the
+same day, so a Fable away job now runs there whenever it is ready (`wsl_sandbox.py`, files in `sandbox/`, made
+by `scripts/setup_wsl_sandbox.py`):
+
+- **A distro of its own, `JarvisSandbox`** (Ubuntu 24.04). No Windows drive is mounted in it and it can't start
+  Windows programs. The agent is an ordinary user with no sudo. The whole VM is capped at 4 GB (`~/.wslconfig`).
+- **One folder shared in per job.** Before each run Jarvis, as root, mounts the job's folder at `/work/<name>`,
+  and for research the owner's Documents at `/owner/Documents`, read-only. Nothing else of the PC is visible.
+  After each run the distro is shut down, so nothing the agent started carries on and its memory is returned.
+- **Claude Code's own sandbox inside**, from a settings file the agent can't change: every shell command is
+  held to the job's folder and to PyPI, GitHub and npm, with no way to run one unsandboxed. `cc_guard.py` still
+  runs before every tool call, because that sandbox doesn't cover Claude's file tools.
+- **Nothing of Jarvis's is in there:** no tokens, no connected services, and Jarvis's own ports don't answer.
+
+Checked for real on 2026-11-11, as the agent user: no drive visible, `sudo`, `su` and `mount` refused, a write
+and a delete in the read-only share refused by Linux, a Windows program copied into the job's folder would not
+start, and Jarvis's ports 7778, 7781, 7782 and 11435 were closed from inside.
+
+What it does not do. The agent can still read the web and whatever was shared in, so a job's folder and, for
+research, Documents could be sent somewhere by an agent that a web page talked into it. A build of a
+Windows-only project (Jarvis itself) can't run its tests inside; Jarvis's own re-run on Windows settles those.
+
+Two steps are the owner's: installing WSL (administrator, then a restart) and signing Claude Code in inside the
+sandbox, once. Until it is ready a Fable job runs under the rules above, and its first text says so and why.
+`away_jobs.AwayQueue._claude_setup` decides once per job; `wsl_sandbox.problem()` re-checks the lockdown before
+every job, so a sandbox someone loosened by hand is not trusted. Codex stays the default for away work.
