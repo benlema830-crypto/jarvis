@@ -151,8 +151,7 @@ class BackgroundEntryPointTest(unittest.TestCase):
     def test_terminal_and_screen_start_capture_destination(self):
         import agent
         import terminal
-        with mock.patch.object(agent.anthropic, 'Anthropic'), \
-                mock.patch.object(agent.Agent, '_configure_screen'), \
+        with mock.patch.object(agent.Agent, '_configure_screen'), \
                 mock.patch.object(terminal, '_claude_exe', return_value='fake.exe'), \
                 mock.patch.object(hud, 'emit'):
             for worker in (terminal.TerminalWorker(), agent.Agent()):

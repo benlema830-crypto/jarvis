@@ -72,6 +72,8 @@ class ClaudeCodeBrain:
         self.run_tool = None
         self.tool_count = 0
         self.cancel = None
+        # The conversation keeps these defaults; the screen agent (agent.py) sets its own for a task.
+        self.max_turns, self.effort, self.web = MAX_TURNS, "low", True
         atexit.register(self.close)
 
     def _sync(self, coroutine, timeout=None):
@@ -81,7 +83,7 @@ class ClaudeCodeBrain:
 
     def _call_tool(self, name, args):
         self.tool_count += 1
-        if (self.cancel is not None and self.cancel.is_set()) or self.tool_count > MAX_TURNS or not self.run_tool:
+        if (self.cancel is not None and self.cancel.is_set()) or self.tool_count > getattr(self, 'max_turns', MAX_TURNS) or not self.run_tool:
             return {"content": [{"type": "text", "text": "Tool execution stopped."}], "is_error": True}
         output = self.run_tool(SimpleNamespace(name=name, id=f"cc{self.tool_count}", input=args))
         return {"content": _mcp_content(output.get("content", "")), "is_error": bool(output.get("is_error"))}
@@ -108,18 +110,19 @@ class ClaudeCodeBrain:
 
     async def _connect(self, model, system, definitions):
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        web = ["WebSearch", "WebFetch"] if getattr(self, "web", True) else []
         options = ClaudeAgentOptions(
             model=model,
             system_prompt=system,
-            tools=["WebSearch", "WebFetch"],          # no shell, files or subagents
-            allowed_tools=[f"mcp__{SERVER}", "WebSearch", "WebFetch"],
+            tools=web,                                # no shell, files or subagents
+            allowed_tools=[f"mcp__{SERVER}", *web],
             permission_mode="dontAsk",                # anything not allowed above is denied
             mcp_servers={SERVER: self._server(definitions)},
             strict_mcp_config=True,                   # not the owner's own MCP servers
             setting_sources=[],                       # not the owner's settings, hooks or CLAUDE.md
             include_partial_messages=True,            # stream text so Jarvis speaks as it arrives
-            effort="low",                             # quick replies, like the API conversation path
-            max_turns=MAX_TURNS,
+            effort=getattr(self, "effort", "low"),    # quick replies in conversation
+            max_turns=getattr(self, "max_turns", MAX_TURNS),
             cwd=str(HERE),
             env={"ANTHROPIC_API_KEY": ""},            # use the claude.ai login, never the API key
         )

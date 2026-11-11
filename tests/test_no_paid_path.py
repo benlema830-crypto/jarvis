@@ -18,9 +18,12 @@ class NoPaidKeys(unittest.TestCase):
     def test_all_three_paid_services_are_covered(self):
         self.assertEqual(set(jarvis.PAID_KEYS), {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY"})
 
-    def test_screen_agent_builds_no_client_at_start(self):
+    def test_screen_agent_has_no_api_client_at_all(self):
+        import agent
         import tools
-        self.assertIsNone(tools.AGENT.client)
+        self.assertFalse(hasattr(agent, "anthropic"))
+        self.assertFalse(hasattr(tools.AGENT, "client"))
+        self.assertIsNone(tools.AGENT.brain)  # a Claude Code session exists only while a task runs
 
 
 class StageLog(unittest.TestCase):

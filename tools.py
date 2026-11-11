@@ -1490,8 +1490,6 @@ def run_tool(block) -> dict:
     try:
         import preferences
         if preferences.read().get('subscription_only'):
-            if block.name == 'do_on_computer':
-                raise ValueError('The old autonomous screen agent requires the Claude API and is disabled. Use direct window/file tools or an on-demand screenshot instead.')
             if block.name == 'open_agent_session' and block.input.get('provider') == 'claude':
                 raise ValueError('Only Codex sessions are enabled in subscription-only mode.')
             if block.name == 'switch_voice' and block.input.get('engine', '').lower().strip() == 'elevenlabs':

@@ -1,7 +1,8 @@
 """Agent mode: Jarvis operates the PC himself - clicking, typing, running scripts - to get a task done.
 
-A stronger model (Claude Sonnet 5.5) drives the mouse and keyboard through Claude's computer
-use toolset, one screenshot at a time, in the background while Jarvis carries on talking.
+Claude drives the mouse and keyboard, one screenshot at a time, in the background while Jarvis carries on
+talking. It runs on the owner's Claude plan through Claude Code (claude_code_brain.py), never on API credits:
+the actions below are offered to it as ordinary tools, and each call comes back with a fresh screenshot.
 
 Safety:
   - "Jarvis, stop", Ctrl+Alt+J, the HUD's STOP button, or flinging the mouse into a screen
@@ -23,7 +24,6 @@ import threading
 import response_routing
 import time
 
-import anthropic
 import desktop
 import pyautogui
 import pyperclip
@@ -38,24 +38,12 @@ import worksafe
 MODEL = os.getenv("JARVIS_AGENT_MODEL", "claude-sonnet-5-5")
 EFFORT = os.getenv("JARVIS_AGENT_EFFORT", "low")  # normal effort; task_effort raises it for tasks that prove hard
 HIGHER = {"low": "medium", "medium": "high"}
-ESCALATE_STEPS = 15     # a task still going after this many steps gets more thought for the rest
-ESCALATE_ERRORS = 2     # ...as does one whose actions failed this many turns in a row
 SETTLE_SECONDS = 0.4  # let the screen update before the after-action screenshot
 MAX_STEPS = 60
 MAX_MINUTES = 15
 SHOT_LONG_EDGE = 1456  # screenshots are scaled to this; Claude's coordinates are in that space
 HOME = os.path.expanduser("~")
-NOT_EXECUTED = "Not executed: an earlier computer action in this turn failed."
-BETAS = ["context-management-2025-06-27", "server-side-fallback-2026-07-01"]
-# Old screenshots are cleared server-side so long tasks stay fast and cheap
-CONTEXT_MANAGEMENT = {"edits": [{
-    "type": "clear_tool_uses_20250919",
-    "trigger": {"type": "input_tokens", "value": 40000},
-    "keep": {"type": "tool_uses", "value": 8},
-    "clear_at_least": {"type": "input_tokens", "value": 10000},
-    "exclude_tools": ["ask_user"],
-}]}
-
+NOT_EXECUTED = "Not executed: an earlier action in this call failed."
 
 pyautogui.FAILSAFE = True  # mouse into a screen corner = emergency stop
 pyautogui.PAUSE = 0.05
@@ -63,8 +51,8 @@ pyautogui.PAUSE = 0.05
 SYSTEM = """You are the hands of JARVIS, an AI assistant, operating the user's Windows 11 PC to complete one task.
 
 How to work - speed matters, the user is waiting and can't use the mouse meanwhile:
-- After each turn of actions you automatically get a fresh screenshot in the last action's result, so don't request one separately (only after a wait).
-- Chain several actions in one turn whenever you can predict the outcome, e.g. click a box, type, press enter. Look again only when the next step depends on what happens.
+- Call computer with a list of actions. After the list runs you automatically get a fresh screenshot, so don't ask for one separately (only as your very first call, to see the screen, or after a wait).
+- Put several actions in one call whenever you can predict the outcome, e.g. click a box, type, press enter. Look again only when the next step depends on what happens.
 - Prefer keyboard shortcuts and Windows search (press super, type the app's name, press enter) over hunting for icons.
 - For file, folder and settings chores, one PowerShell script via run_powershell is far faster than clicking.
 
@@ -77,12 +65,36 @@ Rules:
 - When the task is done, or can't be done, stop calling tools. Your final reply is spoken aloud by JARVIS. For a simple success, give only the shortest useful confirmation, e.g. "Roblox opened." Only claim what you verified. For a failure, briefly state the problem and the necessary next step. Use more detail only when the requested result, an important caveat or a decision needs it. No filler, jokes, automatic "sir", or "anything else?" follow-up. Plain spoken English, no markdown.
 
 The full desktop is {w}x{h} in your screenshot coordinates, covering all active monitors.
-Monitor map: {monitors}. Use zoom to read small text on a particular monitor.
+Monitor map: {monitors}. Use the zoom action to read small text or to aim at a small target before clicking it.
 All mouse and zoom coordinates refer to this full-desktop image, including after a zoom.
 Black gaps between monitors are not clickable."""
 
+ACTIONS = ["screenshot", "zoom", "left_click", "right_click", "middle_click", "double_click", "triple_click",
+           "mouse_move", "left_click_drag", "left_mouse_down", "left_mouse_up", "scroll", "type", "key", "hold_key",
+           "wait", "cursor_position"]
 TOOLS = [
-    {"type": "computer_toolset_20260801"},
+    {
+        "name": "computer",
+        "description": "Use the mouse and keyboard and see the screen. Give a list of actions; they run in order and "
+                       "stop at the first failure. You get a screenshot of the result afterwards. Coordinates are "
+                       "[x, y] pixels in the screenshot you were last shown.",
+        "input_schema": {"type": "object", "properties": {"actions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+            "type": "object", "properties": {
+                "action": {"type": "string", "enum": ACTIONS},
+                "coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
+                               "description": "Where to click, move or scroll. Omit to use the current pointer position."},
+                "start_coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
+                                     "description": "left_click_drag: where the drag starts."},
+                "text": {"type": "string", "description": "type: the text. key and hold_key: a key or combination such "
+                                                           "as enter, ctrl+s, alt+tab, super. Clicks: modifier keys to hold."},
+                "region": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4,
+                           "description": "zoom: [x0, y0, x1, y1] to enlarge."},
+                "scroll_direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+                "scroll_amount": {"type": "integer", "description": "Notches to scroll; default 3."},
+                "duration": {"type": "number", "description": "wait and hold_key: seconds."},
+                "repeat": {"type": "integer", "description": "key: how many times; default 1."},
+            }, "required": ["action"]}}}, "required": ["actions"]},
+    },
     {
         "name": "ask_user",
         "description": "Ask the user a yes/no question out loud and wait for their spoken answer. "
@@ -139,7 +151,9 @@ class Blocked(Exception):
 
 class Agent:
     def __init__(self):
-        self.client = None  # made on first use: Jarvis no longer loads an API key at start
+        self.brain = None  # the Claude Code session for the task in hand
+        self._stopped_why = ""  # set when Jarvis himself ends a task (time limit, mouse in a corner)
+        self._said = []
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
         self.task = ""
@@ -188,109 +202,103 @@ class Agent:
 
     # ---------- the loop ----------
 
-    def _escalate(self, why: str):
-        higher = HIGHER.get(self.effort)
-        if higher:
-            print(f"(Screen agent: {why} - thinking harder, effort {higher})", flush=True)
-            self.effort, self.escalated = higher, True
-
     def _run(self, task: str):
+        import claude_code_brain
         started = time.time()
         report, ok = "", False
         self.effort, reason = task_effort.choose("screen", task, EFFORT, HIGHER.get(EFFORT, EFFORT))
-        self.escalated, failed_turns = False, 0
+        self.escalated, self._stopped_why = False, ""
         print(f"(Screen agent effort: {self.effort} - {reason})", flush=True)
+        clock = threading.Timer(MAX_MINUTES * 60, self._give_up, args=("the task was taking too long",))
+        clock.daemon = True
+        clock.start()
+        brain = self.brain = claude_code_brain.ClaudeCodeBrain()
+        brain.max_turns, brain.effort, brain.web = MAX_STEPS, self.effort, False
         try:
-            # The first screenshot comes with the task, so the first step can already act.
-            messages = [{"role": "user", "content": [{"type": "text", "text": f"Task from the user: {task}\n\nThe screen right now:"}]
-                         + self._screenshot()}]
+            import privacy
             system = SYSTEM.format(w=self.shot_size[0], h=self.shot_size[1],
                                    monitors=self.layout.describe(self.shot_size), off_limits=worksafe.blocked_apps())
-            while True:
-                if self._cancel.is_set():
-                    report = "Stopped by the user."
-                    break
-                if self.steps >= MAX_STEPS or time.time() - started > MAX_MINUTES * 60:
-                    report = f"Stopped after {self.steps} steps without finishing - the task was taking too long."
-                    break
-                self.steps += 1
-                import privacy
-                if self.client is None:
-                    self.client = anthropic.Anthropic()
-                response = self.client.beta.messages.create(
-                    model=MODEL, max_tokens=16000, system=privacy.redact(system), tools=TOOLS, messages=privacy.payload(messages),
-                    betas=BETAS, context_management=CONTEXT_MANAGEMENT, fallbacks="default",
-                    output_config={"effort": self.effort}, cache_control={"type": "ephemeral"},
-                )
-                if response.stop_reason == "refusal":
-                    report = "The model declined to carry out this task."
-                    break
-                messages.append({"role": "assistant", "content": response.content})
-                if response.stop_reason == "pause_turn":
-                    continue
-                uses = [b for b in response.content if b.type == "tool_use"]
-                if not uses:
-                    report = " ".join(b.text for b in response.content if b.type == "text").strip() or "Done."
-                    ok = True
-                    break
-                results = self._execute(uses)
-                messages.append({"role": "user", "content": results})
-                failed_turns = failed_turns + 1 if any(r.get("is_error") for r in results) else 0
-                if not self.escalated and failed_turns >= ESCALATE_ERRORS:
-                    self._escalate("actions keep failing")
-                elif not self.escalated and self.steps >= ESCALATE_STEPS:
-                    self._escalate("the task is taking many steps")
-        except pyautogui.FailSafeException:
-            report = "Stopped: the mouse was moved into a screen corner."
-        except anthropic.APIError as e:
-            report = f"The agent hit an API error: {getattr(e, 'message', e)}"
+            request = [{"role": "user", "content": privacy.redact(
+                f"Task from the user: {task}\n\nStart by calling computer with a single screenshot action to see the screen.")}]
+            # The spoken report is what it said after its last action, not its notes to itself along the way.
+            self._said = []
+            whole = brain.ask(MODEL, system, request, TOOLS, self._tool, self._said.append, self._cancel)
+            report = "".join(self._said).strip() or whole.strip() or "It finished without saying what it did."
+            ok = not self._stopped_why
+            if self._stopped_why:
+                report = f"Stopped after {self.steps} steps without finishing - {self._stopped_why}."
+        except InterruptedError:
+            report = (f"Stopped after {self.steps} steps without finishing - {self._stopped_why}." if self._stopped_why
+                      else "Stopped by the user.")
+        except claude_code_brain.LimitReached:
+            report = "I had to stop: my Claude plan's usage limit is reached. Nothing was charged to API credits."
+        except claude_code_brain.WouldBillAPI:
+            report = "I stopped before starting: Claude Code isn't signed in to your Claude plan, and I won't use API credits."
         except Exception as e:
             report = f"The agent failed: {e!r}"
         finally:
+            clock.cancel()
+            brain.close()
+            self.brain = None
             hud.emit("agent", running=False, task=task, kind="screen")
             task_effort.record("screen", task, self.effort, ok, time.time() - started, report, self.steps,
-                               self.escalated, stopped_by_user=self._cancel.is_set() or report.startswith("Stopped:"))
+                               self.escalated, stopped_by_user=self._cancel.is_set() and not self._stopped_why)
             if self.on_done:
                 self.on_done({"task": task, "ok": ok, "report": report, "steps": self.steps})
 
-    def _execute(self, uses) -> list[dict]:
-        """Run one turn's tool calls in order; after a failure, the rest aren't run."""
-        results, failed = [], False
-        for block in uses:
-            toolset = getattr(block, "toolset_name", None)
-            result = {"type": "tool_result", "tool_use_id": block.id}
-            if toolset:
-                result["toolset_name"] = toolset
-            inp = block.input if isinstance(block.input, dict) else block.input.model_dump(exclude_none=True)
-            if failed or self._cancel.is_set():
-                results.append({**result, "is_error": True,
-                                "content": "Stopped by the user." if self._cancel.is_set() else NOT_EXECUTED})
-                failed = True
-                continue
+    def _give_up(self, why: str):
+        """End the task from outside the model's turn (time limit, or the mouse flung into a corner)."""
+        self._stopped_why = self._stopped_why or why
+        self._cancel.set()
+
+    def _tool(self, block) -> dict:
+        """One tool call from Claude Code: run it and hand back text and screenshots. Never raises."""
+        self.steps += 1
+        self._said = []  # anything said before this call was thinking aloud, not the final report
+        inp = block.input if isinstance(block.input, dict) else {}
+        try:
+            if self._cancel.is_set():
+                raise RuntimeError("Stopped by the user.")
+            if block.name == "computer":
+                content = self._actions(inp.get("actions"))
+            elif block.name == "ask_user":
+                content = self._ask(str(inp["question"]))
+            elif block.name == "run_powershell":
+                content = self._powershell(str(inp["script"]), str(inp.get("purpose", "run a script")))
+            else:
+                raise ValueError(f"Unknown tool {block.name}")
+            return {"content": content}
+        except pyautogui.FailSafeException:
+            self._give_up("the mouse was moved into a screen corner")
+            return {"content": "Stopped: the mouse was moved into a screen corner.", "is_error": True}
+        except Exception as e:
+            return {"content": f"Error: {e}", "is_error": True}
+
+    def _actions(self, actions) -> list[dict]:
+        """Run a list of mouse and keyboard actions in order, stopping at the first failure, then show the screen."""
+        if not isinstance(actions, list) or not actions or len(actions) > 12:
+            raise ValueError("Give 1 to 12 actions.")
+        content, last = [], ""
+        for n, item in enumerate(actions, 1):
+            if self._cancel.is_set():
+                raise RuntimeError("Stopped by the user.")
+            if not isinstance(item, dict) or item.get("action") not in ACTIONS:
+                raise ValueError(f"Action {n} is not one of: {', '.join(ACTIONS)}.")
+            last = item["action"]
             try:
-                if toolset == "computer":
-                    content = self._computer(block.name, inp)
-                elif block.name == "ask_user":
-                    content = self._ask(inp["question"])
-                elif block.name == "run_powershell":
-                    content = self._powershell(inp["script"], inp.get("purpose", "run a script"))
-                else:
-                    raise ValueError(f"Unknown tool {block.name}")
-                results.append({**result, "content": content})
+                result = self._computer(last, {k: v for k, v in item.items() if k != "action"})
             except pyautogui.FailSafeException:
                 raise
             except Exception as e:
-                failed = True
-                results.append({**result, "is_error": True, "content": f"Error: {e}"})
-
-        # Show the result of the batch straight away, saving a round trip for a screenshot
-        last = results[-1] if results else None
-        last_use = uses[-1] if uses else None
-        if (last and not last.get("is_error") and getattr(last_use, "toolset_name", None) == "computer"
-                and last_use.name not in ("screenshot", "zoom", "cursor_position")):
-            time.sleep(SETTLE_SECONDS)
-            last["content"] = last["content"] + [{"type": "text", "text": "The screen now:"}] + self._screenshot()
-        return results
+                content.append({"type": "text", "text": f"Action {n} ({last}) failed: {e}. {NOT_EXECUTED if n < len(actions) else ''}".strip()})
+                break
+            content += [b for b in result if not (b.get("type") == "text" and b.get("text") == "OK")]
+        else:
+            if last in ("screenshot", "zoom", "cursor_position"):
+                return content
+            content.append({"type": "text", "text": f"All {len(actions)} actions ran."})
+        time.sleep(SETTLE_SECONDS)
+        return content + [{"type": "text", "text": "The screen now:"}] + self._screenshot()
 
     # ---------- the computer ----------
 
