@@ -38,7 +38,7 @@ class IsolatedMemory(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def brain(self):
-        with mock.patch.object(jarvis.anthropic, 'Anthropic'):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY):
             brain = jarvis.Brain()
         brain.config = dict(brain.selection.begin()); brain.selection.end()
         brain.seen, brain.history = [], []

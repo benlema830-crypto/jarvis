@@ -13,11 +13,11 @@ class CodexTests(unittest.TestCase):
             cb.connect(lambda e:None,cancel)
         self.assertIs(construct.call_args.args[2],cancel)
 
-    def test_subscription_only_rejects_api_selection(self):
+    def test_api_providers_cannot_be_selected(self):
         import model_provider
-        with patch.object(model_provider.preferences, 'read', return_value={'subscription_only': True}):
+        with patch.object(model_provider, 'catalog', return_value={'claude_code': ['claude-opus-5-5'], 'codex': ['gpt-test']}):
             selection = model_provider.Selection()
-            with self.assertRaisesRegex(ValueError, 'disabled'):
+            with self.assertRaisesRegex(ValueError, 'listed model'):
                 selection.request({'provider': 'openai', 'model': 'gpt-4.1-mini'})
 
     def test_api_key_auth_is_rejected(self):

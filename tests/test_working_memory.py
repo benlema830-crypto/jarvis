@@ -111,7 +111,7 @@ class WorkingMemoryTest(unittest.TestCase):
         brain = jarvis.Brain()
         brain._run = lambda speak: speak("Okay")
         self.sessions(a={"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Deploy"})
-        with mock.patch.object(jarvis.router, "choose", return_value=None):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY):
             brain.ask("What's going on?", mock.Mock())
             brain.ask("And now?", mock.Mock())
             self.sessions(a={"name": "Frontier", "project": "Rocket Frontier", "status": "completed",
@@ -122,19 +122,9 @@ class WorkingMemoryTest(unittest.TestCase):
         self.assertNotIn(jarvis.STATE_MARK, users[1])
         self.assertIn("Deployed.", users[2])
         brain.messages = []  # e.g. cleared after a privacy change: the brief comes back
-        with mock.patch.object(jarvis.router, "choose", return_value=None):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY):
             brain.ask("Hello", mock.Mock())
         self.assertIn(jarvis.STATE_MARK, brain.messages[0]["content"])
-
-    def test_local_model_turn_skips_brief(self):
-        import jarvis
-        brain = jarvis.Brain()
-        brain._run = lambda speak: speak("Okay")
-        self.sessions(a={"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Deploy"})
-        with mock.patch.object(jarvis.router, "choose", return_value={"provider": "ollama", "model": "m"}):
-            brain.ask("Turn on the lights", mock.Mock())
-        self.assertNotIn(jarvis.STATE_MARK, brain.messages[0]["content"])
-
 
 if __name__ == "__main__":
     unittest.main()

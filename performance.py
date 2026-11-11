@@ -68,7 +68,7 @@ def conversation(days=14, now=None):
     since = (now or time.time()) - days * 86400
     groups = defaultdict(list)
     for row in _rows(TURNS, since):
-        groups[f"{row.get('provider')}/{row.get('model')}" + (" (local router)" if row.get("local") else "")].append(row)
+        groups[f"{row.get('provider')}/{row.get('model')}"].append(row)
     out = {}
     for name, rows in groups.items():
         firsts = [r["first"] for r in rows if r.get("first") is not None]

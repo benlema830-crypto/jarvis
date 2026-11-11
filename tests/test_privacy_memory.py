@@ -64,16 +64,6 @@ class LocalFeaturesTest(unittest.TestCase):
         self.assertIn('Likes coffee',brain.system);self.assertNotIn('Likes tea',brain.system)
         self.assertNotIn('Likes tea',jarvis.Brain().system)
 
-    def test_openai_boundary_redacts_without_touching_authentication(self):
-        import model_provider
-        response=Mock(status_code=200)
-        secret='sk-proj-'+'Q'*30
-        with patch.object(model_provider,'load_openai_key',return_value='real-auth'), \
-                patch.object(model_provider.requests,'post',return_value=response) as post:
-            model_provider.Responses()._post({'model':'test','input':secret})
-        self.assertNotIn(secret,str(post.call_args.kwargs['json']))
-        self.assertEqual(post.call_args.kwargs['headers']['Authorization'],'Bearer real-auth')
-
     def test_codex_connection_redacts_model_text_only(self):
         import agent_sessions
         from types import SimpleNamespace

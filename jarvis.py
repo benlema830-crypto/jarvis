@@ -16,7 +16,6 @@ import contextlib
 import ctypes
 import ctypes.wintypes
 import datetime
-import json
 import os
 import re
 import socket
@@ -32,7 +31,6 @@ for _stream in (sys.stdout, sys.stderr):
     if _stream is not None and hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-import anthropic
 import win32api
 import win32event
 import winerror
@@ -52,7 +50,6 @@ import apps  # noqa: E402
 import context  # noqa: E402
 import hud  # noqa: E402
 import memory  # noqa: E402
-import privacy  # noqa: E402
 import response_settings  # noqa: E402
 import reminders  # noqa: E402
 import tools  # noqa: E402
@@ -60,26 +57,16 @@ import truth_guard  # noqa: E402
 import worksafe  # noqa: E402
 from ears import split_wake_word, command_for_mode  # noqa: E402
 import preferences  # noqa: E402
-from tools import TOOL_DEFS, run_tool, web_search_def  # noqa: E402
+from tools import TOOL_DEFS, run_tool  # noqa: E402
 from voice import BRITISH_VOICES, RATE, SentenceBuffer, Voice, spoken_report  # noqa: E402
 import voice_health
 import runtime_metrics
 import conversation_settings
 import model_provider
-import router
 import working_memory
 import performance
-from types import SimpleNamespace
 from instance_config import MUTEX_NAME  # noqa: E402
 
-MODEL = os.getenv("JARVIS_MODEL", "claude-haiku-5-5")
-BETAS = ["compact-2026-01-12"]
-# Models with safety classifiers that can decline a request. "default" fallbacks retry a
-# declined request on a suitable model server-side instead of failing the turn (not Haiku).
-FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
-TOOL_ROUNDS = 25  # model rounds per reply; direct terminal work takes more than a voice command
-COMPACT_AT = 60_000  # input tokens; older conversation is summarized beyond this (API minimum 50,000)
-USAGE_LOG = os.path.join(HERE, "data", "usage.jsonl")
 START_TIME = time.time()
 FOLLOWUP_SECONDS = 8  # after Jarvis answers, you can reply without saying "Hey Jarvis"
 EXIT_PHRASES = {"exit", "quit", "goodbye", "good night", "shut down", "go to sleep", "power down"}
@@ -241,34 +228,12 @@ WAITING_WORDS = {"look_at_screen": "Taking a look.",
                  "check_email": "Checking your inbox.", "read_email": "Checking your inbox."}
 
 
-class Refused(Exception):
-    pass
-
-
 class Interrupted(Exception):
     pass
 
 
-def log_usage(usage):
-    rec = {
-        "t": time.time(),
-        "input": usage.input_tokens,
-        "cache_read": usage.cache_read_input_tokens or 0,
-        "cache_write": usage.cache_creation_input_tokens or 0,
-        "output": usage.output_tokens,
-        "searches": getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0) or 0,
-    }
-    hud.emit("usage", **rec)
-    try:
-        with open(USAGE_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
-    except OSError:
-        pass
-
-
 class Brain:
     def __init__(self):
-        self.client = None  # Claude is initialized only when selected.
         self.selection = model_provider.SELECTION
         self.config = dict(model_provider.DEFAULT)
         # Previous-launch excerpts are read once; this session's own turns live in self.messages.
@@ -279,30 +244,23 @@ class Brain:
         self._state = ''  # the working-memory brief last added to this conversation
         self._response_settings = response_settings.read()
         self.system = self._compose()  # stable between memory/style changes, so it caches
-        self.tools = TOOL_DEFS + [web_search_def()]
         self.messages = []
-        self._openai_turns = []
-        self._openai_message_count = 0
         self._codex_brain = None
         self._claude_code_brain = None
-        self._limit_notice = 0.0  # when Jarvis last said the Claude plan limit was reached
-        self._local = None  # this turn's local model, when the router sent it there
         self.cancel = threading.Event()
         import direct_tools
         direct_tools.cancel = self.cancel  # "stop" also ends a command the turn is running
         self._speech_lock = threading.Lock()
         saved = preferences.read().get('conversation_model')
-        if preferences.read().get('subscription_only') and (not isinstance(saved, dict) or saved.get('provider') not in model_provider.SUBSCRIPTION_PROVIDERS):
-            raise RuntimeError('Subscription-only mode needs a saved Codex or local model. Paid API fallback is disabled.')
         if saved:
             if (isinstance(saved, dict) and set(saved) == {'provider', 'model'} and
-                saved.get('provider') in ('openai', 'anthropic', 'codex', 'claude_code', 'ollama') and isinstance(saved.get('model'), str) and
-                re.fullmatch(r'[A-Za-z0-9_./:-]{1,100}', saved['model'])):
-                # This file is written only after successful validation. Reuse the
-                # preference without a paid startup probe or provider fallback.
+                    saved.get('provider') in model_provider.PROVIDERS and isinstance(saved.get('model'), str) and
+                    re.fullmatch(r'[A-Za-z0-9_./:-]{1,100}', saved['model'])):
+                # This file is written only after successful validation, so it is reused without a start-up probe.
                 self.selection.active = dict(saved)
             else:
-                self.selection.startup_error = 'Saved model configuration is invalid. Select a model before chatting.'
+                self.selection.startup_error = ('The saved brain is not Claude or Codex on your own plan. '
+                                                'Choose one in More > Change model.')
                 self.selection.error = self.selection.startup_error
         self.selection.ready = True
         hud.info.update(model=self.selection.active['model'], provider=self.selection.active['provider'])
@@ -312,15 +270,13 @@ class Brain:
                 + (self._recent_context if recent else '') + response_settings.prompt(self._response_settings))
 
     def _restart_adapters(self, text_only):
-        """Codex threads fix their base prompt at start; OpenAI turns may hold tool pairs."""
+        """Codex threads fix their base prompt at start, so a changed prompt needs a new thread."""
         if self._codex_brain is not None:
             self._codex_brain.close()
         if self._claude_code_brain is not None:
             self._claude_code_brain.close()
         if text_only:
             self.messages = model_provider.text_history(self.messages)
-            self._openai_turns = []
-            self._openai_message_count = 0
 
     def _refresh_context(self):
         privacy_revision = memory.privacy_revision()
@@ -391,16 +347,12 @@ class Brain:
             if self._claude_code_brain is not None:
                 self._claude_code_brain.close()
             self.messages = model_provider.text_history(self.messages)
-            self._openai_turns = []
-            self._openai_message_count = 0
             self.config = config
-        self._local = local = router.choose(text, config)
-        hud.info.update(model=(local or config)['model'], provider=(local or config)['provider'])
+        hud.info.update(model=config['model'], provider=config['provider'])
         self.cancel.clear()
         start = len(self.messages)
         stamp = datetime.datetime.now().strftime("%A %Y-%m-%d %H:%M")
-        # A small local model answering a quick request doesn't need the brief; the main brain gets it next.
-        state = '' if local else self._working_state()
+        state = self._working_state()
         self.messages.append({"role": "user", "content": f"[{stamp}] {state}{text}"})
         spoken = []
         began, first, outcome = time.monotonic(), [], "failed"
@@ -457,13 +409,11 @@ class Brain:
             outcome = "ok"
             self._save_turn(text, " ".join(spoken), self._turn_privacy)
         finally:
-            answered = local or config  # a local turn may still hand over to the main brain mid-turn
             try:  # which model answered and how fast; no words are kept
-                performance.record_turn(answered['provider'], answered['model'], bool(local),
+                performance.record_turn(config['provider'], config['model'], False,
                                         first[0] if first else None, time.monotonic() - began, outcome)
             except OSError:
                 pass
-            self._local = None
             self.selection.end()
 
     def _tool(self, block):
@@ -480,140 +430,12 @@ class Brain:
             timer.cancel()
 
     def _run(self, speak):
-        if self._local:
-            return self._run_local(speak)
-        if self.config['provider'] == 'ollama':
-            return self._run_ollama(speak)
+        """One brain does the talking: Claude or Codex, on the owner's own plan. Nothing here can bill an API."""
         if self.config['provider'] == 'codex':
             return self._run_codex(speak)
         if self.config['provider'] == 'claude_code':
             return self._run_claude_code(speak)
-        if self.config['provider'] == 'openai':
-            return self._run_openai(speak)
-        if self.client is None:
-            self.client = anthropic.Anthropic()
-        fallback = self.config['model'] in FALLBACK_MODELS
-        extra = {"fallbacks": "default"} if fallback else {}
-        for _ in range(TOOL_ROUNDS):
-            buf = SentenceBuffer()
-            voice_health.api_state("requesting")
-            with self.client.beta.messages.stream(
-                model=self.config['model'],
-                max_tokens=4096,
-                system=privacy.redact(self.system),
-                tools=self.tools,
-                messages=privacy.payload(self.messages),
-                betas=BETAS + (["server-side-fallback-2026-07-01"] if fallback else []),
-                **extra,
-                context_management={"edits": [{"type": "compact_20260112",
-                                               "trigger": {"type": "input_tokens", "value": COMPACT_AT}}]},
-                output_config={"effort": "low"},  # quick replies; it still thinks when it needs to
-                cache_control={"type": "ephemeral"},  # reuse the conversation prefix - faster and cheaper
-            ) as stream:
-                for event in stream:
-                    if self.cancel.is_set():
-                        raise Interrupted()
-                    if event.type == "text":
-                        for sentence in buf.feed(event.text):
-                            speak(sentence)
-                    elif event.type == "content_block_start":
-                        kind = event.content_block.type
-                        if kind in ("tool_use", "server_tool_use") and (rest := buf.flush()):
-                            speak(rest)  # say "Let me check" before going quiet to look
-                        if kind == "server_tool_use":
-                            truth_guard.note_tool("web_search")
-                            hud.emit("tool", name=event.content_block.name, input={})
-                        elif kind == "compaction":
-                            print("(condensing older conversation)", flush=True)
-                            hud.emit("tool", name="compaction", input={})
-                response = stream.get_final_message()
-            voice_health.api_state("responded")
-            if self.cancel.is_set():
-                raise Interrupted()
-            if rest := buf.flush():
-                speak(rest)
-            log_usage(response.usage)
-            research_sources = []
-            for block in response.content:
-                for citation in getattr(block, 'citations', None) or []:
-                    url = getattr(citation, 'url', None)
-                    if isinstance(url, str):
-                        research_sources.append({'url': url[:2000],
-                            'title': str(getattr(citation, 'title', '') or '')[:200]})
-            if research_sources:
-                hud.emit('sources', sources=research_sources[:12])
-
-            if response.stop_reason == "refusal":
-                raise Refused()
-            tool_uses = [b for b in response.content if b.type == "tool_use"]
-            if tool_uses and response.stop_reason == "max_tokens":
-                raise RuntimeError("tool input was cut off")
-            self.messages.append({"role": "assistant", "content": response.content})
-            if response.stop_reason == "pause_turn":
-                continue  # a long web search paused; send it back to carry on
-            if not tool_uses:
-                return
-            results = []
-            for b in tool_uses:
-                if self.cancel.is_set():
-                    raise Interrupted()
-                results.append(run_tool(b))
-            self.messages.append({"role": "user", "content": results})
-        raise RuntimeError("too many tool rounds")
-
-    def _run_local(self, speak):
-        """A quick request on the free local model with only the quick tools. Its answer is held
-        until it finishes (well under a second); if Ollama fails, claims an action without a tool
-        behind it, or any tool it tried failed, the answer is dropped and the selected brain answers:
-        a small model tends to cover a failed step with a cheerful "done"."""
-        said, used, failed = [], [], []
-        def tool(block):
-            used.append(block.name)
-            result = run_tool(block)
-            if result.get('is_error'):
-                failed.append(block.name)
-            return result
-        local, self._local = self._local, None
-        selected, self.config = self.config, {'provider': local['provider'], 'model': local['model']}
-        # Past-session excerpts teach a small model to say "done" without the tool.
-        system, self.system = self.system, self._compose(recent=False)
-        try:
-            self._run_ollama(said.append, router.tool_defs(local['tools']), tool, self.messages[-router.RECENT:],
-                             router.KEEP_ALIVE)
-        except model_provider.ProviderError:
-            if len(failed) < len(used):  # something was done; don't do it twice
-                raise
-        else:
-            if (used and not failed) or not (used or local['action']):
-                for sentence in said:
-                    speak(sentence)
-                return
-            self.messages.pop()  # the unbacked local answer
-        finally:
-            self.config, self.system = selected, system  # the selected brain's thread stays open
-        hud.info.update(model=selected['model'], provider=selected['provider'])
-        self._run(speak)
-
-    def _run_ollama(self, speak, tools=None, run=None, history=None, keep_alive='2m'):
-        import ollama_brain
-        buf = SentenceBuffer()
-        def delta(text):
-            for sentence in buf.feed(text):
-                speak(sentence)
-        voice_health.api_state('requesting')
-        try:
-            answer = ollama_brain.ask(self.config['model'], self.system, self.messages if history is None else history,
-                                      tools or TOOL_DEFS, run or run_tool, delta, self.cancel, keep_alive)
-        except InterruptedError:
-            raise Interrupted()
-        except ollama_brain.OllamaError as error:
-            raise model_provider.ProviderError(str(error)) from None
-        if self.cancel.is_set():
-            raise Interrupted()
-        voice_health.api_state('responded')
-        if rest := buf.flush():
-            speak(rest)
-        self.messages.append({'role': 'assistant', 'content': answer})
+        raise model_provider.ProviderError('My brain must be Claude or Codex on your plan. Choose one in More, Change model.')
 
     def _run_codex(self, speak):
         import codex_brain
@@ -639,9 +461,8 @@ class Brain:
         self.messages.append({'role': 'assistant', 'content': answer})
 
     def _run_claude_code(self, speak):
-        """Claude on the owner's Claude plan via Claude Code. If the plan's limit is reached,
-        say so (at most every 30 minutes) and answer with API credits instead, unless the
-        owner turned on subscription-only mode."""
+        """Claude on the owner's Claude plan via Claude Code. If the plan's limit is reached he says so and
+        stops; there is no paid fallback."""
         import claude_code_brain
         if self._claude_code_brain is None:
             self._claude_code_brain = claude_code_brain.ClaudeCodeBrain()
@@ -658,18 +479,8 @@ class Brain:
         except InterruptedError:
             raise Interrupted()
         except claude_code_brain.LimitReached:
-            if preferences.read().get('subscription_only') or spoken:
-                raise model_provider.ProviderError("My Claude plan's usage limit is reached. "
-                                                   "Switch my brain or wait for the limit to reset.") from None
-            if time.time() - self._limit_notice > 1800:
-                self._limit_notice = time.time()
-                speak("My Claude plan limit is reached, so I'm using API credits for now.")
-            subscription = self.config
-            self.config = {'provider': 'anthropic', 'model': subscription['model']}
-            try:
-                return self._run(speak)  # the API path records the answer itself
-            finally:
-                self.config = subscription
+            raise model_provider.ProviderError("My Claude plan's usage limit is reached. "
+                                               "Switch my brain to Codex or wait for the limit to reset.") from None
         except claude_code_brain.WouldBillAPI:
             raise model_provider.ProviderError('Claude Code is not signed in to your Claude plan, so I stopped '
                                                'rather than use API credits. Sign in to Claude Code.') from None
@@ -683,90 +494,6 @@ class Brain:
             speak(rest)
         self.messages.append({'role': 'assistant', 'content': answer})
 
-    def _run_openai(self, speak):
-        # Keep complete Responses turns (including calls, outputs, citations and
-        # encrypted reasoning). Trim only at turn boundaries, never between a
-        # function_call and its output. Cross-provider changes reset this cache.
-        while len(self._openai_turns) > 1 and (len(self._openai_turns) >= 10 or
-                sum(len(json.dumps(t)) for t in self._openai_turns) > 160_000):
-            self._openai_turns.pop(0)
-        prior = [item for turn in self._openai_turns for item in turn]
-        items = prior + model_provider.text_history(self.messages[self._openai_message_count:])
-        turn_start = len(prior)
-        definitions = [{'type': 'function', 'name': t['name'],
-                        'description': t.get('description', ''),
-                        'parameters': t['input_schema'], 'strict': False} for t in TOOL_DEFS]
-        answer = []
-        for _ in range(TOOL_ROUNDS):
-            if self.cancel.is_set():
-                raise Interrupted()
-            buf = SentenceBuffer()
-            final = None
-            voice_health.api_state('requesting')
-            for event in model_provider.Responses().events({
-                'model': self.config['model'], 'instructions': self.system,
-                'input': items, 'tools': definitions + [{'type': 'web_search', 'search_context_size': 'low'}],
-                'max_output_tokens': 4096, 'max_tool_calls': 3,
-                'include': ['reasoning.encrypted_content']}, self.cancel):
-                if self.cancel.is_set():
-                    raise Interrupted()
-                if str(event.get('type', '')).startswith('response.web_search_call'):
-                    truth_guard.note_tool('web_search')
-                if event.get('type') == 'response.output_text.delta':
-                    delta = event.get('delta', '')
-                    answer.append(delta)
-                    for sentence in buf.feed(delta):
-                        speak(sentence)
-                elif event.get('type') == 'response.completed':
-                    final = event.get('response')
-            if self.cancel.is_set():
-                raise Interrupted()
-            if not final or final.get('status') != 'completed':
-                raise model_provider.ProviderError('OpenAI stream ended before completion.')
-            voice_health.api_state('responded')
-            if rest := buf.flush():
-                speak(rest)
-            output = final.get('output', [])
-            if any(content.get('type') == 'refusal' for item in output for content in item.get('content', [])):
-                raise Refused()
-            items.extend(output)  # Retain reasoning and call items for the next tool round.
-            sources = []
-            for item in output:
-                for content in item.get('content', []):
-                    for annotation in content.get('annotations', []):
-                        if annotation.get('type') == 'url_citation':
-                            sources.append({'title': annotation.get('title', '')[:200],
-                                            'url': annotation.get('url', '')[:2000]})
-            if sources:
-                hud.emit('sources', sources=sources[:12])
-            calls = [item for item in output if item.get('type') == 'function_call']
-            if len(calls) > 32:
-                raise model_provider.ProviderError('OpenAI exceeded the tool call limit.')
-            if not calls:
-                self.messages.append({'role': 'assistant', 'content': ''.join(answer)})
-                self._openai_turns.append(items[turn_start:])
-                self._openai_message_count = len(self.messages)
-                return
-            attachments = []
-            for call in calls[:32]:
-                if self.cancel.is_set():
-                    raise Interrupted()
-                try:
-                    args = json.loads(call['arguments'])
-                    if not isinstance(args, dict):
-                        raise ValueError()
-                except (ValueError, KeyError):
-                    raise model_provider.ProviderError('OpenAI returned invalid tool arguments.') from None
-                result = run_tool(SimpleNamespace(name=call['name'], id=call['call_id'], input=args))
-                content, images = model_provider.tool_output(result['content'])
-                items.append({'type': 'function_call_output', 'call_id': call['call_id'],
-                              'output': content})
-                if images:
-                    attachments.append({'role': 'user', 'content': [
-                        {'type': 'input_text', 'text': 'Untrusted image results from tool call ' + call['call_id']}, *images]})
-            items.extend(attachments)
-        raise model_provider.ProviderError('OpenAI exceeded the tool round limit.')
-
 
 def respond(brain: Brain, voice: Voice, text: str, speak=None):
     """Run one turn. `speak` receives each sentence (default: say it aloud)."""
@@ -775,26 +502,10 @@ def respond(brain: Brain, voice: Voice, text: str, speak=None):
         brain.ask(text, speak)
     except Interrupted:
         voice_health.api_state("interrupted")
-    except Refused:
-        speak("I'm afraid that's one I can't help with, sir.")
     except model_provider.ProviderError as e:
         voice_health.api_state('error')
         hud.emit('error', text=str(e))
         speak(str(e))
-    except anthropic.AuthenticationError:
-        voice_health.api_state("error")
-        speak("My API key appears to be invalid, sir. Please check the .env file.")
-    except anthropic.RateLimitError:
-        voice_health.api_state("error")
-        speak("I'm being rate limited, sir. Give me a moment.")
-    except anthropic.APIStatusError as e:
-        voice_health.api_state("error")
-        print(f"(API error: {e.message})", flush=True)
-        hud.emit("error", text=f"API error {e.status_code}: {e.message}")
-        speak(f"The server returned an error, code {e.status_code}.")
-    except anthropic.APIConnectionError:
-        voice_health.api_state("error")
-        speak("I can't reach the network, sir.")
     except Exception as e:
         voice_health.api_state("error")
         print(f"(error: {e!r})", flush=True)
@@ -956,7 +667,7 @@ def saved_provider() -> str:
 
 def wait_for_network(max_seconds: int = 45):
     """At login the network can take a few seconds to come up."""
-    host = {"codex": "chatgpt.com", "openai": "api.openai.com"}.get(saved_provider(), "api.anthropic.com")
+    host = "chatgpt.com" if saved_provider() == "codex" else "api.anthropic.com"
     deadline = time.time() + max_seconds
     while time.time() < deadline:
         try:
@@ -1163,10 +874,9 @@ def main():
     if "--voices" in sys.argv:
         demo_voices()
         return
-    if (saved_provider() not in ("codex", "claude_code") and not os.getenv("ANTHROPIC_API_KEY")
-            and model_provider.credential_state() != 'available'):
-        print("No usable conversation credential found. Sign in to Codex with ChatGPT, configure Claude in .env, "
-              "or OpenAI with scripts/setup_openai_key.py.")
+    if saved_provider() not in model_provider.PROVIDERS:
+        print("Jarvis's brain must be Claude (Claude Code sign-in) or Codex (ChatGPT sign-in). "
+              "Set conversation_model in data/preferences.json to one of them.")
         sys.exit(1)
 
     _mutex = single_instance()  # noqa: F841 - held for the life of the process
@@ -1198,7 +908,7 @@ def main():
         voice_health.phase("briefing")
         briefing_prompt = briefing.result()
     print(f"Voice engine: {voice.engine}", flush=True)
-    hud.info.update(voice=voice.engine, voice_choice=voice.choice, model=MODEL, ears=ears.transcribe.device if ears else "keyboard",
+    hud.info.update(voice=voice.engine, voice_choice=voice.choice, ears=ears.transcribe.device if ears else "keyboard",
                     output=voice.output or "Windows default", mic=ears.mic if ears else "")
     hud.emit("settings", **hud.settings())
 

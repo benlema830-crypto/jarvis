@@ -89,7 +89,7 @@ class ResponsivenessTest(unittest.TestCase):
         source._log.assert_called_once()
 
     def test_interrupted_tool_history_remains_valid(self):
-        with mock.patch.object(jarvis.anthropic, "Anthropic"), mock.patch.object(jarvis.memory, "prompt_section", return_value=""):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY), mock.patch.object(jarvis.memory, "prompt_section", return_value=""):
             brain = jarvis.Brain()
         def partial(speak):
             brain.messages.append({"role": "assistant", "content": [{"type": "tool_use", "id": "unfinished"}]})

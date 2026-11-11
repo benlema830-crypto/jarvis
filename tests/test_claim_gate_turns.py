@@ -10,7 +10,7 @@ class GateInTurnTest(unittest.TestCase):
     def setUp(self):
         for patcher in (mock.patch.object(jarvis.memory, "record_turn"),
                         mock.patch.object(jarvis.performance, "record_turn"),
-                        mock.patch.object(jarvis.router, "choose", return_value=None),
+                        mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY),
                         mock.patch.object(truth_guard, "LOG", mock.MagicMock())):
             patcher.start()
             self.addCleanup(patcher.stop)

@@ -1,123 +1,27 @@
-"""Conversation provider settings and a small, credential-safe Responses client."""
-import json
-import os
-from pathlib import Path
-import re
+"""Which brain talks: Claude or Codex, each on the owner's own plan. No provider here can bill an API."""
 import threading
 
-import requests
 import preferences
 import privacy
-from model_credentials import load_openai_key
 
-ROOT = Path(__file__).resolve().parent
-CLAUDE_MODEL = os.getenv('JARVIS_MODEL', 'claude-haiku-5-5')
-DEFAULT = {'provider': 'anthropic', 'model': CLAUDE_MODEL}
-# Providers that never spend API credits: ChatGPT plan, Claude plan, local models.
-SUBSCRIPTION_PROVIDERS = ('codex', 'claude_code', 'ollama')
-# Selectable Claude conversation models, quickest and cheapest first.
-CLAUDE_MODELS = list(dict.fromkeys([CLAUDE_MODEL, 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']))
+PROVIDERS = ('claude_code', 'codex')
+DEFAULT = {'provider': 'claude_code', 'model': 'claude-opus-5-5'}
+SUBSCRIPTION_PROVIDERS = PROVIDERS  # every brain is a subscription brain now; kept for callers that ask
 
 
 class ProviderError(RuntimeError):
     """Only fixed, nonsecret messages may reach the UI."""
 
 
-def credential_state():
-    try:
-        return 'available' if load_openai_key() else 'setup required'
-    except Exception:
-        return 'unavailable for this Windows account'
-
-
 def catalog():
-    try:
-        discovered = json.loads((ROOT / 'data/reports/openai-setup.json').read_text())['models']
-    except (OSError, ValueError, KeyError, TypeError):
-        discovered = []
-    # Discovery is not inference verification. Every choice is probed before use.
-    models = sorted({m for m in discovered if isinstance(m, str) and
-                     re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}', m) and
-                     (m.startswith('gpt-') or re.match(r'o[134]-', m))})[:100]
+    """Models to choose from. Listing is not proof one works: every choice is tried before it is used."""
+    import claude_code_brain
     try:
         import codex_brain
         codex_models = codex_brain.models()
     except Exception:
         codex_models = []
-    import ollama_brain
-    import claude_code_brain
-    return {'claude_code': claude_code_brain.MODELS, 'anthropic': CLAUDE_MODELS, 'openai': models or ['gpt-4.1-mini'], 'codex': codex_models,
-            'ollama': ollama_brain.models()}
-
-
-class Responses:
-    def _post(self, payload, stream=False):
-        payload = {k:privacy.payload(v) if k in ('input','instructions') else v for k,v in payload.items()}
-        try:
-            key = load_openai_key()
-        except Exception:
-            raise ProviderError('OpenAI credential is unavailable for this Windows account.') from None
-        if not key:
-            raise ProviderError('OpenAI setup required. Run scripts/setup_openai_key.py.')
-        try:
-            response = requests.post('https://api.openai.com/v1/responses',
-                headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
-                json=payload, stream=stream, timeout=(10, 30), allow_redirects=False)
-        except requests.RequestException:
-            raise ProviderError('OpenAI connection failed. The model was not changed.') from None
-        if response.status_code != 200:
-            code = response.status_code
-            response.close()
-            reason = {401: 'authentication failed', 403: 'access denied',
-                      404: 'model unavailable', 429: 'quota or rate limit reached'}.get(code, 'request rejected')
-            raise ProviderError('OpenAI ' + reason + '.')
-        return response
-
-    def validate(self, model):
-        with self._post({'model': model, 'input': 'Reply with OK.', 'max_output_tokens': 32,
-                         'store': False}) as response:
-            try:
-                result = response.json()
-                text = ''.join(c.get('text', '') for item in result.get('output', [])
-                               for c in item.get('content', []) if c.get('type') == 'output_text')
-                if result.get('status') != 'completed' or not text.strip():
-                    raise ValueError()
-            except (ValueError, TypeError, AttributeError):
-                raise ProviderError('OpenAI validation did not return a completed text answer.') from None
-
-    def events(self, payload, cancel):
-        response = self._post({**payload, 'stream': True, 'store': False}, stream=True)
-        done = threading.Event()
-        # Closing the response releases a blocked read on interruption; the socket
-        # read timeout is also bounded. The watcher never executes tools or speech.
-        def watch():
-            while not done.wait(.1):
-                if cancel.is_set():
-                    response.close()
-                    return
-        threading.Thread(target=watch, daemon=True).start()
-        try:
-            for line in response.iter_lines():
-                if cancel.is_set():
-                    return
-                if not line or not line.startswith(b'data:'):
-                    continue
-                raw = line[5:].strip()
-                if raw == b'[DONE]':
-                    break
-                try:
-                    event = json.loads(raw)
-                except ValueError:
-                    raise ProviderError('OpenAI returned an invalid stream.') from None
-                if event.get('type') in ('error', 'response.failed', 'response.incomplete'):
-                    raise ProviderError('OpenAI could not complete this answer.')
-                yield event
-        except (requests.RequestException, OSError, AttributeError):
-            if not cancel.is_set():
-                raise ProviderError('OpenAI stream disconnected.') from None
-        finally:
-            done.set()
-            response.close()
+    return {'claude_code': claude_code_brain.MODELS, 'codex': codex_models}
 
 
 def text_history(messages):
@@ -168,13 +72,7 @@ class Selection:
         self.persist = persist or (lambda c: preferences.update(conversation_model=c))
 
     def _validate(self, config):
-        if config['provider'] == 'ollama':
-            import ollama_brain
-            try:
-                ollama_brain.validate(config['model'])
-            except ollama_brain.OllamaError as error:
-                raise ProviderError(str(error)) from None
-        elif config['provider'] == 'codex':
+        if config['provider'] == 'codex':
             import codex_brain
             try:
                 codex_brain.validate(config['model'])
@@ -186,33 +84,20 @@ class Selection:
                 claude_code_brain.validate(config['model'])
             except Exception:
                 raise ProviderError('Claude subscription validation failed. Check that Claude Code is signed in to your Claude plan.') from None
-        elif config['provider'] == 'openai':
-            Responses().validate(config['model'])
         else:
-            import anthropic
-            try:
-                with anthropic.Anthropic(timeout=30, max_retries=0) as client:
-                    result = client.messages.create(model=config['model'], max_tokens=16,
-                        messages=[{'role': 'user', 'content': 'Reply with OK.'}])
-                    if not any(getattr(b, 'text', '') for b in result.content):
-                        raise ProviderError('Claude validation returned no text.')
-            except Exception:
-                raise ProviderError('Claude model validation failed; previous model retained.') from None
+            raise ProviderError('Choose Claude or Codex.')
 
     def snapshot(self):
         with self.lock:
             return {'active': dict(self.active), 'pending': dict(self.pending) if self.pending else None,
                     'busy': self.busy, 'validating': self.validating, 'error': self.error,
-                    'ready': self.ready, 'credential': credential_state(), 'models': catalog(),
-                    'subscription_only': bool(preferences.read().get('subscription_only'))}
+                    'ready': self.ready, 'credential': 'n/a', 'models': catalog(), 'subscription_only': True}
 
     def request(self, config):
         if not isinstance(config, dict) or set(config) != {'provider', 'model'}:
             raise ValueError('Choose a provider and model.')
         if not all(isinstance(v, str) for v in config.values()):
             raise ValueError('Choose a provider and model.')
-        if preferences.read().get('subscription_only') and config['provider'] not in SUBSCRIPTION_PROVIDERS:
-            raise ValueError('Paid API providers are disabled in subscription-only mode. Choose Codex or an enabled local model.')
         available = catalog()
         if config['provider'] not in available or config['model'] not in available[config['provider']]:
             raise ValueError('Choose a listed model; discovery does not guarantee compatibility.')

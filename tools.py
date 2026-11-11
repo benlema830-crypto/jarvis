@@ -1286,11 +1286,9 @@ def send_telegram(text: str) -> str:
 
 @beta_tool(eager_input_streaming=True)
 def switch_model(model: str) -> str:
-    """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to
-    GPT-6 Sol". Validated with a short test and applied after this turn; tell the user that.
-    Claude models exist twice: on the user's Claude plan (provider claude_code, no API credits) and
-    on API credits (provider anthropic). Include "subscription"/"plan" or "API" in `model` when the
-    user says which; otherwise the current provider, then a plan, is preferred.
+    """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to Sonnet" or
+    "use Codex". The choices are Claude models on the user's Claude plan and Codex models on their ChatGPT
+    plan; neither spends API credits. Validated with a short test and applied after this turn; tell the user that.
 
     Args:
         model: The model name as the user said it; matched against the available models.
@@ -1299,15 +1297,11 @@ def switch_model(model: str) -> str:
     import model_provider
     snapshot = model_provider.SELECTION.snapshot()
     provider = snapshot["active"]["provider"]
-    options = {p: m for p, m in snapshot["models"].items()
-               if not snapshot["subscription_only"] or p in model_provider.SUBSCRIPTION_PROVIDERS}
-    # The same model can be on a plan and on API credits: prefer the current provider, then plans.
     said = model.lower()
-    hint = (["claude_code"] if re.search(r"\b(subscription|plan|claude code)\b", said) else
-            ["anthropic", "openai"] if re.search(r"\bapi\b", said) else [])
-    rank = {p: i for i, p in enumerate(dict.fromkeys([*hint, provider, *model_provider.SUBSCRIPTION_PROVIDERS]))}
-    flat = sorted(((p, m) for p, ms in options.items() for m in ms), key=lambda pm: rank.get(pm[0], 99))
-    said = re.sub(r"\b(on|via|with|using|my|the|claude code|subscription|plan|api|credits?)\b", " ", said)
+    hint = ["codex"] if re.search(r"\b(codex|gpt|chatgpt|openai)\b", said) else ["claude_code"] if "claude" in said else []
+    rank = {p: i for i, p in enumerate(dict.fromkeys([*hint, provider, *model_provider.PROVIDERS]))}
+    flat = sorted(((p, m) for p, ms in snapshot["models"].items() for m in ms), key=lambda pm: rank.get(pm[0], 99))
+    said = re.sub(r"\b(on|via|with|using|my|the|claude code|subscription|plan|brain|model)\b", " ", said)
     want = "-".join(said.split())
     names = [m.lower() for _, m in flat]
     match = next((pm for pm in flat if pm[1].lower() == want), None)
@@ -1320,7 +1314,7 @@ def switch_model(model: str) -> str:
         model_provider.SELECTION.request({"provider": match[0], "model": match[1]})
     except ValueError as error:
         return str(error)
-    return f"Switching to {match[1]} via {match[0]} once this turn finishes, after a quick validation."
+    return f"Switching to {match[1]} once this turn finishes, after a quick validation."
 
 
 @beta_tool(eager_input_streaming=True)
@@ -1485,19 +1479,6 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          send_telegram, switch_model, project_handoff, check_email, read_email, start_research, research_status, queue_away_job, away_jobs, response_style]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
-
-
-def web_search_def() -> dict:
-    """The server-side web search tool, localized to the user's area when known."""
-    tool = dict(WEB_SEARCH)
-    try:
-        loc = context._location()
-        tool["user_location"] = {"type": "approximate", "city": loc.get("city"), "region": loc.get("region"),
-                                 "country": loc.get("country"), "timezone": loc.get("timezone")}
-        tool["user_location"] = {k: v for k, v in tool["user_location"].items() if v}
-    except Exception:
-        pass
-    return tool
 
 
 # Tools whose output the Console prints under the command, the way a terminal would.

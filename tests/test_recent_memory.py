@@ -17,7 +17,7 @@ class RecentMemoryTest(unittest.TestCase):
         self.addCleanup(self.patch.stop)
 
     def brain(self):
-        with mock.patch.object(jarvis.anthropic, "Anthropic"), mock.patch.object(memory, "prompt_section", return_value=""):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY), mock.patch.object(memory, "prompt_section", return_value=""):
             return jarvis.Brain()
 
     def test_restart_restores_dialogue_without_replaying_commands(self):

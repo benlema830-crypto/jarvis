@@ -109,12 +109,11 @@ def install():
                         print(f'{status[0]} {step * 10}%', flush=True)
                         previous = status
         print('Checking local inference with a synthetic prompt...', flush=True)
-        os.environ['JARVIS_OLLAMA_ENABLED'] = '1'
-        os.environ['JARVIS_OLLAMA_URL'] = BASE
-        sys.path.insert(0, str(ROOT))
-        import ollama_brain
         began = time.monotonic()
-        ollama_brain.validate(MODEL)
+        answer = requests.post(BASE + '/api/generate', timeout=300,
+                               json={'model': MODEL, 'prompt': 'Reply with OK.', 'stream': False}).json()
+        if not str(answer.get('response', '')).strip():
+            raise RuntimeError('The local model returned no text.')
         report = {'runtime_version': VERSION, 'archive_sha256': digest, 'model': MODEL,
                   'validation': 'passed', 'validation_seconds': round(time.monotonic() - began, 2),
                   'cloud_disabled': True, 'selected_in_jarvis': False}

@@ -35,25 +35,23 @@ class FallbackTest(unittest.TestCase):
         b._claude_code_brain.ask.side_effect = error
         return b
 
-    def test_plan_limit_falls_back_to_api_credits_and_says_so_once(self):
-        b = self.brain(claude_code_brain.LimitReached("limit"))
-        seen = []
-        b._run = lambda speak: seen.append(dict(b.config))  # the API path
-        said = []
-        with mock.patch.object(jarvis.preferences, "read", return_value={}):
-            b._run_claude_code(said.append)
-            b._run_claude_code(said.append)
-        self.assertEqual(seen, [{"provider": "anthropic", "model": "claude-opus-5-5"}] * 2)
-        self.assertEqual(len([s for s in said if "API credits" in s]), 1)
-        self.assertEqual(b.config["provider"], "claude_code")  # the choice itself is unchanged
+    def test_plan_limit_stops_and_says_so_whatever_the_settings(self):
+        for settings in ({}, {"subscription_only": False}, {"subscription_only": True}):
+            b = self.brain(claude_code_brain.LimitReached("limit"))
+            b._run = mock.Mock()
+            with mock.patch.object(jarvis.preferences, "read", return_value=settings):
+                with self.assertRaisesRegex(model_provider.ProviderError, "usage limit"):
+                    b._run_claude_code(lambda s: None)
+            b._run.assert_not_called()  # there is no other path to fall back to
+            self.assertEqual(b.config["provider"], "claude_code")
 
-    def test_subscription_only_never_falls_back(self):
-        b = self.brain(claude_code_brain.LimitReached("limit"))
-        b._run = mock.Mock()
-        with mock.patch.object(jarvis.preferences, "read", return_value={"subscription_only": True}):
-            with self.assertRaises(model_provider.ProviderError):
-                b._run_claude_code(lambda s: None)
-        b._run.assert_not_called()
+    def test_no_api_client_exists_in_the_main_loop(self):
+        self.assertFalse(hasattr(jarvis, "anthropic"))
+        self.assertFalse(hasattr(jarvis.Brain, "_run_openai"))
+        b = jarvis.Brain.__new__(jarvis.Brain)
+        b.config = {"provider": "anthropic", "model": "claude-opus-5-5"}
+        with self.assertRaises(model_provider.ProviderError):
+            b._run(lambda s: None)
 
     def test_api_key_in_use_stops_instead_of_billing(self):
         b = self.brain(claude_code_brain.WouldBillAPI("ANTHROPIC_API_KEY"))

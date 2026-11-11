@@ -61,7 +61,7 @@ class PerformanceTest(Isolated):
     def test_scorecard_compares_models_and_tasks(self):
         for first in (1.0, 2.0, 3.0):
             performance.record_turn("codex", "terra", False, first, first + 1, "ok")
-        performance.record_turn("ollama", "qwen3:4b", True, 0.5, 0.8, "ok")
+        performance.record_turn("claude_code", "opus", False, 0.5, 0.8, "ok")
         performance.record_turn("codex", "terra", False, None, 30, "failed")
         rows = [{"t": time.time(), "kind": "codex", "ok": True, "seconds": 120, "report": "Done and tested."},
                 {"t": time.time(), "kind": "codex", "ok": True, "seconds": 600, "report": "Deployment is blocked."},
@@ -70,7 +70,7 @@ class PerformanceTest(Isolated):
         card = performance.scorecard()
         self.assertIn("codex/terra: 4 turns, median 2.0s", card)
         self.assertIn("1 failed", card)
-        self.assertIn("ollama/qwen3:4b (local router): 1 turns", card)
+        self.assertIn("claude_code/opus: 1 turns", card)
         self.assertIn("codex: 2 tasks, 2 finished, 1 struggled", card)
         self.assertIn("Deployment is blocked.", card)
         self.assertIn("1 stopped by the user", card)
@@ -81,7 +81,7 @@ class PerformanceTest(Isolated):
         brain._run = lambda speak: speak("Okay")
         brain.selection.active = {"provider": "codex", "model": "terra"}
         brain.config = dict(brain.selection.active)
-        with mock.patch.object(jarvis.router, "choose", return_value=None):
+        with mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY):
             brain.ask("Hello", mock.Mock())
         row = json.loads((self.root / "turns.jsonl").read_text(encoding="utf-8").splitlines()[-1])
         self.assertEqual((row["provider"], row["model"], row["outcome"]), ("codex", "terra", "ok"))

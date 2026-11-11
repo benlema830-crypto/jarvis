@@ -68,7 +68,7 @@ class WholeTurn(unittest.TestCase):
         said = []
         with mock.patch.object(jarvis, "WAIT_BEFORE_WORDS", 0.05), \
                 mock.patch.object(jarvis, "run_tool", side_effect=lambda block: time.sleep(tool_seconds) or {"content": "ok"}), \
-                mock.patch.object(jarvis.router, "choose", return_value=None), \
+                mock.patch.object(jarvis, "NO_REPLY", jarvis.NO_REPLY), \
                 mock.patch.object(jarvis.performance, "record_turn"), mock.patch.object(jarvis.hud, "emit"):
             b.ask(text, said.append)
         return said
