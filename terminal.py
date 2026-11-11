@@ -28,7 +28,7 @@ import worksafe
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
-MODEL = os.getenv("JARVIS_TERMINAL_MODEL", "sonnet")
+MODEL = os.getenv("JARVIS_TERMINAL_MODEL", "claude-opus-5-5")
 MAX_MINUTES = 30
 APPROVAL_MINUTES = 15  # how long a "yes" lasts within that session
 SETTINGS = os.path.join(HERE, "data", "cc_settings.json")
@@ -48,6 +48,9 @@ RULES = """You're working for JARVIS, the user's voice assistant, on their Windo
 
 
 def _claude_exe() -> str | None:
+    import testing_guard
+    if testing_guard.under_test():
+        return None  # a test must supply a fake: the real Claude Code would act on a made-up task (2026-11-10)
     return shutil.which("claude") or next(
         (p for p in [os.path.join(HOME, ".local", "bin", "claude.exe")] if os.path.exists(p)), None)
 
@@ -107,6 +110,9 @@ class TerminalWorker:
         self.cwd = cwd or HOME
         self.research = research
         self.effort = ""  # "" = Claude Code's normal effort; task_effort raises it for tasks that proved hard
+        # Set per task by whoever starts the run (agent_models.resolve): which model, a fixed effort if Jarvis
+        # chose one, and extra environment (the local model's address).
+        self.model, self.fixed_effort, self.env_extra = MODEL, "", {}
         self.on_progress = None
         self.on_session = None
 
@@ -150,8 +156,13 @@ class TerminalWorker:
         timer.daemon = True
         timer.start()
         prompt, report, ok, finished, outcome = task, "", False, False, "failed"
-        self.effort, reason = task_effort.choose("terminal", task, "", "high")
-        print(f"(Terminal task effort: {self.effort or 'normal'} - {reason})", flush=True)
+        if self.fixed_effort:
+            self.effort, reason = self.fixed_effort, "chosen for this task"
+        elif self.env_extra:
+            self.effort, reason = "", "not used by the local model"
+        else:
+            self.effort, reason = task_effort.choose("terminal", task, "", "high")
+        print(f"(Agent on {self.model or 'the default model'}, effort: {self.effort or 'normal'} - {reason})", flush=True)
         try:
             write_settings()
             while True:
@@ -207,11 +218,12 @@ class TerminalWorker:
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)  # use the user's Claude login, not Jarvis's API key
         env.pop("CLAUDECODE", None)
+        env.update(self.env_extra)
         cmd = [_claude_exe(), "-p", prompt, "--output-format", "stream-json", "--verbose",
                "--permission-mode", "plan" if self.research else "bypassPermissions", "--settings", SETTINGS,
                "--append-system-prompt", RULES.format(off_limits=worksafe.blocked_apps())]
-        if MODEL:
-            cmd += ["--model", MODEL]
+        if self.model:
+            cmd += ["--model", self.model]
         if self.effort:
             cmd += ["--effort", self.effort]
         if session:

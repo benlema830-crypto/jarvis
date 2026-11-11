@@ -1,4 +1,4 @@
-"""Terminal tasks run in a sandboxed Codex session by default, whether or not paid APIs are enabled."""
+"""Terminal tasks go to the Jarvis Tasks agent session, on the model Jarvis chose for the job."""
 import unittest
 from unittest import mock
 
@@ -22,29 +22,26 @@ class TerminalRoutingTest(unittest.TestCase):
         from types import SimpleNamespace
         return tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'tidy Downloads'}))['content']
 
-    def assert_codex(self):
-        tools.SESSIONS.open.assert_called_with(name='Jarvis Tasks', project='Jarvis', provider='codex')
-        tools.SESSIONS.start.assert_called_with('tidy Downloads', name='Jarvis Tasks', mode='work', fresh=True)
+    def test_a_task_goes_to_the_jarvis_tasks_session_with_no_model_forced(self):
+        self.assertIn('started', self.run_task())
+        tools.SESSIONS.open.assert_called_with(name='Jarvis Tasks', project='Jarvis')
+        tools.SESSIONS.start.assert_called_with('tidy Downloads', name='Jarvis Tasks', mode='work', model='', effort='', fresh=True)
         tools.TERMINAL.start.assert_not_called()
 
-    def test_paid_apis_enabled_still_uses_codex(self):
-        self.prefs = {'subscription_only': False}
-        self.assertIn('started', self.run_task())
-        self.assert_codex()
+    def test_old_settings_no_longer_decide_the_model(self):
+        for prefs in ({'subscription_only': True}, {'subscription_only': False, 'terminal_provider': 'claude'}):
+            self.prefs = prefs
+            self.run_task()
+            tools.SESSIONS.start.assert_called_with('tidy Downloads', name='Jarvis Tasks', mode='work', model='', effort='', fresh=True)
+        tools.TERMINAL.start.assert_not_called()
 
-    def test_subscription_only_uses_codex(self):
-        self.prefs = {'subscription_only': True}
-        self.run_task()
-        self.assert_codex()
-
-    def test_claude_code_only_by_explicit_choice_and_never_in_subscription_only(self):
-        self.prefs = {'subscription_only': False, 'terminal_provider': 'claude'}
-        self.run_task()
-        tools.TERMINAL.start.assert_called_once()
-        tools.TERMINAL.start.reset_mock()
-        self.prefs = {'subscription_only': True, 'terminal_provider': 'claude'}
-        self.run_task()
-        self.assert_codex()
+    def test_jarvis_choice_of_model_and_effort_is_passed_on(self):
+        from types import SimpleNamespace
+        tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'rename a file', 'model': 'haiku', 'effort': 'low'}))
+        tools.SESSIONS.start.assert_called_with('rename a file', name='Jarvis Tasks', mode='work', model='haiku', effort='low', fresh=True)
+        with mock.patch.object(type(tools.TERMINAL), 'running', new_callable=mock.PropertyMock, return_value=False):
+            tools.run_tool(SimpleNamespace(name='send_agent_task', id='t', input={'task': 'big refactor', 'name': 'Giant Builder', 'mode': 'work', 'model': 'opus', 'effort': 'high'}))
+        tools.SESSIONS.start.assert_called_with('big refactor', 'Giant Builder', 'work', model='opus', effort='high')
 
     def test_status_and_stop_follow_the_codex_task(self):
         self.prefs = {'subscription_only': False}
@@ -67,9 +64,9 @@ class TerminalRoutingTest(unittest.TestCase):
     def test_followups_continue_the_conversation_and_folder_is_passed_on(self):
         from types import SimpleNamespace
         tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'and also that', 'continue_previous': True}))
-        tools.SESSIONS.start.assert_called_with('and also that', name='Jarvis Tasks', mode='work')
+        tools.SESSIONS.start.assert_called_with('and also that', name='Jarvis Tasks', mode='work', model='', effort='')
         tools.run_tool(SimpleNamespace(name='terminal_task', id='t', input={'task': 'build', 'folder': 'C:/Work'}))
-        tools.SESSIONS.start.assert_called_with('build', name='Jarvis Tasks', mode='work', fresh=True, folder='C:/Work')
+        tools.SESSIONS.start.assert_called_with('build', name='Jarvis Tasks', mode='work', model='', effort='', fresh=True, folder='C:/Work')
 
     def test_sending_a_task_to_a_running_session_delivers_it_as_a_message(self):
         from types import SimpleNamespace

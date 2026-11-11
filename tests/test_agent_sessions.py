@@ -63,6 +63,8 @@ class SessionTest(unittest.TestCase):
                       mock.patch.object(sessions.working_memory, "journal", return_value=([], [])),
                       # Project briefs read the vault's Decision log: the owner's real one must not reach a test.
                       mock.patch.object(sessions.working_memory.knowledge, "VAULT", self.root / "vault"),
+                      # These tests drive the Codex protocol; the everyday default is Claude Opus (test_agent_models.py).
+                      mock.patch("agent_models.default_choice", return_value="codex"),
                       mock.patch.object(sessions, "PROJECT", self.root),
                       mock.patch.object(sessions, "executable", return_value="codex.exe"),
                       mock.patch.object(sessions.hud, "emit")):
@@ -461,30 +463,6 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(ask.call_args.kwargs["free_text"])
         sent = worker.connection.send.call_args.args[0]
         self.assertEqual(sent["result"]["answers"]["q"]["answers"], ["the red one"])
-
-    def test_claude_session_has_separate_name_and_history(self):
-        self.manager.open()
-        with mock.patch.object(terminal, "_claude_exe", return_value="claude.exe"):
-            self.manager.open(provider="claude")
-            self.assertIn("different provider", self.manager.open("Frontier", provider="claude"))
-        self.assertEqual(self.manager.entries["frontier claude"]["provider"], "claude")
-        self.assertEqual(self.manager.entries["frontier"]["provider"], "codex")
-
-    def test_claude_reports_and_persists_resume_id(self):
-        def run(worker, task, session):
-            self.assertEqual(worker.cwd, str(self.root))
-            self.assertTrue(worker.research)
-            self.assertIn("Read and follow", task)
-            worker.session_id = session or "claude-session"
-            worker.on_done({"ok": True, "report": "Next task identified."})
-        with mock.patch.object(terminal, "_claude_exe", return_value="claude.exe"), \
-             mock.patch.object(terminal.TerminalWorker, "_run", run):
-            self.manager.open(provider="claude")
-            self.manager.start("Find our next move")
-            self.manager.thread.join(3)
-        self.assertEqual(self.manager.entries["frontier claude"]["thread_id"], "claude-session")
-        self.assertEqual(self.manager.entries["frontier claude"]["report"], "Next task identified.")
-        self.assertFalse(self.manager.running)
 
     def test_claude_cli_uses_project_and_explicit_permission_mode(self):
         for research, mode in ((True, "plan"), (False, "bypassPermissions")):

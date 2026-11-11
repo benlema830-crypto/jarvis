@@ -676,43 +676,38 @@ def stop_agent() -> str:
 # ---------- Terminal tasks (Claude Code) ----------
 
 @beta_tool(eager_input_streaming=True)
-def terminal_task(task: str, continue_previous: bool = False, folder: str = "") -> str:
+def terminal_task(task: str, continue_previous: bool = False, folder: str = "", model: str = "", effort: str = "") -> str:
     """Hand a job to a background coding agent that works in the terminal: it runs PowerShell,
     reads and edits files, searches folders and the web, and works through multi-step problems.
-    It runs in a sandboxed Codex session, reports when it's done, and asks the user before anything
-    outside its sandbox, deleting, installing or changing settings.
+    It reports when it's done, and asks the user before deleting, installing or changing settings.
 
     Use it for jobs that need many steps or several minutes. Anything a few steps can settle, do yourself
     with run_command, read_file, search_text or edit_file: that's much faster and you see the real result.
     For clicking around in apps or websites, use do_on_computer instead. When it starts, tell the user
-    briefly that you're on it.
+    briefly that you're on it and which model you gave it to.
 
     Args:
         task: Complete, specific instructions, including anything the user said that matters.
         continue_previous: True to continue the last terminal task's conversation (follow-ups like
             "now also do X"), so it remembers what it did. False starts clean, which suits unrelated jobs.
         folder: Folder to work in, when it isn't Jarvis itself. Ignored when continuing a previous task.
+        model: Which model does the work. You choose, per task:
+            "opus" (Claude Opus 5.5) for most tasks; leave blank for this default.
+            "sonnet" for routine, clearly specified jobs where speed matters more than depth.
+            "haiku" for a one-step chore.
+            "codex" when the user asks for Codex or ChatGPT, when the code or files shouldn't be trusted (it
+            runs in a sandbox), or when the Claude plan's limit has been reached.
+            "local" only when the user asks for the local, offline or private model: it is free but much
+            slower and weaker, so give it small jobs.
+        effort: "low" for a small or simple job, "medium" for an ordinary one, "high" for a big, multi-part or
+            stubborn one. Leave blank to use what similar tasks needed before.
     """
-    if _terminal_uses_codex():
-        SESSIONS.open(name=TASK_SESSION, project='Jarvis', provider='codex')
-        target = {} if continue_previous else {'fresh': True, **({'folder': folder} if folder else {})}
-        return SESSIONS.start(task, name=TASK_SESSION, mode='work', **target)
-    if SESSIONS.running:
-        return "A named project agent is running. Wait for it or stop it before starting a separate terminal task."
-    started = TERMINAL.start(task, continue_previous)
-    if started == "Started.":
-        return "Started. You'll be told automatically when it's done; don't check its status unless the user asks."
-    return started
+    SESSIONS.open(name=TASK_SESSION, project='Jarvis')
+    target = {} if continue_previous else {'fresh': True, **({'folder': folder} if folder else {})}
+    return SESSIONS.start(task, name=TASK_SESSION, mode='work', model=model, effort=effort, **target)
 
 
 TASK_SESSION = 'Jarvis Tasks'
-
-
-def _terminal_uses_codex():
-    """Codex's sandbox is the safer boundary; Claude Code (keyword guard only) needs an explicit opt-in."""
-    import preferences
-    prefs = preferences.read()
-    return prefs.get('subscription_only') or prefs.get('terminal_provider') != 'claude'
 
 
 @beta_tool(eager_input_streaming=True)
@@ -802,20 +797,21 @@ def manage_personal_files(action: str, path: str, destination: str = "") -> str:
     return direct_files.operate(action, path, destination)
 
 @beta_tool(eager_input_streaming=True)
-def open_agent_session(name: str = "", project: str = "Rocket Frontier", provider: str = "codex") -> str:
-    """Prepare or select a named persistent Codex or Claude Code session in Jarvis. Does not start work.
+def open_agent_session(name: str = "", project: str = "Rocket Frontier", provider: str = "") -> str:
+    """Prepare or select a named persistent agent session in Jarvis. Does not start work. Which model does
+    the work is chosen per task, in send_agent_task.
 
     Args:
         name: Short name; blank defaults to a name based on the project and provider.
         project: Configured project name: Rocket Frontier, Jarvis, Don't Wake the Giant, or KnightShow
             (the Sir Wendell AI comedy series / content workflow agents).
-        provider: codex (default) or claude. Keep each provider's session history separate.
+        provider: Leave blank. (Kept for old requests: codex or claude as a starting point only.)
     """
     return SESSIONS.open(name, project, provider)
 
 
 @beta_tool(eager_input_streaming=True)
-def send_agent_task(task: str, name: str = "", mode: str = "research") -> str:
+def send_agent_task(task: str, name: str = "", mode: str = "research", model: str = "", effort: str = "") -> str:
     """Send a task to a named agent session, continuing its own conversation. Results arrive automatically.
     Use research for finding the next task, investigating or recommending a next move. Use work only
     when the user asks to implement, fix, build or complete something. Never turn a request for advice
@@ -828,12 +824,22 @@ def send_agent_task(task: str, name: str = "", mode: str = "research") -> str:
         task: Complete user-authorized instructions and relevant context.
         name: Agent session name, or blank for the selected session.
         mode: research or work.
+        model: Which model does the work. You choose, per task:
+            "opus" (Claude Opus 5.5) for most tasks; leave blank for this default.
+            "sonnet" for routine, clearly specified jobs where speed matters more than depth.
+            "haiku" for a one-step chore.
+            "codex" when the user asks for Codex or ChatGPT, when the code or files shouldn't be trusted (it
+            runs in a sandbox), or when the Claude plan's limit has been reached.
+            "local" only when the user asks for the local, offline or private model: it is free but much
+            slower and weaker, so give it small jobs.
+        effort: "low" for a small or simple job, "medium" for an ordinary one, "high" for a big, multi-part or
+            stubborn one. Leave blank to use what similar tasks needed before.
     """
     if TERMINAL.running:
         return "The separate terminal task is still running. Wait or stop it before starting a project agent."
     if SESSIONS.is_running(name) or (not name.strip() and SESSIONS.selected in SESSIONS.workers):
         return SESSIONS.message(task, name)
-    return SESSIONS.start(task, name, mode)
+    return SESSIONS.start(task, name, mode, model=model, effort=effort)
 
 
 @beta_tool(eager_input_streaming=True)
@@ -1490,8 +1496,6 @@ def run_tool(block) -> dict:
     try:
         import preferences
         if preferences.read().get('subscription_only'):
-            if block.name == 'open_agent_session' and block.input.get('provider') == 'claude':
-                raise ValueError('Only Codex sessions are enabled in subscription-only mode.')
             if block.name == 'switch_voice' and block.input.get('engine', '').lower().strip() == 'elevenlabs':
                 raise ValueError('ElevenLabs is disabled; use qwen or kokoro.')
         tool = TOOLS_BY_NAME[block.name]

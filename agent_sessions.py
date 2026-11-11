@@ -307,6 +307,8 @@ class Worker:
             self.publish()
         worker.on_progress = progress
         worker.session_id = entry.get("thread_id")
+        worker.model = entry.get("model") or terminal.MODEL
+        worker.fixed_effort, worker.env_extra = entry.get("effort", ""), dict(entry.get("agent_env") or {})
         def save_session(session_id):
             with self.lock:
                 entry["thread_id"] = session_id
@@ -520,7 +522,10 @@ class Worker:
             sandbox = {"type": "readOnly"} if mode == "research" else {
                 "type": "workspaceWrite", "writableRoots": [entry["cwd"]], "networkAccess": True}
             normal = normal_effort()
-            effort, reason = task_effort.choose("codex", task, normal, HIGHER_EFFORT.get(normal, normal))
+            if entry.get("effort"):
+                effort, reason = entry["effort"], "chosen for this task"
+            else:
+                effort, reason = task_effort.choose("codex", task, normal, HIGHER_EFFORT.get(normal, normal))
             print(f"(Codex effort: {effort} - {reason})", flush=True)
             # Repeated with the task: developer instructions can be summarized away in a long-lived thread.
             conn.call("turn/start", {"threadId": entry["thread_id"], "cwd": entry["cwd"], "effort": effort,
@@ -678,8 +683,10 @@ class SessionManager:
         worker = self.workers[key] = Worker(self, key)
         return worker
 
-    def open(self, name="", project="Rocket Frontier", provider="codex"):
-        provider = provider.strip().lower()
+    def open(self, name="", project="Rocket Frontier", provider=""):
+        """`provider` is only a starting point: each task says which model it runs on (see start)."""
+        import agent_models
+        provider = provider.strip().lower() or ("codex" if agent_models.default_choice() == "codex" else "claude")
         if provider not in ("codex", "claude"):
             return "Choose codex or claude."
         try:
@@ -693,18 +700,14 @@ class SessionManager:
         else:
             project_folder = project_catalog.PROJECTS[project_name]
             default_name = project_catalog.DEFAULT_SESSIONS[project_name]
-        name = name.strip() or (default_name if provider == "codex" else default_name + " Claude")
+        name = name.strip() or default_name
         if not re.fullmatch(r"[\w -]{1,40}", name):
             return "Use a short session name containing letters, numbers, spaces or dashes."
         if not project_folder.is_dir():
             return f"The {project_name} project folder is missing."
-        if not (executable() if provider == "codex" else terminal._claude_exe()):
-            return f"{provider.title()} is not installed."
         with self.lock:
             self._load()
             key = name.casefold()
-            if key in self.entries and self.entries[key].get("provider", "codex") != provider:
-                return "That name belongs to a different provider. Choose a new name to keep their histories separate."
             if key in self.entries and self.entries[key].get("project") != project_name:
                 return "That name belongs to a different project. Choose a new session name."
             self.entries.setdefault(key, {"name": name, "project": project_name, "cwd": str(project_folder),
@@ -755,9 +758,12 @@ class SessionManager:
                             "each other. Use message_agent to add this to its work, wait for it, or stop it.")
         return None
 
-    def start(self, task, name="", mode="research", resume=False, fresh=False, folder=""):
+    def start(self, task, name="", mode="research", resume=False, fresh=False, folder="", model="", effort=""):
         """`fresh` starts a new conversation with the agent instead of continuing the saved one. `folder` runs
-        it elsewhere (only with a fresh conversation, since a thread's history belongs to its folder)."""
+        it elsewhere (only with a fresh conversation, since a thread's history belongs to its folder).
+        `model` and `effort` are Jarvis's choice for this task (agent_models.py); blank means the default model
+        and the learned effort. A session that changes between Claude and Codex starts a new conversation,
+        because neither can read the other's; the project brief carries over what was done."""
         if mode not in ("research", "work"):
             return "Mode must be research or work."
         if not task.strip():
@@ -767,10 +773,17 @@ class SessionManager:
             key = name.strip().casefold() if name.strip() else self.selected
             if key not in self.entries:
                 return "Open a named agent session first."
-            import preferences
-            if preferences.read().get('subscription_only') and self.entries[key].get('provider') != 'codex':
-                return 'Only Codex tasks are enabled in subscription-only mode.'
             entry = self.entries[key]
+            import agent_models
+            try:  # an unattended (away) session always runs in Codex's sandbox: nobody is there to answer it
+                plan = agent_models.resolve("codex" if entry.get("unattended") else
+                                            (entry.get("model_choice", "") if resume and not model else model), effort)
+            except ValueError as error:
+                return str(error)
+            if plan["provider"] == "claude" and not terminal._claude_exe():
+                return "Claude Code isn't installed on this PC. Choose codex."
+            if plan["provider"] == "codex" and not executable():
+                return "Codex isn't installed on this PC. Choose a Claude model."
             if folder:
                 target = Path(folder).expanduser()
                 if not target.is_dir():
@@ -786,9 +799,15 @@ class SessionManager:
                 entry["thread_id"] = None
                 if not folder:
                     entry["cwd"] = str(project_catalog.PROJECTS.get(entry["project"], entry["cwd"]))
+            switched = entry.get("provider", "codex") != plan["provider"] or \
+                (plan["choice"] == "local") != (entry.get("model_choice") == "local")
+            if switched:
+                entry["thread_id"] = None  # the other kind of agent can't continue this conversation
+            entry.update(provider=plan["provider"], model=plan["model"], model_choice=plan["choice"],
+                         effort=plan["effort"], agent_env=plan["env"], model_words=agent_models.spoken(plan))
             self.selected = key
             worker = self._begin(key)
-            entry.update(task=task, mode=mode, status="running", progress=f"Connecting to {entry['provider']}…", report="", outcome="", evidence="")
+            entry.update(task=task, mode=mode, status="running", progress=f"Connecting to {plan['words']}…", report="", outcome="", evidence="")
             if not resume:
                 entry['timeline'] = []
                 entry['changed_files'] = []
@@ -798,7 +817,9 @@ class SessionManager:
             self.publish()
             self.thread = worker.thread = threading.Thread(target=response_routing.inherit(worker._run), args=(task, mode), daemon=True)
             worker.thread.start()
-        return f"{entry['name']} started. Jarvis will tell you when it finishes; progress is visible in the session panel."
+        fresh_note = " It starts a new conversation, because the last task ran on a different kind of agent." if switched and not fresh else ""
+        return (f"{entry['name']} started on {entry['model_words']}.{fresh_note} Jarvis will tell you when it "
+                "finishes; progress is visible in the session panel.")
 
     def message(self, message, name=""):
         """Tell a running agent something without stopping it."""
@@ -877,7 +898,8 @@ class SessionManager:
     def _describe(entry, running, detailed=True):
         """Plain facts for the brain: small, and it can't be mistaken for a progress estimate."""
         status, now = entry.get("status", "idle"), time.time()
-        head = f"{entry.get('name')} ({entry.get('project')}, {entry.get('provider', 'codex')}, {entry.get('mode', 'no')} mode): {status}"
+        head = (f"{entry.get('name')} ({entry.get('project')}, {entry.get('model_words') or entry.get('provider', 'codex')}, "
+                f"{entry.get('mode', 'no')} mode): {status}")
         if entry.get("outcome") and not running:
             head += f", outcome {entry['outcome']}"
         lines = [head + "."]
