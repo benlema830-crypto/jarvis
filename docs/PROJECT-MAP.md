@@ -59,6 +59,8 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
+| Where the owner is | whereabouts.py (out of the room: the phone is away from home, or the bedroom sensor and the PC have both been quiet for 30 minutes; decides whether Jarvis texts or speaks) |
+| Paid fallback | openai_api.py (the OpenAI API on the owner's key: the conversation when the ChatGPT plan is at its limit, and one command at a time on request) |
 | Agents | agent_sessions.py (sessions and workers), terminal.py (a Claude Code run), agent.py (the screen agent), agent_models.py (which model a job runs on), parallel.py (several agents on one job, with an optional lead), cc_guard.py (what an agent may do), wsl_sandbox.py and sandbox/ (the Linux sandbox an unattended Claude agent runs in), approvals.py, task_effort.py (learned per-task effort) |
 | Direct terminal | direct_tools.py (run_command, read_file, search_text, edit_file, write_file: the conversation's own shell and file tools, through cc_guard) |
 | Away work | away_jobs.py (queue for builds and research the owner asked for; private copies, its own test re-run, Telegram progress, spoken summary on return; Codex by default, Claude Fable 5.2 when asked) |
@@ -248,3 +250,28 @@ or approval records, and the honesty rules (no claiming what a tool didn't do) a
 The cost, said to the owner before the change: he reads web pages, and with these questions gone a page that
 tricked him could get him to delete or push something. The questions that remain cover money, messages to
 other people, and anything after reading email.
+
+## Texts, updates and the paid fallback (2026-11-11, later)
+
+Three more decisions from the owner the same day.
+
+**Texts only when they are out of their room** ("i only want jarvis to respond over text if im not in my room aka
+phone location and or bedroom sensor for more then 30 minutes, or i text him myself"). `whereabouts.out_of_room()`
+is true when the phone is away from home, or when the bedroom sensor has been clear for thirty minutes and the PC
+untouched for as long (the desk is in the sensor's blind spot). It gates the texts Jarvis starts himself: an
+approval question (`jarvis.text_question`) and an away job's texts (`away_jobs._wanted_by_text`). A message they
+sent is always answered where it came from, and so is a job they queued by text. In the room they hear it
+instead; the spoken summary of away work no longer says "I've texted you" unless he did.
+
+**No daily limit on updates, but only what matters.** `attention.DAILY_CAP` is `None`. Before an update is said
+or texted, Jarvis makes the short version himself (`jarvis.brief_update`): the outcome in a sentence or two and
+anything that needs the owner, or nothing at all when he judges they don't need it. Short reports and things he
+wrote himself go as they are. If that turn fails, the first sentences are said as before. Someone in the room
+but away from the keyboard now hears an update (`whereabouts.can_hear`), except at night.
+
+**The OpenAI key as a fallback.** When Codex reports `usageLimitExceeded`, the conversation carries on through
+`openai_api.Conversation`, on the key in `data/openai-key.dpapi`. He says so once, stays there for fifteen
+minutes at a time, and goes back when the plan answers. Any other Codex failure spends nothing. `run_command` can
+be given the key for one command (`with_openai_key`) when the owner asks for something the API alone can do; the
+key is cut out of the output. Not proven with a real request: on 2026-11-11 the key was valid but OpenAI
+reported its credit exhausted, and he says exactly that when it happens.

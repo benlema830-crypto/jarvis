@@ -63,6 +63,7 @@ class Base(unittest.TestCase):
         self.now = 1000.0
         self.texts, self.said, self.archived = [], [], []
         self.idle = 9999
+        self.out_of_room = True   # the owner has left the room, so texts go out (whereabouts.py decides for real)
         self.sessions = FakeSessions()
         self.queue = self.make_queue()
         patcher = mock.patch("preferences.read", return_value={})
@@ -75,7 +76,7 @@ class Base(unittest.TestCase):
     def make_queue(self):
         queue = away_jobs.AwayQueue(sessions=self.sessions, store=self.root / "jobs.json", root=self.root / "builds",
                                     notify=self.texts.append, clock=lambda: self.now, idle=lambda: self.idle,
-                                    announce=self.said.append,
+                                    announce=self.said.append, may_text=lambda: self.out_of_room,
                                     archive=lambda *args: self.archived.append(args))
         queue.spawn = lambda work, *args: work(*args)  # runs in line: a test can't leave a thread behind
         return queue

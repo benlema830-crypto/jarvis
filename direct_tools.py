@@ -87,13 +87,22 @@ def _kill(proc):
                        creationflags=subprocess.CREATE_NO_WINDOW)
 
 
-def execute(command, folder, seconds):
-    """Run PowerShell with no guard check (the caller did that). Encoded so quoting can't change its meaning."""
+def execute(command, folder, seconds, with_openai_key=False):
+    """Run PowerShell with no guard check (the caller did that). Encoded so quoting can't change its meaning.
+
+    `with_openai_key` puts the owner's OpenAI API key into this one command's environment, for a job that can't
+    be done without the API (openai_api.py). The key is cut out of whatever the command prints."""
     script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8;$ProgressPreference='SilentlyContinue';" + command
     encoded = base64.b64encode(script.encode("utf-16-le")).decode()
     began = time.monotonic()
+    env = _clean_env()
+    if with_openai_key:
+        import openai_api
+        if not openai_api.available():
+            return "No OpenAI API key is saved on this PC, so the command was not run."
+        env["OPENAI_API_KEY"] = openai_api.key()
     proc = subprocess.Popen(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                            cwd=str(folder), env=_clean_env(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            cwd=str(folder), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                             creationflags=subprocess.CREATE_NO_WINDOW)
     chunks = []
@@ -112,12 +121,15 @@ def execute(command, folder, seconds):
     proc.wait()
     reader.join(2)
     output = "".join(chunks).strip()
+    if with_openai_key:
+        import openai_api
+        output = openai_api.hide_key(output)
     took = time.monotonic() - began
     status = ending or f"Exit code {proc.returncode} in {took:.1f}s."
     return f"{status}\n{_clip(output) if output else '(no output)'}"
 
 
-def run_command(command, folder="", timeout=DEFAULT_TIMEOUT):
+def run_command(command, folder="", timeout=DEFAULT_TIMEOUT, with_openai_key=False):
     command = str(command or "").strip()
     if not command:
         raise ValueError("Give a command.")
@@ -128,7 +140,7 @@ def run_command(command, folder="", timeout=DEFAULT_TIMEOUT):
         raise ValueError(f"No such folder: {where}")
     seconds = max(1, min(int(timeout or DEFAULT_TIMEOUT), MAX_TIMEOUT))
     _guard("PowerShell", {"command": command}, f"Run in {where}: {command}", cc_guard.plain_read_command(command))
-    return execute(command, where, seconds)
+    return execute(command, where, seconds, bool(with_openai_key))
 
 
 def read_file(path, start_line=1, max_lines=300):

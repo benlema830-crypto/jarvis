@@ -21,6 +21,11 @@ def telegram_turn(chat):
         _telegram_chat.reset(token)
 
 
+def from_telegram() -> bool:
+    """This turn, or the work it started, began with a message the owner texted."""
+    return _telegram_chat.get() is not None
+
+
 def inherit(function):
     """Capture now, restore while running a worker (including its callbacks)."""
     chat = _telegram_chat.get()

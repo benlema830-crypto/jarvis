@@ -42,6 +42,7 @@ from pathlib import Path
 
 import direct_tools
 import project_catalog
+import response_routing
 
 HERE = Path(__file__).resolve().parent
 STORE = HERE / "data" / "away_jobs.json"
@@ -267,6 +268,16 @@ def run_check(workspace, source, before=None):
     return result
 
 
+def _out_of_room():
+    import whereabouts
+    return whereabouts.out_of_room()
+
+
+def _can_hear():
+    import whereabouts
+    return whereabouts.can_hear()
+
+
 def _sandbox_problem():
     import wsl_sandbox
     return wsl_sandbox.problem()
@@ -274,8 +285,9 @@ def _sandbox_problem():
 
 class AwayQueue:
     def __init__(self, sessions=None, store=None, root=None, notify=text_owner, clock=time.time, idle=None,
-                 announce=None, archive=None, sandbox_problem=None):
+                 announce=None, archive=None, sandbox_problem=None, may_text=None):
         self._sessions = sessions
+        self.may_text = may_text or _out_of_room
         self.sandbox_problem = sandbox_problem or _sandbox_problem
         self.store = store or STORE  # fixed here so a stray thread can't write somewhere else later
         self.root = Path(root) if root else BUILD_ROOT
@@ -325,16 +337,32 @@ class AwayQueue:
                     raise
                 time.sleep(0.05)
 
-    def _text(self, message):
+    def _text(self, message, job=None):
         """Sent on its own thread: a slow network must not hold up the work or the conversation."""
-        self.spawn(self._send, message)
+        self.spawn(self._send, message, job)
 
-    def _send(self, message):
+    def _wanted_by_text(self, job):
+        """The owner's rule (2026-11-11): a text only when they are out of their room, or when they queued the
+        job by text themselves. In the room they hear about it instead (_brief)."""
+        if job and job.get("by_text"):
+            return True
+        try:
+            return bool(self.may_text())
+        except Exception:
+            return True  # can't tell where they are: a text they didn't need beats news they never got
+
+    def _send(self, message, job=None):
         """A failure never stops the work. It's remembered, so status and the spoken summary don't claim a text went out."""
+        if not self._wanted_by_text(job):
+            return
         for attempt in range(TEXT_ATTEMPTS):
             try:
                 reply = self.notify(message)
                 self.text_problem = reply if isinstance(reply, str) and reply.startswith("Telegram isn't") else ""
+                if job and job["status"] in FINISHED and not self.text_problem:
+                    with self.lock:
+                        job["texted"] = True  # so the spoken summary can say "I've texted you the details" truthfully
+                        self._save()
                 return
             except Exception as error:
                 self.text_problem = f"Couldn't text the owner: {type(error).__name__}"
@@ -373,7 +401,7 @@ class AwayQueue:
                 raise ValueError("That's already in the queue.")
             job = {"id": uuid.uuid4().hex[:6], "kind": kind, "request": request, "why": why, "project": label, "source": source,
                    "status": "queued", "phase": "", "round": 0, "created": self.clock(), "dirty": dirty, "told": False,
-                   "model": model}
+                   "model": model, "by_text": response_routing.from_telegram()}  # queued by a text: answer by text
             self.jobs.append(job)
             self.halted = False
             self._save()
@@ -559,7 +587,7 @@ class AwayQueue:
             minutes_in = int((now - job.get("started", now)) // 60)
             quiet = "" if changed else " No new commands since the last text."
             self._text(f"Still on: {short(job['request'])}\n{minutes_in} min in, attempt {job['round']} of {MAX_ROUNDS}. "
-                       f"{self._observed(facts)}{quiet}")
+                       f"{self._observed(facts)}{quiet}", job)
 
     @staticmethod
     def _progress_minutes():
@@ -670,7 +698,7 @@ class AwayQueue:
                 if job["status"] == "running":
                     self._close(job, "failed", f"Couldn't make the private copy: {error}")
                     self._save()
-                    self._text(self._final_text(job))
+                    self._text(self._final_text(job), job)
             return
         prompt = job.get("next_prompt") or self._prompt(job)
         now = self.clock()
@@ -702,7 +730,7 @@ class AwayQueue:
                 elif job.get("unsandboxed"):
                     where += f" Held by rules only, not the sandbox: {job['unsandboxed']}."
                 self._text(f"Started{' on ' + FABLE_WORDS if fable else ''}: {short(job['request'])}\n{where}{note}"
-                           + (f" I'll text every {minutes:g} minutes and when it ends." if minutes else " I'll text when it ends."))
+                           + (f" I'll text every {minutes:g} minutes and when it ends." if minutes else " I'll text when it ends."), job)
             return
         with self.lock:
             if BUSY.search(reply):  # other agents have the slots: try again next tick
@@ -763,7 +791,7 @@ class AwayQueue:
             if left:
                 with self.lock:
                     self.retry_at = self.clock() + RETRY_AFTER_LIMIT
-                self._text(f"Hit a plan usage limit on: {short(job['request'])}\nI'll try again in about an hour.")
+                self._text(f"Hit a plan usage limit on: {short(job['request'])}\nI'll try again in about an hour.", job)
                 self._send_back(job, f"You were cut off by a usage limit. Inspect what's there and finish the job under the same rules:\n{job['request']}")
             else:
                 self._finish_build(job, "failed", "It kept hitting the plan's usage limit.")
@@ -815,7 +843,7 @@ class AwayQueue:
         if job["check"]["state"] != "failed":
             self._finish_build(job, "done")
         elif left:
-            self._text(f"Sent back: {short(job['request'])}\nIt said it was done, but its tests failed when I ran them myself.")
+            self._text(f"Sent back: {short(job['request'])}\nIt said it was done, but its tests failed when I ran them myself.", job)
             self._send_back(job, f"You reported done, but when Jarvis ran the tests they failed:\n{job['check']['detail']}\n\n"
                                  f"Fix the cause, not the tests, then report again. The job was:\n{job['request']}")
         else:
@@ -828,7 +856,7 @@ class AwayQueue:
             self._summarize(job)
             self._close(job, status)
             self._save()
-        self._text(self._final_text(job))
+        self._text(self._final_text(job), job)
         if self.archive:
             try:
                 self.archive("away build", job["request"], status == "done", self._final_text(job))
@@ -907,7 +935,7 @@ class AwayQueue:
             return
         job.update(status="running", phase="working", started=self.clock())
         self._save()
-        self._text(f"Started researching: {short(job['request'])}")
+        self._text(f"Started researching: {short(job['request'])}", job)
 
     def _research_done(self, job, run):
         with self.lock:
@@ -917,7 +945,7 @@ class AwayQueue:
             self._close(job, "done" if run.get("ok") else "failed")
             job.update(report=run.get("summary", ""), vault_note=run.get("note", ""))
             self._save()
-        self._text(self._final_text(job))
+        self._text(self._final_text(job), job)
         self.wake.set()
 
     # ---------- Back at the PC ----------
@@ -931,7 +959,7 @@ class AwayQueue:
         if not unread:
             return
         try:
-            if self.idle() >= BACK_SECONDS:
+            if self.idle() >= BACK_SECONDS and not _can_hear():  # at the PC, or in the room in waking hours
                 return
         except Exception:
             return
@@ -941,7 +969,8 @@ class AwayQueue:
             self._save()
         said = "; ".join(f"{short(job['request'], 60)} {SPOKEN[job['status']]}" for job in unread[:3])
         more = f" Plus {len(unread) - 3} more." if len(unread) > 3 else ""
-        details = "Ask me for the details." if self.text_problem else "I've texted you the details."
+        texted = not self.text_problem and all(job.get("texted") for job in unread)
+        details = "I've texted you the details." if texted else "Ask me for the details."
         self.announce({"label": "Away work", "chime": True, "report": True,
                        "say": f"An update on your queued work: {said}.{more} {details}",
                        "note": "[AWAY WORK] You told the user what finished. Details: " + " ".join(self._line(job) for job in unread)

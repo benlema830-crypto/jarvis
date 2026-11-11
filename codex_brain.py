@@ -63,6 +63,16 @@ def models():
             conn.close()
 
 
+class LimitReached(RuntimeError):
+    """The ChatGPT plan's usage limit is reached: Codex says so as usageLimitExceeded."""
+
+
+def says_limit(value) -> bool:
+    """A Codex error, in whatever shape it arrived, that is the plan's usage limit (not a passing rate limit)."""
+    text = (value if isinstance(value, str) else json.dumps(value, default=str)).lower().replace("_", "").replace(" ", "")
+    return "usagelimitexceeded" in text or "usagelimitreached" in text or "hityourusagelimit" in text
+
+
 class CodexBrain:
     def __init__(self):
         self.conn = None
@@ -104,6 +114,8 @@ class CodexBrain:
             self.turn_id = params.get('turn', {}).get('id')
         elif method == 'turn/completed':
             self.complete = params.get('turn', {})
+        elif method == 'error' and says_limit(params):
+            self.limit_seen = True
         elif 'id' in event and method:
             if method == 'item/tool/call':
                 self.tool_count += 1
@@ -148,6 +160,7 @@ class CodexBrain:
         system = privacy.redact(system)
         self.cancel, self.delta, self.run_tool = cancel, delta, run_tool
         self.complete, self.answer, self.turn_id, self.tool_count = None, [], None, 0
+        self.limit_seen = False
         self.message_item = None
         self.sources = []
         fresh = self.conn is None or self.model != model
@@ -206,11 +219,16 @@ class CodexBrain:
                 elif self.conn.proc.poll() is not None:
                     raise RuntimeError('Codex connection ended.')
             if self.complete.get('status') != 'completed':
+                if self.limit_seen or says_limit(self.complete):
+                    raise LimitReached("The ChatGPT plan's usage limit is reached.")
                 raise RuntimeError('Codex could not complete the turn. Check subscription limits or sign-in.')
             self.sent_messages = len(messages) + 1  # caller appends the assistant answer
             return ''.join(self.answer)
-        except BaseException:
+        except BaseException as error:
             self.close()  # Never reuse an interrupted/failed event stream.
+            if isinstance(error, Exception) and not isinstance(error, (LimitReached, InterruptedError)) and \
+                    (self.limit_seen or says_limit(str(error))):
+                raise LimitReached("The ChatGPT plan's usage limit is reached.") from None
             raise
 
 

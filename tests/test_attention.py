@@ -31,7 +31,13 @@ class DecideTest(Isolated):
             self.assertEqual(self.decide(spoke=30), "say")
         self.assertEqual(attention.snapshot()["spoken_today"], 0)
 
-    def test_at_the_pc_the_budget_is_five_then_updates_are_held(self):
+    def test_there_is_no_daily_limit_unless_the_owner_sets_one(self):
+        self.assertIsNone(attention.cap())
+        self.assertEqual([self.decide(f"Update {n}", spoke=3600) for n in range(12)], ["say"] * 12)
+        self.assertEqual(attention.held(), [])
+
+    def test_with_a_limit_set_updates_past_it_are_held(self):
+        self.settings = {"interruptions": {"daily_cap": 5}}
         said = [self.decide(f"Update {n}", spoke=3600) for n in range(7)]
         self.assertEqual(said, ["say"] * 5 + ["hold"] * 2)
         held = attention.held()
@@ -44,6 +50,7 @@ class DecideTest(Isolated):
         self.assertEqual(attention.snapshot()["spoken_today"], 0)
 
     def test_budget_resets_next_day_but_held_updates_carry_over(self):
+        self.settings = {"interruptions": {"daily_cap": 5}}
         for n in range(6):
             self.decide(f"Update {n}", spoke=3600)
         self.assertEqual(self.decide("Tomorrow's", spoke=3600, today="2026-11-11"), "say")

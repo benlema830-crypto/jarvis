@@ -10,7 +10,7 @@ Two parts:
                With no lines (the default) no AI call is made, so this costs nothing until it is used.
 
 Whatever comes out goes through attention.py like any other unprompted update: said if the owner is around
-and the day's budget allows, otherwise held for the next welcome back.
+otherwise held for the next welcome back.
 preferences "heartbeat": {"enabled": false} turns it off; "minutes" and "checklist_minutes" set the pace.
 """
 import shutil

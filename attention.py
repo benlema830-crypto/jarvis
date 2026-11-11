@@ -3,14 +3,19 @@
 Finished-work reports, the daily review and "welcome back" used to be spoken whenever they came up: about
 eleven a day, into an empty room or over whatever the owner was doing. Each one now gets one of two outcomes:
 
-  say   the owner is talking with Jarvis right now, or is at the PC and today's budget isn't spent
-  hold  nobody is at the PC (it would be said to an empty room), or today's budget is spent
+  say   the owner is talking with Jarvis right now, or is there to hear it
+  hold  nobody is there (it would be said to an empty room)
 
 Held updates are not lost. They are listed in the Console, and the next "welcome back" or morning briefing
 delivers them together, as one interruption instead of several. The held_updates tool reads them on request.
 
+There is no daily limit (the owner, 2026-11-11: "i dont want him to have a limit on something like that, but i
+dont want him to say stuff that i dont need to hear constantly"). What keeps it from being constant is that each
+update is first cut down to what matters, or dropped, by Jarvis himself (jarvis.brief_update). A limit can still
+be set: preferences "interruptions": {"daily_cap": 5}; 0 holds everything, -1 never holds even to an empty room.
+
 Never held: reminders and timers, the morning alarm, questions that need a yes or no, and anything the owner
-just asked for. preferences "interruptions": {"daily_cap": 5} sets the budget; 0 holds everything, -1 never holds.
+just asked for.
 """
 import datetime
 import json
@@ -21,14 +26,15 @@ from pathlib import Path
 import preferences
 
 STORE = DEFAULT_STORE = Path(__file__).resolve().parent / "data" / "attention.json"
-DAILY_CAP = 5
+DAILY_CAP = None        # no limit unless the owner sets one
 ENGAGED_SECONDS = 600   # spoke or typed to Jarvis this recently: he's part of the conversation, so just say it
 AWAY_SECONDS = 300      # no keyboard or mouse for this long: nobody is there to hear it
 MAX_HELD = 40
 _lock = threading.RLock()
 
 
-def cap() -> int:
+def cap() -> int | None:
+    """The most unprompted updates to say in a day, or None for no limit."""
     value = (preferences.read().get("interruptions") or {}).get("daily_cap", DAILY_CAP)
     return value if type(value) is int and -1 <= value <= 100 else DAILY_CAP
 
@@ -68,7 +74,7 @@ def decide(label, text="", *, since_owner_spoke=None, input_idle=None, today=Non
         away = input_idle is not None and input_idle >= AWAY_SECONDS and not engaged
         if limit == -1 or engaged:
             return "say"
-        if not away and data["spoken"] < limit:
+        if not away and (limit is None or data["spoken"] < limit):
             data["spoken"] += 1
             _save(data)
             return "say"

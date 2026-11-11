@@ -88,15 +88,31 @@ class TelegramDispatchTest(unittest.TestCase):
         self.send.assert_called_once_with(101, 'Hello. Here is the answer.')
         self.assert_silent()
 
-    def test_task_completion_keeps_full_report_and_history_without_audio(self):
+    def test_task_completion_is_cut_to_what_matters_and_sent_without_audio(self):
         report = 'A complete report. ' * 60
-        self.assertTrue(jarvis.handle_telegram_item(self.brain, self.voice, {
-            'telegram': 101, 'say': report, 'note': '[TASK FINISHED] plug paired',
-            'report': True, 'chime': True}))
-        self.send.assert_called_once_with(101, report)
-        self.brain.note.assert_called_once_with('[TASK FINISHED] plug paired', report)
-        self.brain.ask.assert_not_called()
+        item = {'telegram': 101, 'say': report, 'note': '[TASK FINISHED] plug paired', 'report': True, 'chime': True}
+        self.brain.ask.side_effect = lambda prompt, speak: speak('The plug is paired and answering.')
+        self.assertTrue(jarvis.handle_telegram_item(self.brain, self.voice, dict(item)))
+        self.send.assert_called_once_with(101, 'The plug is paired and answering.')
+        prompt = self.brain.ask.call_args.args[0]
+        self.assertIn(report.strip(), prompt)                 # he read the whole thing to make the short one
+        self.assertIn('[TASK FINISHED] plug paired', prompt)
         self.assert_silent()
+
+    def test_if_the_short_version_cant_be_made_the_whole_report_is_sent(self):
+        report = 'A complete report. ' * 60
+        self.brain.ask.side_effect = None                     # the turn says nothing
+        self.assertTrue(jarvis.handle_telegram_item(self.brain, self.voice, {
+            'telegram': 101, 'say': report, 'note': '[TASK FINISHED] plug paired', 'report': True, 'chime': True}))
+        self.send.assert_called_once_with(101, report)        # all of it: "the rest is on screen" is no use by text
+        self.brain.note.assert_called_once_with('[TASK FINISHED] plug paired', report)
+        self.assert_silent()
+
+    def test_an_update_he_judges_not_worth_it_is_not_sent(self):
+        self.brain.ask.side_effect = lambda prompt, speak: speak('(quiet)')
+        self.assertTrue(jarvis.handle_telegram_item(self.brain, self.voice, {
+            'telegram': 101, 'say': 'Routine progress. ' * 40, 'report': True}))
+        self.send.assert_not_called()
 
     def test_task_started_during_telegram_turn_delivers_after_a_pc_turn(self):
         def ask(prompt, deliver):

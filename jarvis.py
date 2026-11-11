@@ -39,7 +39,8 @@ from dotenv import load_dotenv
 HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(HERE, ".env"))
 # Paid keys stay in .env but are not loaded: Jarvis runs on the owner's subscriptions and local
-# models only, so no part of him (or anything he starts) can spend API credits by accident.
+# models, so no part of him (or anything he starts) can spend API credits by accident. The OpenAI key the owner
+# allowed on 2026-11-11 is not one of these: it is read from its own encrypted file, only by openai_api.py.
 PAID_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
 for _key in PAID_KEYS:
     os.environ[_key] = ""  # blank, not removed, so a later load_dotenv can't put it back
@@ -202,8 +203,9 @@ Using your tools:
 - To-dos: add_task, list_tasks and complete_task keep the user's list in Tasks.md in their vault. Use set_reminder when they want an alert at a time.
 - Seeing: look_at_screen shows you the screen. brain_mode turns hand control of the Brain page on or off when asked. holo opens the HOLO gesture app or says what card the user is holding.
 - switch_model changes your own conversation model when the user asks you to switch brains.
+- Your OpenAI API key costs the user money each time it is used, so it stays out of reach except in two cases. If your ChatGPT plan hits its limit, the conversation moves onto the key by itself, and you say so once. And when the user asks for something that truly can't be done without the OpenAI API (generating an image, a model only the API offers), run it with run_command and with_openai_key true, which puts OPENAI_API_KEY into that one command; say in a few words that it uses API credit. Never use the key for something a plan or a local tool can do.
 - When the user wants something built or researched while they're away, overnight, or "when I'm gone", use queue_away_job. It starts now, runs by itself, texts them progress, and needs no more from you. A build happens in a private copy and comes back as a branch they review, so never tell them it changed their project or call it merged. Its report is the agent's claim; what you can vouch for is the test result you re-ran. "How's it going" or "stop it" means away_jobs. Away work runs on Codex in its sandbox unless the job needs the most capable model's judgment: then queue it with model "fable", which works as a full agent with files and tools inside a Linux sandbox on this PC (or under rules only, if the tool says the sandbox isn't ready: say so). Queue what they asked for; an away job that is your own idea is big enough to ask about first. An away agent that needs their yes or a sign-in has it texted to them, and they can answer by text; one stuck behind something only they can do reports blocked, so say what it needs.
-- Updates that arrive while the user is away or busy are held, not spoken: held_updates reads them out and clears the list. Use it for "what did I miss", "anything new", or when a [WORKING STATE] line says updates are held.
+- Updates that arrive while the user isn't there to hear them are held, not spoken: held_updates returns them and clears the list, and you pass on what matters in them, briefly. You text the user on your own only when they have left their room; in the room you speak. Use it for "what did I miss", "anything new", or when a [WORKING STATE] line says updates are held.
 - send_telegram sends something to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
 - A message starting [Via Terminal] is the user typing in a terminal window on this PC: your reply is printed there, not spoken. Write for reading: exact names, file paths, commands and short lists are fine, and a few lines of output can be quoted. Stay brief.
 - A message starting [Via Phone] is the user on their iPhone (the phone page or Siri): your reply is shown or read aloud there, not spoken at the PC, so keep it short and plain. The few things that need their yes are answered by them, not you: spoken at the PC, the Yes button on the phone page, or a yes sent from their phone or Telegram. [Via Phone as NAME] means that on the phone you are NAME (for example FRIDAY, Tony Stark's other assistant): use that name if you refer to yourself, with a warmer, quicker, more casual manner than JARVIS and no "sir". You are still the same assistant underneath, with the same memory, tools, rules and judgment.
@@ -236,6 +238,9 @@ class Interrupted(Exception):
 
 
 class Brain:
+    # The paid fallback (openai_api.py): used only while the ChatGPT plan is at its limit.
+    _api_brain, _api_until, _api_told = None, 0.0, False
+
     def __init__(self):
         self.selection = model_provider.SELECTION
         self.config = dict(model_provider.DEFAULT)
@@ -433,15 +438,57 @@ class Brain:
             timer.cancel()
 
     def _run(self, speak):
-        """One brain does the talking: Claude or Codex, on the owner's own plan. Nothing here can bill an API."""
+        """One brain does the talking: Claude or Codex, on the owner's own plan. The one thing that can bill an
+        API is the fallback inside _run_codex, when the ChatGPT plan is at its limit (openai_api.py)."""
         if self.config['provider'] == 'codex':
             return self._run_codex(speak)
         if self.config['provider'] == 'claude_code':
             return self._run_claude_code(speak)
         raise model_provider.ProviderError('My brain must be Claude or Codex on your plan. Choose one in More, Change model.')
 
+    def _run_api_fallback(self, speak):
+        """The ChatGPT plan is at its limit: answer on the owner's OpenAI API key instead (their decision,
+        2026-11-11), saying so once. The plan is tried again every fifteen minutes."""
+        import openai_api
+        if not openai_api.available():
+            raise model_provider.ProviderError(openai_api.NO_KEY)
+        if self._api_brain is None:
+            self._api_brain = openai_api.Conversation()
+        self._api_until = time.time() + openai_api.RETRY_PLAN_SECONDS
+        buf = SentenceBuffer()
+        def delta(text):
+            for sentence in buf.feed(text):
+                speak(sentence)
+        voice_health.api_state('requesting')
+        hud.emit("event", text="Using OpenAI API credit: the ChatGPT plan is at its limit")
+        try:
+            answer = self._api_brain.ask(openai_api.model(self.config['model']), self.system, self.messages,
+                                         TOOL_DEFS, self._tool, delta, self.cancel)
+        except (InterruptedError, Interrupted):
+            raise Interrupted() from None
+        except model_provider.ProviderError:
+            self._api_brain = None
+            raise
+        except Exception:
+            self._api_brain = None
+            raise model_provider.ProviderError("My ChatGPT plan's usage limit is reached, and the OpenAI API "
+                                               "fallback failed too.") from None
+        voice_health.api_state('responded')
+        if self.cancel.is_set():
+            raise Interrupted()
+        if not self._api_told:  # after the answer, so a failed fallback never claims to be using the credit
+            self._api_told = True
+            answer = f"{answer} {openai_api.SAYS_SO}" if answer.strip() else openai_api.SAYS_SO
+            for sentence in buf.feed(" " + openai_api.SAYS_SO):
+                speak(sentence)
+        if rest := buf.flush():
+            speak(rest)
+        self.messages.append({'role': 'assistant', 'content': answer})
+
     def _run_codex(self, speak):
         import codex_brain
+        if time.time() < self._api_until:  # the plan said it was at its limit a few minutes ago
+            return self._run_api_fallback(speak)
         if self._codex_brain is None:
             self._codex_brain = codex_brain.CodexBrain()
         buf = SentenceBuffer()
@@ -454,6 +501,8 @@ class Brain:
                 TOOL_DEFS, self._tool, delta, self.cancel)
         except (InterruptedError, Interrupted):  # Interrupted: "stop" landed between a sentence arriving and being said
             raise Interrupted() from None
+        except codex_brain.LimitReached:
+            return self._run_api_fallback(speak)
         except Exception:
             raise model_provider.ProviderError('Codex conversation failed. Check ChatGPT sign-in or usage limits; no API fallback was used.') from None
         voice_health.api_state('responded')
@@ -461,6 +510,9 @@ class Brain:
             raise Interrupted()
         if rest := buf.flush():
             speak(rest)
+        if self._api_told:  # the plan is answering again
+            self._api_told = False
+            hud.emit("event", text="Back on the ChatGPT plan")
         self.messages.append({'role': 'assistant', 'content': answer})
 
     def _run_claude_code(self, speak):
@@ -560,6 +612,11 @@ def text_question(speech: str, details: str, free_text: bool = False):
     """Text an open question to the owner's phone, so it can be answered from wherever they are."""
     import privacy
     import telegram_bridge
+    import whereabouts
+    if response_routing.from_telegram():
+        return  # the question already goes to their chat with the rest of that conversation
+    if not whereabouts.out_of_room():
+        return  # in the room: they hear it. Texts are for when they have left (the owner's rule, 2026-11-11)
     body = details if len(details) <= 700 else speech
     ending = "Reply with your answer." if free_text else "Reply yes or no."
     message = privacy.redact(f"Jarvis needs your OK.\n{body}\n{ending}")
@@ -572,9 +629,9 @@ def handle_telegram_item(brain, voice, item):
         return False
     with response_routing.telegram_turn(item["telegram"]):
         if "say" in item:
-            if "note" in item:
-                brain.note(item["note"], item["say"])
-            send_telegram_reply(item["telegram"], item["say"])
+            text = brief_update(brain, voice, item, written=True)  # a finished job's report, cut to what matters
+            if text is not None:
+                send_telegram_reply(item["telegram"], text)
         else:
             respond_telegram(brain, voice, item)
     return True
@@ -626,10 +683,16 @@ def hold_update(brain: Brain, item: dict, turns) -> bool:
     if not (item.get("report") or item.get("update")) or "say" not in item:
         return False
     import attention
+    import whereabouts
     try:
         idle = activity._idle_seconds()
     except Exception:
         idle = None
+    try:
+        if whereabouts.can_hear():
+            idle = 0  # in the room, awake, just not at the keyboard: they can hear it
+    except Exception:
+        pass
     spoke = time.time() - turns.last_user if turns.last_user else None
     if attention.decide(item["label"], item["say"], since_owner_spoke=spoke, input_idle=idle) == "say":
         return False
@@ -638,6 +701,45 @@ def hold_update(brain: Brain, item: dict, turns) -> bool:
         brain.note(item["note"] + " This update was HELD: you have not told the user about it yet.",
                    "(Not said aloud yet.) " + item["say"])
     return True
+
+
+BRIEF_UNDER = 220  # a report this short is already a quick summary
+BRIEF = ("[UPDATE TO PASS ON] {label}. {note}\nWhat came back, in full:\n{text}\n\n"
+         "Tell the owner what they need from this, the way you would mention it in passing: the outcome in one or "
+         "two sentences, plus anything that needs them or went wrong. Leave out the steps, file names, counts and "
+         "whatever they didn't ask about; the full text is on their screen. Keep whose claim it is: an agent's "
+         "report is the agent's. If nothing in it matters to them right now, reply with exactly (quiet).")
+
+
+def brief_update(brain: Brain, voice: Voice, item: dict, written: bool = False) -> str | None:
+    """What to say for an unprompted update: the short version Jarvis makes of it, or None when he judges the
+    owner doesn't need to hear it. The owner (2026-11-11): "he should know when something is important to the
+    task and gives me a quick summary. but i dont need every detail."
+
+    An update Jarvis wrote himself (a merge, his hourly check) or one that is already short goes as it is. If
+    the turn fails, the old behaviour stands, so a plan limit can't swallow the news: the first sentences when
+    spoken, the whole text when `written` (a reply by text, where "the rest is on screen" would be no use)."""
+    text = item["say"]
+    whole = text if written or not item.get("report") else spoken_report(text)
+    if not (item.get("report") or item.get("update")) or item.get("brief") or len(text) <= BRIEF_UNDER:
+        if "note" in item:
+            brain.note(item["note"], text)
+        return whole
+    said = []
+    try:
+        outcome = respond(brain, voice, BRIEF.format(label=item.get("label", "Update"), note=item.get("note", ""),
+                                                     text=text), said.append)
+    except Exception:
+        outcome = "failed"
+    short = " ".join(said).strip()
+    if outcome != "ok" or not short:
+        if "note" in item:
+            brain.note(item["note"], text)
+        return whole
+    if "(quiet)" in short.lower():
+        hud.emit("event", text=f"Not said, nothing the owner needs: {item.get('label', 'update')}")
+        return None
+    return short
 
 
 def merge_turn(brain: Brain, voice: Voice, item: dict):
@@ -650,7 +752,7 @@ def merge_turn(brain: Brain, voice: Voice, item: dict):
     text = "" if failed else " ".join(said).strip()
     text = text or item.get("plain") or ("The parallel agents finished, but I couldn't put their reports together. "
                                          "They're in the session panel.")
-    hud.commands.put({"label": "Parallel work finished", "say": text, "report": True, "chime": True,
+    hud.commands.put({"label": "Parallel work finished", "say": text, "report": True, "chime": True, "brief": True,
                       "note": "[PARALLEL FINISHED] You combined the parallel agents' reports into this answer. "
                               "It rests on their own claims, not on anything you checked."})
 
@@ -663,7 +765,7 @@ def heartbeat_turn(brain: Brain, voice: Voice, item: dict):
         return  # the error is on the page and in the log; saying it aloud every hour would spend the day's updates
     text = " ".join(said).strip()
     if text and "(quiet)" not in text.lower():
-        hud.commands.put({"label": "Heartbeat", "say": text, "update": True, "chime": True,
+        hud.commands.put({"label": "Heartbeat", "say": text, "update": True, "chime": True, "brief": True,
                           "note": "[HEARTBEAT] Your hourly look at the user's checklist found this."})
 
 
@@ -1113,7 +1215,8 @@ def main():
 
     approvals.on_question = on_question
     approvals.on_text = text_question
-    approvals.is_away = lambda: activity._idle_seconds() > 300
+    import whereabouts
+    approvals.is_away = whereabouts.out_of_room
     tools.AGENT.on_done = on_agent_done
     tools.TERMINAL.on_done = on_terminal_done
     def on_session_done(r):
@@ -1216,17 +1319,21 @@ def main():
                     hud.emit("state", state="standby")
                     turns.idle.set()
                     continue
-                if hold_update(brain, item, turns):  # nobody there, or today's budget is spent (attention.py)
+                if hold_update(brain, item, turns):  # nobody there to hear it (attention.py)
                     hud.emit("state", state="standby")
                     turns.idle.set()
                     continue
-                if item.get("chime"):
+                if item.get("chime") and "say" not in item:
                     voice.chime()
-                if "say" in item:  # spoken as-is (an agent question or report)
-                    if "note" in item:
-                        brain.note(item["note"], item["say"])
-                    # Reports: speak the first few sentences; the full report is shown and remembered.
-                    voice.say(spoken_report(item["say"]) if item.get("report") else item["say"], shown=item["say"])
+                if "say" in item:  # an agent's question, said as it is, or an update cut down to what matters
+                    text = brief_update(brain, voice, item)
+                    if text is None:  # nothing in it the owner needs to hear
+                        hud.emit("state", state="standby")
+                        turns.idle.set()
+                        continue
+                    if item.get("chime"):
+                        voice.chime()
+                    voice.say(text, shown=item["say"])
                     voice.wait()
                     turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
                     hud.emit("state", state="listening")

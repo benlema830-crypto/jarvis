@@ -472,9 +472,9 @@ def recall_memory(query: str) -> str:
 
 @beta_tool(eager_input_streaming=True)
 def held_updates() -> str:
-    """Updates that were held instead of spoken (finished agent work, the daily review) because the user was
-    away or today's interruption budget was spent. Returns them and clears the list, so tell the user what
-    they say. Agents' reports are their own claims."""
+    """Updates that were held instead of spoken (finished agent work, the daily review) because the user wasn't
+    there to hear them. Returns them and clears the list. Tell the user what matters in them: the outcome of
+    each in a sentence and anything that needs them, not every detail. Agents' reports are their own claims."""
     import attention
     text = attention.lines(attention.take())
     attention.delivered()  # they are in the conversation now, where the owner asked for them
@@ -1089,14 +1089,14 @@ def _approved_args(name, args):
     """Arguments for the step that runs once approved: the checks have been passed, so paths are resolved here."""
     import direct_tools
     if name == 'run_command':
-        command, folder, timeout = args
+        command, folder, timeout, *with_key = args
         seconds = max(1, min(int(timeout or direct_tools.DEFAULT_TIMEOUT), direct_tools.MAX_TIMEOUT))
-        return command, direct_tools._resolve(folder, direct_tools.HOME), seconds
+        return command, direct_tools._resolve(folder, direct_tools.HOME), seconds, *with_key
     return (direct_tools._resolve(args[0]), *args[1:])
 
 
 @beta_tool(eager_input_streaming=True)
-def run_command(command: str, folder: str = "", timeout: int = 60) -> str:
+def run_command(command: str, folder: str = "", timeout: int = 60, with_openai_key: bool = False) -> str:
     """Run a PowerShell command on this PC right now and get its real output and exit code. This is your
     terminal: use it to look things up and check things yourself (what's running, disk space, git status,
     logs, whether something worked) rather than guessing or starting an agent. Each command starts fresh,
@@ -1110,9 +1110,12 @@ def run_command(command: str, folder: str = "", timeout: int = 60) -> str:
         command: PowerShell to run. Windows PowerShell 5.1, so no && operator; use ; instead.
         folder: Folder to run in. Blank means the user's home folder.
         timeout: Seconds before it's stopped, up to 150.
+        with_openai_key: True only when the user asked for something that can't be done without the OpenAI API
+            (generating an image, a model only the API offers). It puts their paid key into this one command as
+            OPENAI_API_KEY, and every call spends their credit, so say that it does.
     """
     import direct_tools
-    return _direct('run_command', direct_tools.run_command, command, folder, timeout)
+    return _direct('run_command', direct_tools.run_command, command, folder, timeout, bool(with_openai_key))
 
 
 @beta_tool(eager_input_streaming=True)

@@ -94,7 +94,8 @@ class AnswerFromPhoneTest(unittest.TestCase):
 
     def test_the_question_is_texted_with_its_details(self):
         sent = []
-        with mock.patch("telegram_bridge.send_to_owner", sent.append), mock.patch("privacy.redact", lambda text: text):
+        with mock.patch("telegram_bridge.send_to_owner", sent.append), mock.patch("privacy.redact", lambda text: text), \
+                mock.patch("whereabouts.out_of_room", return_value=True):
             jarvis.text_question("May I send this email to sam@example.com?", "Send this email?\nTo: sam@example.com\n\nHi Sam")
             jarvis.text_question("Which colour?", "Builder: Which colour?", True)
             for _ in range(200):
