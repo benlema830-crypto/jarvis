@@ -75,10 +75,10 @@ class ApprovalSpeechTest(unittest.TestCase):
         manager = agent_sessions.SessionManager()
         worker = manager._begin("test")
         manager.entries = {"test": {"name": "Test", "mode": "work"}}
-        command = "Remove-Item " + "x" * 800
+        command = "gh pr comment 5 --body " + "x" * 800
         event = {"method": "item/commandExecution/requestApproval", "params": {"command": command}}
         with mock.patch.object(manager, "publish"), mock.patch.object(approvals, "ask", return_value=(False, "no")) as ask:
             self.assertEqual(worker._approval(event), {"decision": "decline"})
         self.assertIn(command, ask.call_args.args[0])
-        self.assertNotIn("Remove-Item", ask.call_args.kwargs["spoken"])
-        self.assertIn("delete data", ask.call_args.kwargs["spoken"])
+        self.assertNotIn("gh pr comment", ask.call_args.kwargs["spoken"])
+        self.assertIn("send a message to other people", ask.call_args.kwargs["spoken"])

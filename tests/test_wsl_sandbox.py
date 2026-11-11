@@ -181,7 +181,9 @@ class RunTest(unittest.TestCase):
         self.assertEqual((sent["cwd"], sent["prompt"], sent["model"], sent["effort"], sent["resume"], sent["permission_mode"]),
                          ("/work/job", "Research it", "claude-fable-5-2", "high", "s0", "bypassPermissions"))
         self.assertIn("inside a Linux sandbox", sent["rules"])
-        self.assertIn("Nobody is at the PC", sent["rules"])
+        self.assertIn("The owner is away from the PC", sent["rules"])
+        self.assertIn("so don't ask", sent["rules"])                      # no yes could reach the guard in there
+        self.assertNotIn("APPROVAL NEEDED", sent["rules"])
         self.assertNotIn("on their Windows PC.", sent["rules"])
         stop.assert_called_once()                                         # nothing it started outlives the run
 

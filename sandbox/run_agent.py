@@ -12,7 +12,8 @@ run from Windows stops it.
 
 What holds the agent here is not in this file. /etc/claude-code/managed-settings.json (root's, so the agent
 can't change it) switches on Claude Code's own sandbox for every shell command and runs cc_guard.py before
-every tool call. JARVIS_UNATTENDED_ROOT below tells that guard which folder the job owns.
+every tool call. JARVIS_UNATTENDED_ROOT below tells that guard which folder the job owns, and JARVIS_SANDBOXED
+that a question can't be answered in here.
 """
 import json
 import os
@@ -34,7 +35,7 @@ def main():
     home = os.path.expanduser("~")
     # Built from nothing, so no variable from Windows or from an earlier shell rides along.
     env = {"HOME": home, "USER": "agent", "LOGNAME": "agent", "SHELL": "/bin/bash", "LANG": "C.UTF-8",
-           "PATH": f"{home}/.local/bin:/usr/local/bin:/usr/bin:/bin", "JARVIS_UNATTENDED_ROOT": cwd}
+           "PATH": f"{home}/.local/bin:/usr/local/bin:/usr/bin:/bin", "JARVIS_UNATTENDED_ROOT": cwd, "JARVIS_SANDBOXED": "1"}
     os.chdir(cwd)
     # The task is Claude Code's standard input: a file, already unlinked, so nothing is left behind.
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as task:

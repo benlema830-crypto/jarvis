@@ -49,7 +49,7 @@ class FilesTest(unittest.TestCase):
             direct_files.checked(str(self.root / ".git" / "config"))
 
     def test_off_limits_and_unsupported_actions(self):
-        with mock.patch.dict("os.environ", {"JARVIS_ALLOW_OUTLOOK": "0"}):
+        with mock.patch.dict("os.environ", {"JARVIS_BLOCK_WORK_APPS": "outlook"}):
             with self.assertRaises(ValueError):
                 direct_files.checked(str(self.root / "mail.pst"))
         with self.assertRaises(ValueError):

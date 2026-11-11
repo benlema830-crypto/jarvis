@@ -42,12 +42,11 @@ class UnattendedRulesTest(unittest.TestCase):
         self.assertEqual(self.verdict("Edit", file_path=str(self.root / ".." / ".." / "Documents" / "x.py"))[0], "blocked")
         self.assertEqual(self.verdict("Write", file_path="", content="x")[0], "blocked")
 
-    def test_what_would_need_a_yes_is_refused_not_asked(self):
+    def test_it_may_do_what_any_agent_may_and_a_message_to_others_is_asked(self):
         for command in ("winget install something", "git push origin main", "git reset --hard HEAD~3",
                         "Set-ItemProperty HKCU:\\Software\\x -Name y -Value 1", "powershell -enc AAAABBBBCCCCDDDDEEEE"):
-            verdict, why = self.verdict("PowerShell", command=command)
-            self.assertEqual(verdict, "blocked", command)
-            self.assertIn("nobody is here to approve it", why)
+            self.assertEqual(self.verdict("PowerShell", command=command), ("allow", ""), command)
+        self.assertEqual(self.verdict("PowerShell", command='gh pr comment 3 --body "done"'), ("approval", cc_guard.MESSAGE))
 
     def test_it_may_tidy_its_own_folder_but_delete_nothing_else(self):
         self.assertEqual(self.shell("Remove-Item build -Recurse -Force"), "allow")
@@ -68,21 +67,47 @@ class UnattendedRulesTest(unittest.TestCase):
         readme = self.verdict("Write", file_path=str(self.root / "README.md"), content="Copy .env.example to .env first.")
         self.assertEqual(readme[0], "allow")
 
-    def test_work_apps_stay_off_limits(self):
-        self.assertEqual(self.shell(r"Get-ChildItem C:\Users\x\AppData\Roaming\Microsoft\Teams")[0:7], "blocked")
+    def test_apps_the_owner_put_off_limits_stay_so(self):
+        command = r"Get-ChildItem C:\Users\x\AppData\Roaming\Microsoft\Teams"
+        with mock.patch.dict(cc_guard.os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams"}):
+            self.assertEqual(self.shell(command)[0:7], "blocked")
+        with mock.patch.dict(cc_guard.os.environ, {"JARVIS_BLOCK_WORK_APPS": ""}):
+            self.assertEqual(self.shell(command), "allow")
 
-    def test_the_hook_refuses_instead_of_pausing_when_the_folder_is_set(self):
-        call = {"tool_name": "PowerShell", "tool_input": {"command": "winget install x"}, "session_id": "s"}
+    def hook(self, command, **env):
+        call = {"tool_name": "PowerShell", "tool_input": {"command": command}, "session_id": "s"}
         out = io.StringIO()
-        with mock.patch.dict(cc_guard.os.environ, {cc_guard.UNATTENDED_ROOT: str(self.root)}), \
+        with mock.patch.dict(cc_guard.os.environ, {cc_guard.UNATTENDED_ROOT: str(self.root), **env}), \
                 mock.patch.object(cc_guard.sys, "stdin", io.StringIO(json.dumps(call))), \
                 mock.patch.object(cc_guard.sys, "stdout", out), \
                 mock.patch.object(cc_guard, "record_pending") as pending, self.assertRaises(SystemExit):
             cc_guard.main()
-        reason = json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]
+        reason = json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecisionReason"] if out.getvalue() else ""
+        return reason, pending
+
+    def test_the_hook_pauses_a_message_so_the_owner_can_be_texted(self):
+        reason, pending = self.hook('gh pr comment 3 --body "done"')
+        self.assertTrue(reason.startswith("PAUSED:"))
+        self.assertIn("APPROVAL NEEDED", reason)
+        pending.assert_called_once()
+        reason, pending = self.hook("winget install x")               # nothing to pause: it just runs
+        self.assertEqual(reason, "")
+
+    def test_inside_the_sandbox_it_is_refused_because_no_yes_could_reach_it(self):
+        reason, pending = self.hook('gh pr comment 3 --body "done"', **{cc_guard.SANDBOXED: "1"})
         self.assertTrue(reason.startswith("BLOCKED:"))
-        self.assertNotIn("APPROVAL NEEDED", reason)          # nothing to wait for
-        pending.assert_not_called()                           # and nothing a later yes could unlock
+        self.assertIn("inside the sandbox", reason)
+        self.assertNotIn("APPROVAL NEEDED", reason)
+        pending.assert_not_called()
+
+    def test_a_pause_is_still_reported_when_its_record_cant_be_written(self):
+        call = {"tool_name": "PowerShell", "tool_input": {"command": 'gh pr comment 3 --body "x"'}, "session_id": "s"}
+        out = io.StringIO()
+        with mock.patch.object(cc_guard.sys, "stdin", io.StringIO(json.dumps(call))), \
+                mock.patch.object(cc_guard.sys, "stdout", out), mock.patch.object(cc_guard, "approved", return_value=False), \
+                mock.patch.object(cc_guard, "record_pending", side_effect=OSError("read-only")), self.assertRaises(SystemExit):
+            cc_guard.main()
+        self.assertIn("PAUSED", out.getvalue())                       # a crash here would have let it run
 
 
 class UnattendedRunTest(unittest.TestCase):
@@ -103,8 +128,9 @@ class UnattendedRunTest(unittest.TestCase):
         command, env = call.args[0], call.kwargs["env"]
         self.assertIn("--strict-mcp-config", command)
         rules = command[command.index("--append-system-prompt") + 1]
-        self.assertIn("Nobody is at the PC", rules)
-        self.assertNotIn("APPROVAL NEEDED", rules)
+        self.assertIn("The owner is away from the PC", rules)
+        self.assertIn("Jarvis texts", rules)                 # a question reaches them by text now
+        self.assertIn("writing or deleting anywhere else is refused", rules)
         self.assertEqual(env[cc_guard.UNATTENDED_ROOT], "C:/job")
         self.assertNotIn("HA_TOKEN", env)
         self.assertNotIn("TELEGRAM_BOT_KEY", env)
@@ -117,11 +143,9 @@ class UnattendedRunTest(unittest.TestCase):
         self.assertNotIn(cc_guard.UNATTENDED_ROOT, env)
         self.assertIn("APPROVAL NEEDED", command[command.index("--append-system-prompt") + 1])
 
-    def test_a_question_with_nobody_there_is_answered_no_without_being_spoken(self):
-        worker = terminal.TerminalWorker(cwd="C:/job")
-        worker.unattended_root = "C:/job"
-        answers = [{"result": "APPROVAL NEEDED: May I install the package system-wide?", "session_id": "s1"},
-                   {"result": "I left the install undone and finished the rest.\nOUTCOME: partial", "session_id": "s1"}]
+    def away_run(self, worker, said):
+        answers = [{"result": "APPROVAL NEEDED: May I email the supplier for a quote?", "session_id": "s1"},
+                   {"result": "I left the email unsent and finished the rest.\nOUTCOME: partial", "session_id": "s1"}]
         prompts, done = [], []
         worker.on_done = done.append
 
@@ -129,9 +153,28 @@ class UnattendedRunTest(unittest.TestCase):
             prompts.append(prompt)
             return answers[len(prompts) - 1]
         with mock.patch.object(worker, "_claude", fake), mock.patch.object(terminal, "write_settings"), \
-                mock.patch.object(terminal.approvals, "ask") as ask, mock.patch.object(terminal.hud, "emit"), \
-                mock.patch.object(terminal.task_effort, "record"):
+                mock.patch.object(terminal.approvals, "ask", return_value=said) as ask, mock.patch.object(terminal.hud, "emit"), \
+                mock.patch.object(terminal, "grant") as grant, mock.patch.object(terminal.task_effort, "record"):
             worker._run("Build it", None)
+        return ask, grant, prompts, done
+
+    def test_a_question_with_nobody_there_is_texted_to_the_owner(self):
+        worker = terminal.TerminalWorker(cwd="C:/job")
+        worker.unattended_root = "C:/job"
+        ask, grant, prompts, done = self.away_run(worker, (False, "(no answer within ten minutes)"))
+        self.assertEqual(ask.call_args.args[0], "May I email the supplier for a quote?")
+        self.assertTrue(ask.call_args.kwargs["away"])        # ten minutes to answer by text, not two
+        grant.assert_not_called()
+        self.assertIn("said no", prompts[1])
+        self.assertEqual(done[0]["outcome"], "partial")
+        ask, grant, prompts, _ = self.away_run(worker, (True, "yes"))
+        grant.assert_called_once()
+        self.assertIn("said yes", prompts[1])
+
+    def test_inside_the_sandbox_a_question_is_answered_no_without_asking(self):
+        worker = terminal.TerminalWorker(cwd="C:/job")
+        worker.unattended_root, worker.sandbox = "C:/job", {"read_only": []}
+        ask, _, prompts, done = self.away_run(worker, (True, "yes"))
         ask.assert_not_called()
         self.assertEqual(prompts[1], terminal.AWAY_ANSWER)
         self.assertEqual(done[0]["outcome"], "partial")

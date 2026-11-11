@@ -39,8 +39,10 @@ _QUOTED = re.compile(r"[\"“][^\"”]*[\"”]")  # words about a claim aren't o
 _NOT_A_REPORT = re.compile(r"\b(?:if|once|when|after|before|until|unless|whether|haven'?t|hadn'?t|didn'?t|never|not)\b[^.,;]*$", re.I)
 
 # Tools whose output is written by someone else and may try to give Jarvis instructions.
-UNTRUSTED_TOOLS = {"check_email", "read_email", "read_clipboard", "look_at_screen",
-                   "web_search", "WebSearch", "WebFetch", "call_mcp_tool"}
+# After one of these in a turn, a change waits for the owner's yes and unattended work can't be queued: the
+# text was written by a stranger who may have aimed it at Jarvis. Email only, since 2026-11-11 (the owner's
+# decision): web search, the clipboard and the screen used to count, and every lookup then cost a question.
+UNTRUSTED_TOOLS = {"check_email", "read_email"}
 
 # "The TV is on." "They're off now." A statement about the state of a thing, ending the clause, so that
 # "nothing is on your calendar" and "what is on your mind" don't count.
@@ -65,7 +67,7 @@ PROVEN_BY_RETURN = frozenset({
     "remember", "update_memory", "correct_memory", "forget", "set_reminder", "cancel_reminder", "add_task",
     "complete_task", "create_knowledge_note", "edit_file", "write_file"})
 # A failure of one of these is always worth telling the owner, even if the brain's reply glosses over it.
-MUST_REPORT_FAILURE = frozenset({"home_control", "send_telegram", "set_reminder", "add_task", "remember",
+MUST_REPORT_FAILURE = frozenset({"home_control", "send_telegram", "send_email", "set_reminder", "add_task", "remember",
                                  "queue_away_job", "send_agent_task", "terminal_task"})
 CONFIRMED, SENT, WAITING, UNKNOWN, FAILED = "confirmed", "sent", "waiting", "unknown", "failed"
 _ADMITS = re.compile(r"\b(?:not|never|no luck|unable|fail\w*|unconfirmed|problem|error|refus\w*|declin\w*|"

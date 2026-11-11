@@ -4,7 +4,7 @@ New Outlook has no scripting API, so this works its window the way a screen read
 reads the event labels and fills in the new-event form directly. No screenshots and no mouse.
 The new-event form does pop up briefly while an event is added.
 
-Only used when JARVIS_ALLOW_OUTLOOK=1 (see worksafe.py). Outlook is opened if it isn't running.
+Not used when Outlook has been put off-limits (see worksafe.py). Outlook is opened if it isn't running.
 """
 
 import ctypes

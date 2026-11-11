@@ -1,10 +1,12 @@
-"""Claude Code PreToolUse hook for Jarvis's terminal tasks (see terminal.py).
+"""Claude Code PreToolUse hook for Jarvis's terminal tasks (see terminal.py), and the same verdicts for Jarvis's
+own commands and his Codex agents.
 
 Claude Code runs this before every tool call. It reads the call as JSON on stdin and:
-  - lets ordinary work run (Claude Code is in bypass-permissions mode),
-  - blocks risky actions - deleting, installing/uninstalling software, changing system
-    settings - until the user has approved that kind of action out loud,
-  - always blocks Teams data, and Outlook's too unless JARVIS_ALLOW_OUTLOOK=1 (see worksafe.py).
+  - lets the work run (Claude Code is in bypass-permissions mode). Deleting, installing, system settings,
+    git pushes and edits anywhere no longer wait for anyone: the owner's decision, 2026-11-11;
+  - pauses only a command that messages other people in the owner's name, until they say yes;
+  - never lets an agent rewrite these rules or its own approval records;
+  - blocks the apps listed in JARVIS_BLOCK_WORK_APPS (none by default; see worksafe.py).
 
 Approvals live in data/cc_approvals.json, written by terminal.py when the user says yes.
 """
@@ -19,32 +21,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APPROVALS = os.path.join(HERE, "data", "cc_approvals.json")
 PENDING = os.path.join(HERE, "data", "cc_pending.json")
 
+MESSAGE = "message other people"
 RISKY = {
-    # Keyword rules cannot see through encoding or string-built commands, so those always ask.
-    "hidden or encoded command": re.compile(
-        r"\s-(?:e|ec|en|enc|enco\w*|encodedcommand)\s+[A-Za-z0-9+/=]{12,}|\b(?:Invoke-Expression|iex)\b|FromBase64String", re.I),
-    "destructive git": re.compile(r"\bgit\s+(?:reset\s+--hard|push\b[^\n]*(?:--force|-f\b)|checkout\s+--\s|restore\s+(?:--worktree\s+)?\.)", re.I),
-    "publish or external message": re.compile(r"\b(?:git\s+push|npm\s+publish|gh\s+(?:release\s+create|pr\s+merge|issue\s+comment|pr\s+comment)|Send-MailMessage)\b", re.I),
-    "delete": re.compile(
-        r"\b(Remove-Item|rm|rmdir|rd|del|erase|Clear-RecycleBin|Clear-Content)\b|\bri\s|"
-        r"\[(System\.)?IO\.(File|Directory)\]::Delete|\.Delete\(|shred|git\s+clean|"
-        r"\bos\.(?:remove|unlink|rmdir|removedirs)\s*\(|\bshutil\.rmtree\b|\.(?:unlink|rmdir|rmSync|unlinkSync|rmdirSync)\s*\(", re.I),
-    "install": re.compile(
-        r"\b(winget|choco|scoop|msiexec|Add-AppxPackage|Remove-AppxPackage|Install-Package|"
-        r"Uninstall-Package|Install-Module|Uninstall-Module|Install-Script)\b|"
-        r"\bnpm\s+(i|install|uninstall)\s+(-g|--global)\b|\.msi\b|setup\.exe|installer\.exe", re.I),
-    "system settings": re.compile(
-        r"\breg(\.exe)?\s+(add|delete|import|restore|load)\b|"
-        r"\b(Set|New|Remove|Rename)-ItemProperty\b|\bHKLM:|\bHKCU:|"
-        r"\b(Set-ExecutionPolicy|netsh|bcdedit|diskpart|powercfg|schtasks|Register-ScheduledTask|"
-        r"Unregister-ScheduledTask|Set-Service|Stop-Service|Start-Service|Restart-Service|New-Service|"
-        r"Set-NetFirewall\w*|New-NetFirewallRule|Disable-NetAdapter|Enable-NetAdapter|Set-MpPreference|"
-        r"Add-MpPreference|Set-TimeZone|Set-Date|Rename-Computer|Restart-Computer|Stop-Computer|shutdown|"
-        r"takeown|icacls|Add-LocalGroupMember|New-LocalUser|Set-LocalUser|Disable-ComputerRestore|"
-        r"Enable-WindowsOptionalFeature|Disable-WindowsOptionalFeature|dism)\b|\bsfc\s+/|\bformat(\.com)?\s+[a-z]:|\bsc(\.exe)?\s+(config|delete|create|stop)\b",
-        re.I),
+    # The one kind of command that still waits for the owner: it speaks to other people as them. Spending
+    # money doesn't happen in a shell command; the screen agent and outside tools ask for that themselves.
+    MESSAGE: re.compile(
+        r"\bSend-MailMessage\b|\bgh\s+(?:issue|pr)\s+(?:comment|review)\b|\bgh\s+issue\s+create\b|"
+        r"\b(?:sendmail|mutt|msmtp|swaks)\b|\bmail\s+-s\b|\bsmtplib\b|"
+        r"hooks\.slack\.com|discord(?:app)?\.com/api/webhooks|\btwilio\b", re.I),
 }
-# Teams apps and data: never, approval or not. Outlook too, unless JARVIS_ALLOW_OUTLOOK=1.
+# Deleting asks nobody. An agent working unattended is still kept to deleting inside its own folder (see
+# unattended), and this is how a delete is recognised.
+DELETE = re.compile(
+    r"\b(Remove-Item|rm|rmdir|rd|del|erase|Clear-RecycleBin|Clear-Content)\b|\bri\s|"
+    r"\[(System\.)?IO\.(File|Directory)\]::Delete|\.Delete\(|shred|git\s+clean|"
+    r"\bos\.(?:remove|unlink|rmdir|removedirs)\s*\(|\bshutil\.rmtree\b|\.(?:unlink|rmdir|rmSync|unlinkSync|rmdirSync)\s*\(", re.I)
+# Apps the owner has put off-limits, approval or not. None by default: JARVIS_BLOCK_WORK_APPS=teams,outlook.
 TEAMS_OFF_LIMITS = re.compile(
     r"\\Microsoft\\Teams\b|\\Packages\\MSTeams|\b(ms-teams|msteams|teams)\.exe\b", re.I)
 OUTLOOK_OFF_LIMITS = re.compile(
@@ -86,11 +78,6 @@ PROTECTED = {os.path.normcase(os.path.join(HERE, *p)) for p in (
     ("cc_guard.py",), ("approvals.py",))}
 STATE_NAMES = re.compile(r"\bcc_(?:approvals|pending|settings)\.json\b", re.I)
 HOME = os.path.expanduser("~")
-# Writes stay inside the user's folder; inside it, autostart, credentials and agent configuration still ask.
-ALLOWED_ROOTS = [HOME]
-SENSITIVE = [os.path.join(HOME, *p) for p in (
-    ("AppData", "Roaming", "Microsoft", "Windows", "Start Menu"), (".ssh",), (".codex",), (".claude",),
-    ("Documents", "WindowsPowerShell"), ("Documents", "PowerShell"))]
 
 
 def _inside(path, root):
@@ -108,25 +95,22 @@ def _write_verdict(file_path):
     path = os.path.normcase(path)
     if path in PROTECTED:
         return "blocked", "Jarvis's approval records and guard rules can't be changed by an agent."
-    if not any(_inside(path, root) for root in ALLOWED_ROOTS):
-        return "approval", "write outside allowed folders"
-    if any(_inside(path, place) for place in SENSITIVE):
-        return "approval", "change startup, credential or agent settings"
-    return None
+    return None  # anywhere else is the agent's to write, with no question
 
 
-def outlook_allowed() -> bool:
-    # Same switch as worksafe.outlook_allowed(); not imported to keep this hook light. Jarvis's
-    # .env reaches it through the environment terminal.py passes to Claude Code.
-    return os.getenv("JARVIS_ALLOW_OUTLOOK", "").strip().lower() in ("1", "true", "yes", "on")
+def blocked_work_apps() -> set:
+    # Same switch as worksafe.blocked(); not imported to keep this hook light. Jarvis's .env reaches it
+    # through the environment terminal.py passes to Claude Code.
+    return {name.strip().lower() for name in os.getenv("JARVIS_BLOCK_WORK_APPS", "").split(",") if name.strip()}
 
 
 def decide(tool: str, tool_input: dict) -> tuple[str, str]:
     """('allow' | 'approval' | 'blocked', detail)."""
     text = json.dumps(tool_input).replace("\\\\", "\\") if tool in SHELL_TOOLS | FILE_TOOLS else ""
-    if text and TEAMS_OFF_LIMITS.search(text):
+    off_limits = blocked_work_apps() if text else ()
+    if "teams" in off_limits and TEAMS_OFF_LIMITS.search(text):
         return "blocked", "Microsoft Teams (its app and data) is off-limits."
-    if text and not outlook_allowed() and OUTLOOK_OFF_LIMITS.search(text):
+    if "outlook" in off_limits and OUTLOOK_OFF_LIMITS.search(text):
         return "blocked", "Outlook (its app and data) is off-limits."
     if tool in WRITE_TOOLS:
         verdict = _write_verdict(str(tool_input.get("file_path") or tool_input.get("notebook_path") or ""))
@@ -150,7 +134,7 @@ SECRET_FILE = re.compile(r"(?:^|[\\/\s'\"=])(?:\.env(?:\.[\w-]+)?(?<!\.example)|
 
 # Set by terminal.py for an agent working with nobody at the PC (an away job on Claude): the one folder it works in.
 UNATTENDED_ROOT = "JARVIS_UNATTENDED_ROOT"
-NOBODY_HERE = "nobody is here to approve it. Don't look for another way: leave it undone and say so in your report."
+SANDBOXED = "JARVIS_SANDBOXED"  # set by sandbox/run_agent.py: this hook is running inside the Linux sandbox
 # A full path: quoted (it may hold spaces, as "Jarvis Builds" does) or bare.
 _ABSOLUTE = re.compile(r"'([A-Za-z]:[\\/][^']*)'|\"([A-Za-z]:[\\/][^\"]*)\"|(?<![\w'\"])([A-Za-z]:[\\/][^\s'\"|;&<>)]*)")
 _ELSEWHERE = re.compile(r"(?:^|[\s'\"=(])(?:~|\.\.(?:[\\/]|$|\s)|\$HOME\b|\$env:|%[A-Za-z_]+%|/[A-Za-z]/)", re.I)
@@ -173,19 +157,18 @@ def _leaves(text, root) -> bool:
 
 
 def unattended(tool: str, tool_input: dict, root: str) -> tuple[str, str]:
-    """The verdict for an agent with nobody at the PC: ('allow' | 'blocked', detail). There is no "ask".
+    """The verdict for an agent working in a folder of its own with nobody at the PC (an away job).
 
-    It may read, search, browse, run commands and create or change files, like any agent. What differs:
-      - whatever would need the owner's yes is refused instead of asked (installing, system settings, publishing,
-        destructive git, hidden commands);
-      - its file tools write only inside its own folder;
-      - deleting is allowed only inside its own folder, and it can't move its shell out of that folder;
+    It may do what any agent may. What differs is that the job owns one folder, and stays in it:
+      - its file tools write only inside that folder;
+      - deleting is allowed only inside it, and it can't move its shell out of it;
       - credentials files can't be read or named in a command.
+    'approval' means what it means for any agent (a message to other people): the owner is texted and asked.
     This judges what the agent asks to do; it is not a sandbox. A program the agent writes and runs can still
-    reach the rest of the PC. The private folder, the environment with no tokens in it, and these rules are
-    the protection, and the Codex sandbox remains the stricter choice."""
+    reach the rest of the PC, which is why a Claude away job runs inside the Linux sandbox when that is ready
+    (wsl_sandbox.py)."""
     verdict, detail = decide(tool, tool_input)
-    if verdict == "blocked":
+    if verdict != "allow":
         return verdict, detail
     root = os.path.realpath(root)
     # Only where a file is named, never what is written into one: a README may say "copy .env.example to .env".
@@ -203,18 +186,14 @@ def unattended(tool: str, tool_input: dict, root: str) -> tuple[str, str]:
         return "allow", ""
     if tool in SHELL_TOOLS:
         command = str(tool_input.get("command", ""))
+        if plain_read_command(command):
+            return "allow", ""
         for target in _CHANGE_FOLDER.findall(command):
-            if _leaves(" " + target.strip().strip("'\""), root) and not plain_read_command(command):
+            if _leaves(" " + target.strip().strip("'\""), root):
                 return "blocked", f"Stay in {root}: don't change to another folder. Use full paths to read elsewhere."
-        if verdict == "approval":
-            if detail == "delete" and not _leaves(command, root):
-                return "allow", ""  # tidying its own folder is ordinary work
-            if detail == "delete":
-                return "blocked", (f"You may delete only inside {root}, named by a path relative to it or a full path "
-                                   f"under it. Anything else needs the owner's approval, and {NOBODY_HERE}")
-            return "blocked", f"That ({detail}) needs the owner's approval, and {NOBODY_HERE}"
-    elif verdict == "approval":
-        return "blocked", f"That ({detail}) needs the owner's approval, and {NOBODY_HERE}"
+        if DELETE.search(command) and _leaves(command, root):
+            return "blocked", (f"You may delete only inside {root}, named by a path relative to it or a full path "
+                               "under it. Leave anything else and say so in your report.")
     return "allow", ""
 
 
@@ -252,17 +231,19 @@ def main():
     call = json.load(sys.stdin)
     tool, tool_input, session = call.get("tool_name", ""), call.get("tool_input") or {}, call.get("session_id", "")
     root = os.environ.get(UNATTENDED_ROOT, "").strip()
-    if root:  # nobody to ask: refuse or run, never pause
-        verdict, detail = unattended(tool, tool_input, root)
-        if verdict == "blocked":
-            deny(f"BLOCKED: {detail}")
-        sys.exit(0)
-    verdict, detail = decide(tool, tool_input)
+    verdict, detail = unattended(tool, tool_input, root) if root else decide(tool, tool_input)
     if verdict == "blocked":
-        deny(f"BLOCKED: {detail} Don't try another way; tell the user it's off-limits.")
+        deny(f"BLOCKED: {detail}" if root else f"BLOCKED: {detail} Don't try another way; tell the user it's off-limits.")
+    if verdict == "approval" and os.environ.get(SANDBOXED):
+        # Inside the Linux sandbox there is nothing to send from and no way for a yes to reach this hook.
+        deny(f"BLOCKED: that ({detail}) can't be done from inside the sandbox. Leave it undone and say in your "
+             "report exactly what you would have sent, so the owner can decide.")
     if verdict == "approval" and not approved(session, detail):
-        record_pending(session, detail, str(tool_input.get("command", "")))
-        deny(f"PAUSED: this action ({detail}) needs the user's spoken approval first. Do not look for a "
+        try:
+            record_pending(session, detail, str(tool_input.get("command", "")))
+        except OSError:
+            pass  # the pause must still be reported: a hook that crashes here would let the action through
+        deny(f"PAUSED: this action ({detail}) needs the user's approval first. Do not look for a "
              "workaround. Stop now and make your final message start with 'APPROVAL NEEDED:' followed by "
              "one short spoken sentence saying exactly what you want to do and why.")
     sys.exit(0)  # no decision: bypass-permissions mode lets it run

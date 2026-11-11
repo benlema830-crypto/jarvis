@@ -55,7 +55,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
 | Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex), heartbeat.py (half-hourly plain checks and the owner's checklist), attention.py (say it now or hold it; five unprompted updates a day), presence_greeting.py, morning_wakeup.py |
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
-| Email | gmail.py (read-only Gmail API, DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
+| Email | gmail.py (Gmail API: reads, and sends after the owner's yes; DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
 | MCP armory | mcp_connections.py (encrypted store and tool transport), mcp_oauth.py (browser authorization and token lifecycle) |
@@ -132,7 +132,7 @@ never waits for anyone. `away_jobs` is the status, stop and resume tool.
 
 A build runs one at a time in `~/Documents/Jarvis Builds/<name>-<id>`: a local clone with its remote removed, or a new
 repo. Its agent is the `Away Builder` session, flagged `unattended`: approval policy `never` in the Codex sandbox, no
-outside tools, no web search, no secrets in its environment, and no spoken questions. `.git` is read-only to the agent, so
+outside tools, no web search, no secrets in its environment. A question it does raise is texted to the owner (below). `.git` is read-only to the agent, so
 Jarvis commits for it (with hooks off) and fetches the result into the owner's repo as `jarvis/<name>-<id>`. He never merges.
 
 The agent saying done isn't enough. Jarvis re-runs the tests through `codex sandbox`, because the agent wrote them, and
@@ -208,3 +208,43 @@ Two steps are the owner's: installing WSL (administrator, then a restart) and si
 sandbox, once. Until it is ready a Fable job runs under the rules above, and its first text says so and why.
 `away_jobs.AwayQueue._claude_setup` decides once per job; `wsl_sandbox.problem()` re-checks the lockdown before
 every job, so a sandbox someone loosened by hand is not trusted. Codex stays the default for away work.
+
+## Fewer rules (2026-11-11)
+
+The owner: "its annoying how much he cant do something or says we should do something because of the rules.
+there should be little to no rules". His transcripts showed where it came from: 27 "May I proceed?" questions,
+a long word list that made harmless requests ask, a caution after every web search, and instructions telling him
+to treat his own ideas as proposals. What was decided, row by row, and where it lives:
+
+- **What still waits for a yes: two things.** Spending money, and sending a message to other people in the
+  owner's name (`approvals.ASKS`). Deleting, installing, system settings, startup and settings folders, git
+  resets and pushes, encoded commands and edits anywhere now run without a question, for Jarvis's own commands
+  and for every agent (`cc_guard.RISKY` holds one pattern, for commands that message people).
+- **No word list.** Requests are no longer scanned for words like send, share, remove, order or token. An
+  outside tool is judged by its name alone (`approvals.tool_kind`).
+- **Only email makes a later change ask.** After `check_email` or `read_email` in a turn, a change needs a yes
+  and away work can't be queued, because a stranger wrote that text. Web search, the clipboard and the screen
+  no longer count (`truth_guard.UNTRUSTED_TOOLS`).
+- **A yes can come from the phone.** Every question is spoken and texted to Telegram
+  (`jarvis.text_question`); a yes or no sent from Telegram or the phone answers it
+  (`jarvis.answer_from_phone`). Away from the PC the owner gets ten minutes, not two.
+- **Away jobs ask instead of being refused.** An away agent that needs a yes has the question texted. It still
+  keeps to its own folder. Inside the Linux sandbox a yes can't reach the guard and there is nothing to send
+  from, so there it is told no and reports what is waiting.
+- **His instructions.** Small ideas of his own he just does and reports; big ones he asks once. "Opening a
+  session doesn't authorize work" and "find the next task means look, never do" are gone. He is told not to
+  lecture or cite rules, to name a real risk once and then do the thing, never to ask whether the owner has
+  permission, and to keep a doubt to a few words.
+- **Agents' instructions** say the same: everything the task needs is authorized; ask only before money or a
+  message to other people (`terminal.RULES`, `agent_sessions.INSTRUCTIONS`, `agent.SYSTEM`).
+- **Teams is unblocked**, with Outlook. Work-safe mode is now opt-in: `JARVIS_BLOCK_WORK_APPS=teams,outlook`
+  in `.env` brings it back (`worksafe.py`).
+- **Jarvis can send email** (`send_email`, `gmail.send`), after the owner's yes to the exact text. It needs
+  one new sign-in with the sending scope: `scripts/setup_gmail.py --renew`.
+
+Kept on purpose: credentials files are never read into the conversation, an agent can't rewrite its own guard
+or approval records, and the honesty rules (no claiming what a tool didn't do) are unchanged.
+
+The cost, said to the owner before the change: he reads web pages, and with these questions gone a page that
+tricked him could get him to delete or push something. The questions that remain cover money, messages to
+other people, and anything after reading email.

@@ -1,10 +1,12 @@
-"""The owner's Gmail, read-only, through Google's Gmail API.
+"""The owner's Gmail through Google's Gmail API: reading, and sending once they say yes.
 
-Scope is gmail.readonly: Jarvis can list, search and read mail but Google won't let this
-connection send, delete, label or change anything. Setup (scripts/setup_gmail.py) signs in once in
-the browser with the owner's own Google Cloud OAuth client; the tokens are encrypted with Windows
-DPAPI in data/gmail.enc. Email is written by other people, so its text is untrusted data: the
-tools wrap it in a warning and Jarvis never acts on instructions inside a message.
+Two scopes. gmail.readonly lists, searches and reads mail. gmail.send (added 2026-11-11, the owner's decision)
+sends a message and nothing else: Google still won't let this connection delete, label or change anything.
+A sign-in made before that date has only the reading scope, and send() then says to run
+scripts/setup_gmail.py --renew. Setup signs in once in the browser with the owner's own Google Cloud OAuth
+client; the tokens are encrypted with Windows DPAPI in data/gmail.enc. Email is written by other people, so its
+text is untrusted data: the tools wrap it in a warning and Jarvis never acts on instructions inside a message.
+Sending always waits for the owner's yes to the exact text (tools.send_email).
 """
 import base64
 import html
@@ -12,7 +14,8 @@ import json
 import re
 import threading
 import time
-from email.utils import parseaddr
+from email.message import EmailMessage
+from email.utils import getaddresses, parseaddr
 from pathlib import Path
 
 import requests
@@ -24,6 +27,11 @@ import privacy
 
 STORE = Path(__file__).resolve().parent / "data" / "gmail.enc"
 SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+NEEDS_SEND_ACCESS = ("Gmail is connected for reading only. To let Jarvis send, the owner runs "
+                     "scripts\\setup_gmail.py --renew and approves sending in the browser.")
+MAX_SEND = 20000
+_ADDRESS = re.compile(r"[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+")
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -92,6 +100,78 @@ def api(path, params=None):
             raise GmailError(f"Gmail returned HTTP {response.status_code}.")
         return response.json()
     raise GmailError("Gmail sign-in failed. Run scripts/setup_gmail.py again.")
+
+
+def _post(path, payload):
+    """POST to a Gmail API path chosen by this module (never by the model)."""
+    for attempt in range(2):
+        token = access_token(force=bool(attempt))
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.post(API + path, json=payload, timeout=(5, 30), allow_redirects=False,
+                                        headers={"Authorization": "Bearer " + token})
+        except requests.RequestException:
+            raise GmailError("Couldn't reach Gmail. Check the internet connection. Nothing was sent.") from None
+        if response.status_code == 401 and attempt == 0:
+            continue
+        if response.status_code == 403:
+            raise GmailError(NEEDS_SEND_ACCESS)
+        if response.status_code == 429:
+            raise GmailError("Gmail is rate limiting; try again in a minute. Nothing was sent.")
+        if not response.ok:
+            raise GmailError(f"Gmail returned HTTP {response.status_code}. Nothing was sent.")
+        return response.json()
+    raise GmailError("Gmail sign-in failed. Run scripts/setup_gmail.py again.")
+
+
+def draft(to: str = "", subject: str = "", body: str = "", reply_to: str = "") -> dict:
+    """Check and assemble a message without sending it: {"to", "subject", "body", "thread", "headers"}.
+
+    `reply_to` is the id of a message from check_email: the reply goes to its sender, in its thread, with its
+    subject, unless `to` or `subject` say otherwise. Raises GmailError for anything that can't be sent."""
+    body = str(body or "").strip()
+    if not body:
+        raise GmailError("The email has no text.")
+    if len(body) > MAX_SEND:
+        raise GmailError("That's too long to send as one email.")
+    to, subject, thread, headers = " ".join(str(to or "").split()), " ".join(str(subject or "").split()), "", {}
+    if reply_to:
+        if not re.fullmatch(r"[A-Za-z0-9]{6,40}", str(reply_to)):
+            raise GmailError("Use an email id from check_email (the code in brackets).")
+        original = api(f"/messages/{reply_to}", {"format": "metadata", "metadataHeaders": [
+            "From", "Reply-To", "Subject", "Message-ID", "References"]})
+        head = _headers(original)
+        thread = original.get("threadId", "")
+        to = to or head.get("reply-to") or head.get("from", "")
+        if not subject:
+            subject = head.get("subject", "")
+            subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+        if head.get("message-id"):
+            headers = {"In-Reply-To": head["message-id"],
+                       "References": f"{head.get('references', '')} {head['message-id']}".strip()}
+    addresses = [address for _, address in getaddresses([to]) if address]
+    if not addresses or not all(_ADDRESS.fullmatch(address) for address in addresses):
+        raise GmailError("I need a full email address to send to.")
+    if not subject:
+        raise GmailError("The email needs a subject.")
+    return {"to": ", ".join(addresses), "subject": subject[:300], "body": body, "thread": thread, "headers": headers}
+
+
+def send(message: dict) -> str:
+    """Send what draft() returned. Returns one line saying what Gmail accepted."""
+    mail = EmailMessage()
+    mail["To"], mail["Subject"] = message["to"], message["subject"]
+    for name, value in message.get("headers", {}).items():
+        mail[name] = value
+    mail.set_content(message["body"])
+    payload = {"raw": base64.urlsafe_b64encode(mail.as_bytes()).decode()}
+    if message.get("thread"):
+        payload["threadId"] = message["thread"]
+    result = _post("/messages/send", payload)
+    if not result.get("id"):
+        raise GmailError("Gmail didn't confirm the send.")
+    return f"Gmail accepted the email to {message['to']} (id {result['id']})."
 
 
 def _clean(text):

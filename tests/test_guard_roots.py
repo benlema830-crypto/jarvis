@@ -1,8 +1,8 @@
-"""Phase D: terminal agents cannot approve themselves, and writes stay inside allowed roots."""
+"""Terminal agents cannot approve themselves or rewrite their guard. Everywhere else is theirs to write
+(the owner's decision, 2026-11-11: writes outside the user folder and in settings folders used to ask)."""
 import os
 from pathlib import Path
 import unittest
-from unittest import mock
 
 import cc_guard
 
@@ -26,35 +26,31 @@ class SelfApprovalTest(unittest.TestCase):
         self.assertEqual(cc_guard.decide('Read', {'file_path': str(JARVIS / 'cc_guard.py')})[0], 'allow')
 
 
-class AllowedRootsTest(unittest.TestCase):
+class WritesAnywhereTest(unittest.TestCase):
     def verdict(self, path, tool='Write'):
         return cc_guard.decide(tool, {'file_path': str(path)})
 
-    def test_writes_outside_the_user_folder_need_approval(self):
+    def test_writes_outside_the_user_folder_run_without_a_question(self):
         for path in (r'C:\Windows\System32\drivers\etc\hosts', r'C:\Program Files\App\config.ini', r'D:\backup\notes.txt'):
-            self.assertEqual(self.verdict(path), ('approval', 'write outside allowed folders'), path)
+            self.assertEqual(self.verdict(path), ('allow', ''), path)
 
-    def test_sensitive_places_inside_the_user_folder_need_approval(self):
-        for relative in (r'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\run.bat', r'.ssh\authorized_keys',
-                         r'.codex\config.toml', r'.claude\settings.json', r'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1',
-                         r'Documents\PowerShell\profile.ps1'):
-            self.assertEqual(self.verdict(HOME / relative), ('approval', 'change startup, credential or agent settings'), relative)
+    def test_startup_and_settings_folders_run_too(self):
+        for relative in (r'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\run.bat', r'.ssh\config',
+                         r'.codex\config.toml', r'.claude\settings.json', r'Documents\PowerShell\profile.ps1'):
+            self.assertEqual(self.verdict(HOME / relative), ('allow', ''), relative)
 
     def test_ordinary_work_in_the_user_folder_is_unchanged(self):
         for relative in (r'Documents\Rocket Frontier\fresh\src\main.lua', r'Downloads\report.txt', r'Desktop\todo.md',
                          r'jarvis\semantic_search.py'):
             self.assertEqual(self.verdict(HOME / relative)[0], 'allow', relative)
-        self.assertEqual(self.verdict(r'C:\Windows\win.ini', tool='Read')[0], 'allow')  # reading is not writing
+        self.assertEqual(self.verdict(r'C:\Windows\win.ini', tool='Read')[0], 'allow')
 
-    def test_traversal_cannot_escape_the_check(self):
-        sneaky = str(HOME / 'Documents' / '..' / '..' / '..' / 'Windows' / 'system.ini')
-        self.assertEqual(self.verdict(sneaky)[0], 'approval')
+    def test_traversal_cannot_reach_the_guards_own_files(self):
         sneaky_state = str(JARVIS / 'tests' / '..' / 'data' / 'cc_approvals.json')
         self.assertEqual(self.verdict(sneaky_state)[0], 'blocked')
 
     def test_codex_file_changes_inherit_the_same_rules(self):
-        with mock.patch.dict(os.environ, {'JARVIS_ALLOW_OUTLOOK': '0'}):
-            self.assertEqual(cc_guard.decide('Edit', {'file_path': cc_guard.APPROVALS})[0], 'blocked')
+        self.assertEqual(cc_guard.decide('Edit', {'file_path': cc_guard.APPROVALS})[0], 'blocked')
 
 
 if __name__ == '__main__':

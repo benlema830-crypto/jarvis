@@ -98,7 +98,7 @@ class SessionTest(unittest.TestCase):
         turn = [p for m, p in FakeConnection.calls if m == "turn/start"][0]
         self.assertEqual(turn["approvalPolicy"], "untrusted")
 
-    def test_unattended_approval_and_question_never_reach_the_speaker(self):
+    def test_an_away_agents_approval_and_question_are_texted_to_the_owner(self):
         folder = self.root / "copy"
         folder.mkdir()
         self.manager.prepare_unattended("Away Builder", "Widget", folder)
@@ -107,14 +107,19 @@ class SessionTest(unittest.TestCase):
         entry.update(status="running", thread_id="t", mode="work")
         sent = []
         worker.connection = mock.Mock(send=sent.append)
-        with mock.patch.object(sessions.approvals, "ask") as ask:
+        # Nobody is at the PC, so both are texted to the owner (their decision, 2026-11-11), who gets ten minutes.
+        with mock.patch.object(sessions.approvals, "ask", return_value=(False, "(no answer within ten minutes)")) as ask:
             answer = worker._approval({"method": "item/commandExecution/requestApproval", "params": {"command": "dir"}})
             self.assertEqual(answer, {"decision": "decline"})
+            self.assertTrue(ask.call_args.kwargs["away"] and ask.call_args.kwargs["always"])
             worker._event({"id": 9, "method": "item/tool/requestUserInput",
                            "params": {"questions": [{"id": "q", "question": "Which colour?"}]}})
-            ask.assert_not_called()
-        said = sent[0]["result"]["answers"]["q"]["answers"][0]
-        self.assertIn("owner is away", said)
+            self.assertTrue(ask.call_args.kwargs["away"] and ask.call_args.kwargs["free_text"])
+        self.assertIn("didn't answer", sent[0]["result"]["answers"]["q"]["answers"][0])
+        with mock.patch.object(sessions.approvals, "ask", return_value=(True, "blue")):
+            worker._event({"id": 10, "method": "item/tool/requestUserInput",
+                           "params": {"questions": [{"id": "q", "question": "Which colour?"}]}})
+        self.assertEqual(sent[1]["result"]["answers"]["q"]["answers"][0], "blue")
         self.manager.workers.clear()
 
     def test_unattended_connection_has_no_web_search_or_secrets(self):
@@ -508,13 +513,29 @@ class SessionTest(unittest.TestCase):
             self.assertEqual(self.approve_command("powershell -File fresh/Build.ps1"), {"decision": "accept"})
             ask.assert_not_called()
 
-    def test_risky_action_requires_explicit_answer(self):
+    def test_a_message_to_other_people_requires_an_explicit_answer(self):
         self.prepare_approval()
         with mock.patch.object(sessions.approvals, "ask", return_value=(False, "no")) as ask:
-            self.assertEqual(self.approve_command("git reset --hard"), {"decision": "decline"})
+            self.assertEqual(self.approve_command('gh pr comment 5 --body "merged"'), {"decision": "decline"})
             ask.assert_called_once()
+            self.assertEqual(ask.call_args.kwargs["kind"], cc_guard.MESSAGE)
+            self.assertIn("send a message to other people", ask.call_args.kwargs["spoken"])
         with mock.patch.object(sessions.approvals, "ask", return_value=(True, "yes")):
-            self.assertEqual(self.approve_command("git push origin main"), {"decision": "accept"})
+            self.assertEqual(self.approve_command('gh pr comment 5 --body "merged"'), {"decision": "accept"})
+
+    def test_git_history_and_pushes_run_without_a_question(self):
+        self.prepare_approval()
+        with mock.patch.object(sessions.approvals, "ask") as ask:
+            for command in ("git reset --hard", "git push origin main", "Remove-Item build -Recurse", "winget install Git.Git"):
+                self.assertEqual(self.approve_command(command), {"decision": "accept"}, command)
+            ask.assert_not_called()
+
+    def test_a_research_agents_command_is_never_a_question_of_its_own(self):
+        self.prepare_approval(mode="research")
+        with mock.patch.object(sessions.approvals, "ask", return_value=(True, "(auto-approved by your settings)")) as ask:
+            self.assertEqual(self.approve_command("python -m unittest"), {"decision": "accept"})
+        self.assertEqual(ask.call_args.kwargs["kind"], "command")
+        self.assertTrue(sessions.approvals.auto_approved("x", "command"))
 
     def test_research_cannot_auto_approve_unknown_command(self):
         self.prepare_approval("research")
@@ -545,16 +566,18 @@ class SessionTest(unittest.TestCase):
             self.assertEqual(self.worker._approval(event), {"permissions": grant, "scope": "turn"})
             ask.assert_not_called()
 
-    def test_sensitive_writes_still_ask(self):
+    def test_writes_in_settings_folders_run_and_broad_access_is_a_named_kind(self):
         self.prepare_approval()
         self.worker._items["edit"] = {"changes": [{"path": str(Path.home() / ".ssh" / "config"), "kind": {"type": "update"}}]}
         event = {"method": "item/fileChange/requestApproval", "params": {"itemId": "edit"}}
         with mock.patch.object(sessions.approvals, "ask", return_value=(False, "no")) as ask:
-            self.assertEqual(self.worker._approval(event), {"decision": "decline"})
+            self.assertEqual(self.worker._approval(event), {"decision": "accept"})    # no question any more
+            ask.assert_not_called()
             grant = {"fileSystem": {"entries": [{"access": "write", "path": {"type": "special", "value": {"kind": "root"}}}]}}
             event = {"method": "item/permissions/requestApproval", "params": {"permissions": grant}}
-            self.assertEqual(self.worker._approval(event), {"permissions": {}, "scope": "turn"})
-            self.assertEqual(ask.call_count, 2)
+            self.worker._approval(event)
+            self.assertEqual(ask.call_args.kwargs["kind"], "broader access")
+        self.assertTrue(sessions.approvals.auto_approved("x", "broader access"))      # which the default setting lets through
 
     def test_codex_changes_to_guard_files_are_undone(self):
         import os
@@ -621,12 +644,13 @@ class SessionTest(unittest.TestCase):
                         'Get-Content x; shutdown /r', 'cat a.txt && rm a.txt'):
             self.assertEqual(cc_guard.decide("PowerShell", {"command": command})[0] != "allow"
                              or not cc_guard.plain_read_command(command), True, command)
-        self.assertEqual(cc_guard.decide("Bash", {"command": "rm -rf build"}), ("approval", "delete"))
+        self.assertEqual(cc_guard.decide("Bash", {"command": "rm -rf build"}), ("allow", ""))
         self.assertEqual(cc_guard.decide("Bash", {"command": "cat data/cc_approvals.json"})[0], "blocked")
 
-    def test_publication_and_destructive_git_guard(self):
+    def test_publishing_and_git_history_run_and_only_messages_wait(self):
         for command in ("git push origin main", "git reset --hard", "npm publish", "gh pr merge 5"):
-            self.assertEqual(cc_guard.decide("Bash", {"command": command})[0], "approval")
+            self.assertEqual(cc_guard.decide("Bash", {"command": command})[0], "allow")
+        self.assertEqual(cc_guard.decide("Bash", {"command": 'gh issue comment 5 --body "fixed"'})[0], "approval")
 
     def test_current_installed_protocol_schemas(self):
         base = Path(sessions.HERE) / "data/codex-schema"

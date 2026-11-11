@@ -148,30 +148,30 @@ class TerminalGuardTest(unittest.TestCase):
             ("PowerShell", r"Get-ChildItem -Recurse -Force ~/Downloads | Format-Table Name, Length", "allow"),
             ("PowerShell", r"pip install requests", "allow"),
             ("Edit", {"file_path": os.path.join(os.path.expanduser("~"), "Jarvis", "notes.txt")}, "allow"),
-            ("PowerShell", r"Remove-Item C:\Users\x\Downloads\old.zip", "approval"),
-            ("Bash", r"rm -rf ~/AppData/Local/Temp/*", "approval"),
-            ("PowerShell", r"winget install Python.Python.3.12", "approval"),
-            ("PowerShell", r"Set-ItemProperty HKCU:\Software\x -Name y -Value 0", "approval"),
-            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", "blocked"),
-            ("Read", {"file_path": r"C:\Users\x\Documents\Outlook Files\archive.pst"}, "blocked"),
-            ("PowerShell", r"Get-Process ms-teams.exe", "blocked"),
+            # The owner's decision, 2026-11-11: none of these waits for a yes any more.
+            ("PowerShell", r"Remove-Item C:\Users\x\Downloads\old.zip", "allow"),
+            ("Bash", r"rm -rf ~/AppData/Local/Temp/*", "allow"),
+            ("PowerShell", r"winget install Python.Python.3.12", "allow"),
+            ("PowerShell", r"Set-ItemProperty HKCU:\Software\x -Name y -Value 0", "allow"),
+            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", "allow"),
+            ("PowerShell", r"Get-Process ms-teams.exe", "allow"),
+            ("PowerShell", r"Send-MailMessage -To a@b.co -Subject hi", "approval"),
         ]
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": ""}):
             for tool, x, expected in cases:
                 inp = x if isinstance(x, dict) else {"command": x}
                 self.assertEqual(cc_guard.decide(tool, inp)[0], expected, x)
 
-    def test_outlook_allowed_teams_still_blocked(self):
+    def test_apps_are_off_limits_only_when_the_owner_names_them(self):
         import cc_guard
-        cases = [
-            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", "allow"),
-            ("PowerShell", r"Start-Process olk.exe", "allow"),
-            ("PowerShell", r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Teams", "blocked"),
-            ("PowerShell", r"Stop-Process -Name ms-teams.exe", "blocked"),
-        ]
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
-            for tool, x, expected in cases:
-                self.assertEqual(cc_guard.decide(tool, {"command": x})[0], expected, x)
+        outlook, teams = r"Get-ChildItem $env:LOCALAPPDATA\Microsoft\Outlook", r"Stop-Process -Name ms-teams.exe"
+        pst = {"file_path": r"C:\Users\x\Documents\Outlook Files\archive.pst"}
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams"}):
+            self.assertEqual(cc_guard.decide("PowerShell", {"command": teams})[0], "blocked")
+            self.assertEqual(cc_guard.decide("PowerShell", {"command": outlook})[0], "allow")
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "Teams, Outlook"}):
+            self.assertEqual(cc_guard.decide("PowerShell", {"command": outlook})[0], "blocked")
+            self.assertEqual(cc_guard.decide("Read", pst)[0], "blocked")
 
     def test_approval_is_per_session_and_kind(self):
         import cc_guard
@@ -210,20 +210,30 @@ class ApprovalsTest(unittest.TestCase):
 
 
 class WorkSafeTest(unittest.TestCase):
-    def test_outlook_and_teams_titles(self):
+    OUTLOOK = ("Inbox - alex@company.com - Outlook", "Mail - Alex Smith - Outlook - Google Chrome", "Outlook")
+    TEAMS = ("Chat | Microsoft Teams", "Microsoft Teams (work or school)")
+
+    def test_nothing_is_blocked_unless_the_owner_says_so(self):
         import worksafe
-        outlook = ("Inbox - alex@company.com - Outlook", "Mail - Alex Smith - Outlook - Google Chrome", "Outlook")
-        teams = ("Chat | Microsoft Teams", "Microsoft Teams (work or school)")
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
-            for title in outlook + teams:
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "", "JARVIS_ALLOW_OUTLOOK": "0"}):
+            for title in self.OUTLOOK + self.TEAMS:
+                self.assertFalse(worksafe.title_blocked(title), title)
+            self.assertEqual(worksafe.blocked_processes(), set())
+            self.assertEqual(worksafe.blocked_apps(), "")
+            self.assertTrue(worksafe.outlook_allowed())
+            self.assertEqual(worksafe.rule("- {apps} are off-limits.\n"), "")   # and no prompt mentions it
+
+    def test_named_apps_are_blocked_by_title_and_process(self):
+        import worksafe
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams,outlook"}):
+            for title in self.OUTLOOK + self.TEAMS:
                 self.assertTrue(worksafe.title_blocked(title), title)
             for title in ("Weather outlook for the weekend - YouTube", "Blender", "teams.txt - Notepad"):
                 self.assertFalse(worksafe.title_blocked(title), title)
             self.assertIn("olk.exe", worksafe.blocked_processes())
-
-    def test_outlook_allowed_teams_still_blocked(self):
-        import worksafe
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
+            self.assertEqual(worksafe.blocked_apps(), "Outlook or Teams")
+            self.assertEqual(worksafe.rule("- {apps} are off-limits.\n"), "- Outlook or Teams are off-limits.\n")
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams"}):
             self.assertFalse(worksafe.title_blocked("Mail - Ben - Outlook"))
             self.assertTrue(worksafe.title_blocked("Chat | Microsoft Teams"))
             self.assertNotIn("olk.exe", worksafe.blocked_processes())
@@ -256,9 +266,9 @@ class OutlookCalendarTest(unittest.TestCase):
                 oc.add_event("x", datetime.date(2026, 10, 23), datetime.date(2026, 10, 23), show_as="Gone fishing")
 
     def test_tool_blocked_in_work_safe_mode(self):
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "0"}):
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "outlook"}):
             self.assertIn("off-limits", tools.add_calendar_event.call({"title": "x", "start": "2026-10-23"}))
-        with mock.patch.dict(os.environ, {"JARVIS_ALLOW_OUTLOOK": "1"}):
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": ""}):
             self.assertIn("same kind", tools.add_calendar_event.call(
                 {"title": "x", "start": "2026-10-23", "end": "Sunday"}))
 

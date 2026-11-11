@@ -176,7 +176,8 @@ class ScreenAgentScriptTest(unittest.TestCase):
         return text, run
 
     def test_a_read_only_script_cannot_read_off_limits_work_data(self):
-        text, run = self.run_script(r"Get-ChildItem 'C:\Users\x\AppData\Roaming\Microsoft\Teams'")
+        with mock.patch.dict("os.environ", {"JARVIS_BLOCK_WORK_APPS": "teams"}):
+            text, run = self.run_script(r"Get-ChildItem 'C:\Users\x\AppData\Roaming\Microsoft\Teams'")
         self.assertIn("BLOCKED", text)
         run.assert_not_called()
 

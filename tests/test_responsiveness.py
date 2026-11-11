@@ -28,8 +28,10 @@ class ResponsivenessTest(unittest.TestCase):
             self.assertEqual(jarvis.quick_reply("Can you open Roblox, please?"), "Roblox opened.")
             launch.assert_called_once_with({"name": "roblox"})
             launch.reset_mock()
-            for text in ("open Roblox and do something", "open teams", "open roblo", "explain Roblox"):
+            for text in ("open Roblox and do something", "open roblo", "explain Roblox"):
                 self.assertIsNone(jarvis.quick_reply(text))
+            with mock.patch.dict(jarvis.os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams"}):
+                self.assertIsNone(jarvis.quick_reply("open teams"))    # only when the owner has put it off-limits
             launch.assert_not_called()
 
     def test_failed_launch_is_not_reported_as_success(self):

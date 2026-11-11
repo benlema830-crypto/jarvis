@@ -72,9 +72,11 @@ class RunCommandTest(DirectToolTest):
 
     def test_off_limits_and_credentials_are_refused(self):
         for command in ("Get-Content C:\\Users\\Lemab\\Jarvis\\.env", "type data\\telegram-token.dpapi",
-                        "Get-Content 'C:\\x\\Microsoft\\Teams\\a.txt'", "cat data/cc_approvals.json", "gc ~/.ssh/id_rsa"):
+                        "cat data/cc_approvals.json", "gc ~/.ssh/id_rsa"):
             result = run("run_command", command=command)
             self.assertTrue(result.get("is_error"), command)
+        with mock.patch.dict(os.environ, {"JARVIS_BLOCK_WORK_APPS": "teams"}):   # only when the owner names it
+            self.assertTrue(run("run_command", command="Get-Content 'C:\\x\\Microsoft\\Teams\\a.txt'").get("is_error"))
         self.assertFalse(run("run_command", command="Write-Output '.env.example'").get("is_error"))
         self.assertFalse(run("run_command", command="Select-String credentials tools.py").get("is_error"))
 
@@ -99,9 +101,24 @@ class ApprovalTest(DirectToolTest):
         self.assertFalse(turn.is_alive(), "The tool blocked the turn while waiting for approval.")
         return result[0]["content"]
 
-    def test_delete_asks_and_runs_only_after_yes(self):
+    def test_a_delete_runs_without_a_question(self):
         target = self.root / "gone.txt"
         target.write_text("x", encoding="utf-8")
+        result = self.in_turn("run_command", command=f"Remove-Item '{target}'")
+        self.assertIn("Exit code 0", result)
+        self.assertFalse(target.exists())
+        self.assertIsNone(approvals.waiting())
+
+    def test_web_search_and_a_look_at_the_screen_dont_make_a_change_ask(self):
+        for tool in ("web_search", "WebFetch", "look_at_screen", "read_clipboard", "call_mcp_tool"):
+            truth_guard.note_tool(tool)
+        self.assertFalse(truth_guard.tainted())
+        self.assertIn("Wrote", self.in_turn("write_file", path=str(self.root / "x.txt"), content="y"))
+
+    def test_after_reading_email_a_change_asks_and_runs_only_after_yes(self):
+        target = self.root / "gone.txt"
+        target.write_text("x", encoding="utf-8")
+        truth_guard.note_tool("read_email")
         result = self.in_turn("run_command", command=f"Remove-Item '{target}'")
         self.assertIn("nothing has changed", result)
         self.assertTrue(target.exists())
@@ -111,9 +128,10 @@ class ApprovalTest(DirectToolTest):
         self.assertIn("Exit code 0", report["prompt"])
         self.assertFalse(target.exists())
 
-    def test_delete_refused_stays_undone(self):
+    def test_after_reading_email_a_refused_change_stays_undone(self):
         target = self.root / "kept.txt"
         target.write_text("x", encoding="utf-8")
+        truth_guard.note_tool("read_email")
         self.in_turn("run_command", command=f"Remove-Item '{target}'")
         self.commands.get(timeout=5)
         approvals.answer("no")
@@ -141,9 +159,9 @@ class ApprovalTest(DirectToolTest):
         approvals.answer("no")
         self.commands.get(timeout=5)
 
-    def test_all_mode_still_asks_after_untrusted_text(self):
+    def test_all_mode_still_asks_after_reading_email(self):
         with mock.patch("preferences.read", return_value={"auto_approve": "all"}):
-            truth_guard.note_tool("WebFetch")
+            truth_guard.note_tool("check_email")
             self.assertIn("nothing has changed", self.in_turn("write_file", path=str(self.root / "x.txt"), content="y"))
             self.assertFalse((self.root / "x.txt").exists())
             self.commands.get(timeout=5)
@@ -208,12 +226,13 @@ class FileToolTest(DirectToolTest):
         self.assertTrue(result.get("is_error"))
         self.assertIn("can't be changed", result["content"])
 
-    def test_sensitive_folders_wait_for_the_owner(self):
-        target = str(Path.home() / ".ssh" / "config")
+    def test_no_folder_makes_a_write_wait_for_the_owner(self):
+        for relative in (".ssh/config", "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/x.bat"):
+            # Judged, not written: this is the owner's real home folder.
+            direct._guard("Write", {"file_path": str(Path.home() / relative)}, "write it")
         with mock.patch.object(tools, "_after_approval", return_value="asked") as ask:
-            self.assertEqual(run("write_file", path=target, content="x")["content"], "asked")
-        ask.assert_called_once()
-        self.assertEqual(ask.call_args.kwargs["kind"], "change startup, credential or agent settings")
+            self.assertIn("Wrote", run("write_file", path=str(self.root / "fresh.txt"), content="x")["content"])
+        ask.assert_not_called()
 
     def test_search_finds_text_and_says_when_nothing_matches(self):
         result = run("search_text", pattern="GAMMA", folder=str(self.root))["content"]

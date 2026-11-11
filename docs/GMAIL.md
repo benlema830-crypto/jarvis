@@ -1,8 +1,13 @@
-# Gmail for Jarvis (read-only)
+# Gmail for Jarvis
 
-Jarvis reads your Gmail through Google's Gmail API with the `gmail.readonly` scope. Google enforces
-that scope: this connection cannot send, reply, delete, label or archive anything. Tokens are
-encrypted with Windows DPAPI in `data/gmail.enc` (only your Windows account can decrypt them).
+Jarvis uses your Gmail through Google's Gmail API with two scopes: `gmail.readonly` to read, and
+`gmail.send` (added 2026-11-11) to send. Google enforces them: this connection cannot delete, label or
+archive anything. Tokens are encrypted with Windows DPAPI in `data/gmail.enc` (only your Windows
+account can decrypt them).
+
+A sign-in made before 2026-11-11 can only read. To let Jarvis send, run
+`.venv\Scripts\python.exe scripts\setup_gmail.py --renew` and approve both boxes in the browser. If Google
+shows only the reading box, add the `gmail.send` scope under **Google Auth Platform → Data Access** first.
 
 ## One-time setup (about 10 minutes)
 
@@ -23,8 +28,9 @@ encrypted with Windows DPAPI in `data/gmail.enc` (only your Windows account can 
    .venv\Scripts\python.exe scripts\setup_gmail.py "C:\Users\Lemab\Downloads\client_secret_....json"
    ```
 
-   The browser opens Google's sign-in. Approve "View your email messages and settings". The
-   script prints the connected address. Delete the downloaded JSON afterwards; its contents are
+   The browser opens Google's sign-in. Approve "View your email messages and settings" and
+   "Send email on your behalf" (leave the second unticked to keep Jarvis read-only). The
+   script prints the connected address and whether it can send. Delete the downloaded JSON afterwards; its contents are
    stored encrypted.
 
 No restart is needed: the next time you ask, Jarvis uses it.
@@ -33,6 +39,9 @@ No restart is needed: the next time you ask, Jarvis uses it.
 
 - `check_email`: "any new email?", "did Sam reply?", Gmail searches like `from:sam newer_than:7d`.
 - `read_email`: one message in full (long ones are cut at 6,000 characters).
+- `send_email`: a new message or a reply in the same thread. Jarvis writes it, shows you the exact
+  text (on screen and by Telegram), and sends only after your yes: spoken, the phone's Yes button,
+  or a "yes" texted back.
 - The daily review lists unread mail from the last day (no promotions/social) under
   "Email needing attention".
 

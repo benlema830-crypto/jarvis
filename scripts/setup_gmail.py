@@ -1,9 +1,11 @@
-"""Connect Jarvis to Gmail, read-only. Run: .venv\\Scripts\\python.exe scripts\\setup_gmail.py <client_secret.json>
-Sign in again later (Google expires Testing-mode sign-ins weekly): setup_gmail.py --renew
+"""Connect Jarvis to Gmail. Run: .venv\\Scripts\\python.exe scripts\\setup_gmail.py <client_secret.json>
+Sign in again later (Google expires Testing-mode sign-ins weekly, and a sign-in made before 2026-11-11 can
+read but not send): setup_gmail.py --renew
 
 The JSON is the "Desktop app" OAuth client downloaded from your own Google Cloud project with the
-Gmail API enabled (see docs/GMAIL.md). Your browser opens Google's sign-in; you approve read-only
-access there. Tokens are encrypted with Windows DPAPI in data/gmail.enc. Nothing secret is printed.
+Gmail API enabled (see docs/GMAIL.md). Your browser opens Google's sign-in; you approve reading and sending
+there (leave the sending box unticked to keep Jarvis read-only). Tokens are encrypted with Windows DPAPI in
+data/gmail.enc. Nothing secret is printed.
 """
 import base64
 import hashlib
@@ -70,10 +72,10 @@ def authorize(client_id, client_secret):
     worker.start()
     try:
         url = gmail.AUTH_URL + "?" + urlencode({
-            "response_type": "code", "client_id": client_id, "redirect_uri": redirect, "scope": gmail.SCOPE,
+            "response_type": "code", "client_id": client_id, "redirect_uri": redirect, "scope": f"{gmail.SCOPE} {gmail.SEND_SCOPE}",
             "state": state, "code_challenge": challenge, "code_challenge_method": "S256",
             "access_type": "offline", "prompt": "consent"})
-        print("Opening Google sign-in in your browser. Approve read-only Gmail access there (up to 5 minutes).")
+        print("Opening Google sign-in in your browser. Approve reading and sending Gmail there (up to 5 minutes).")
         webbrowser.open(url)
         done.wait(300)
         if "code" not in result:
@@ -86,7 +88,8 @@ def authorize(client_id, client_secret):
         value = mcp_oauth.token_result(tokens)
         if not value["refresh_token"]:
             raise gmail.GmailError("Google didn't return a refresh token. Nothing was saved.")
-        return dict(value, client_id=client_id, client_secret=client_secret)
+        return dict(value, client_id=client_id, client_secret=client_secret,
+                    can_send=gmail.SEND_SCOPE in result.get("scope", "").split())
     finally:
         server.shutdown()
         worker.join(timeout=2)
@@ -104,7 +107,7 @@ def main(argv):
             value = authorize(*client(argv[0]))
         gmail.save_credentials(value)
         profile = gmail.api("/profile")
-        print(f"Connected read-only to {profile.get('emailAddress', 'your Gmail')} "
+        print(f"Connected {'for reading and sending' if value.get('can_send') else 'read-only (sending was not approved)'} to {profile.get('emailAddress', 'your Gmail')} "
               f"({profile.get('messagesTotal', '?')} messages). You can delete the client JSON file now.")
         return 0
     except (gmail.GmailError, mcp_oauth.OAuthError) as error:

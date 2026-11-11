@@ -1,16 +1,15 @@
-"""Work-safe mode: keeps Outlook and Teams (which may hold CUI) away from Jarvis.
+"""Work-safe mode: keeps named work apps (Outlook, Teams) away from Jarvis, for a PC that holds work data.
 
-- Their windows are blacked out of every screenshot Jarvis or the agent takes.
-- The agent can't click or type into them.
-- The clipboard isn't read while one of them is in front.
-- The activity log records them only as "work app", with no window title.
-
+Off by default. The owner said on 2026-11-11 that nothing of work's is in Teams on this PC, and Outlook here is
+personal, so nothing is blocked unless .env says so:
+    JARVIS_BLOCK_WORK_APPS=teams,outlook
+For an app listed there:
+- Its windows are blacked out of every screenshot Jarvis or the agent takes.
+- The agent can't click or type into it.
+- The clipboard isn't read while it is in front.
+- The activity log records it only as "work app", with no window title.
 This covers the desktop apps and the web versions in a browser.
-
-JARVIS_ALLOW_OUTLOOK=1 in .env lifts this for Outlook (personal accounts only on this PC);
-Teams stays blocked either way.
 """
-
 import ctypes
 import os
 import re
@@ -34,17 +33,29 @@ TEAMS_TITLE = re.compile(r"Microsoft Teams", re.I)
 GA_ROOT = 2
 
 
+def blocked() -> set[str]:
+    """The apps the owner has put off-limits: any of "teams" and "outlook". Empty unless .env names them."""
+    return {name.strip().lower() for name in os.getenv("JARVIS_BLOCK_WORK_APPS", "").split(",")
+            if name.strip().lower() in ("teams", "outlook")}
+
+
 def outlook_allowed() -> bool:
-    return os.getenv("JARVIS_ALLOW_OUTLOOK", "").strip().lower() in ("1", "true", "yes", "on")
+    return "outlook" not in blocked()
 
 
 def blocked_processes() -> set[str]:
-    return TEAMS_PROCESSES if outlook_allowed() else TEAMS_PROCESSES | OUTLOOK_PROCESSES
+    off = blocked()
+    return (TEAMS_PROCESSES if "teams" in off else set()) | (OUTLOOK_PROCESSES if "outlook" in off else set())
 
 
 def blocked_apps() -> str:
-    """How to name the blocked apps in messages and prompts."""
-    return "Teams" if outlook_allowed() else "Outlook or Teams"
+    """How to name the blocked apps in messages and prompts. "" when none are."""
+    return " or ".join(name.capitalize() for name in sorted(blocked()))
+
+
+def rule(line: str) -> str:
+    """A line for a prompt, with {apps} filled in, or nothing at all when no app is off-limits."""
+    return line.format(apps=blocked_apps()) if blocked() else ""
 
 
 def _process_name(hwnd) -> str:
@@ -57,7 +68,8 @@ def _process_name(hwnd) -> str:
 
 def title_blocked(title: str) -> bool:
     title = title.strip()
-    return bool(TEAMS_TITLE.search(title) or (not outlook_allowed() and OUTLOOK_TITLE.search(title)))
+    off = blocked()
+    return bool(("teams" in off and TEAMS_TITLE.search(title)) or ("outlook" in off and OUTLOOK_TITLE.search(title)))
 
 
 def is_blocked(hwnd) -> bool:

@@ -7,8 +7,9 @@ which also restricts access to your Tailscale login when you give one.
 
 Approvals: when Jarvis is waiting for a yes or no, the phone page shows the question with Yes and No buttons
 (owner's decision in the makeover plan, 2026-11-10). The tap is the owner's own answer, checked with the same
-key and Tailscale login as everything else; the AI still never answers for them, and a message typed or spoken
-from the phone still can't approve anything. preferences "phone_approvals": false turns the buttons off.
+key and Tailscale login as everything else; the AI still never answers for them. A yes or no typed or spoken
+from the phone answers the question too (the owner's decision, 2026-11-11; see jarvis.answer_from_phone).
+preferences "phone_approvals": false turns the buttons off.
 
 Endpoints: GET / (chat page), GET /health, POST /ask {"text"} -> {"reply"},
 POST /voice {"text"} -> the reply as a WAV in Jarvis's own voice (text in the X-Jarvis-Reply header),

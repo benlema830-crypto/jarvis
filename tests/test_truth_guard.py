@@ -69,6 +69,8 @@ class ClaimGateTest(unittest.TestCase):
 
     def test_each_turn_starts_clean(self):
         tg.note_tool("web_search")
+        self.assertFalse(tg.tainted())   # a web search no longer makes later changes ask (2026-11-11)
+        tg.note_tool("read_email")       # email still does: a stranger wrote it
         self.assertTrue(tg.tainted())
         tg.begin_turn()
         self.assertFalse(tg.tainted())

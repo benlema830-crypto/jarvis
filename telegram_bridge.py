@@ -3,8 +3,8 @@
 One-time setup: create a bot with @BotFather, then run
     .venv\\Scripts\\python.exe scripts\\setup_telegram.py
 It stores the bot token with Windows DPAPI and pairs exactly one chat (yours) with a
-one-time code. Messages from any other chat are ignored. Telegram can't approve risky
-actions: approvals still need your spoken "yes" at the PC.
+one-time code. Messages from any other chat are ignored. When Jarvis has a question open
+(spending money, messaging other people), he texts it here and your reply answers it.
 
 Uses the Bot API over HTTPS long polling (no webhook, no open port), `requests` for HTTP
 and PyAV (already installed for speech) for Opus voice notes.
@@ -171,8 +171,8 @@ class Bridge:
             return
         text = (message.get("text") or "").strip()
         if text.startswith("/start") or text.startswith("/help"):
-            self.send(chat, "JARVIS here. Message me or send a voice note. I'll reply here; "
-                            "anything risky still needs your OK at the PC.")
+            self.send(chat, "JARVIS here. Message me or send a voice note. I'll reply here, and if I "
+                            "need your OK for something I'll ask here too.")
             return
         was_voice = False
         if not text and (message.get("voice") or message.get("audio")):

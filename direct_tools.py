@@ -2,11 +2,11 @@
 
 A question that takes one command used to mean starting an agent, waiting, and hearing a report. These run
 inside the turn, the way a terminal session does. They follow the same rules as the agents, through
-cc_guard: off-limits data is refused, and deleting, publishing, hidden commands and sensitive settings wait
-for the owner's spoken answer. Anything else runs, as it does for an agent in work mode.
+cc_guard: a command that messages other people waits for the owner's yes, and everything else runs, deleting
+and installing included.
 
-Two extra precautions, because the conversation is what reads email and the web:
-  - once untrusted text has come in this turn, anything beyond plain reading asks first (truth_guard.tainted)
+Two extra precautions, because the conversation is what reads email:
+  - once email has been read this turn, anything beyond plain reading asks first (truth_guard.tainted)
   - credentials can't be read this way, and the child process doesn't inherit Jarvis's API keys
 """
 import base64
@@ -73,8 +73,8 @@ def _guard(tool, tool_input, summary, read_only=False):
     if verdict == "approval":
         raise NeedsApproval(f"{summary}\nReason: {detail}", detail)
     if truth_guard.tainted() and not read_only:
-        raise NeedsApproval(f"{summary}\nReason: this turn read outside text (email, web or screen), so a change "
-                            "needs your OK in case that text asked for it.", AFTER_UNTRUSTED)
+        raise NeedsApproval(f"{summary}\nReason: this turn read email, so a change needs your OK in case a "
+                            "message asked for it.", AFTER_UNTRUSTED)
 
 
 def _clean_env():
