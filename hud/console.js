@@ -11,7 +11,7 @@
     waiting: ['…', 'waiting for your OK', 'wait'], unknown: ['?', 'could not confirm', 'warn'], failed: ['✗', 'failed', 'bad'],
   };
   const SOURCES = [['(Telegram voice) ', 'Telegram voice'], ['(Telegram) ', 'Telegram'], ['(Phone) ', 'Phone'], ['(Terminal) ', 'Terminal']];
-  let turn = null, needs = [];
+  let turn = null;
 
   /* ---------- Turns ---------- */
   function atBottom() { return stream.scrollHeight - stream.scrollTop - stream.clientHeight < 60; }
@@ -98,30 +98,16 @@
     keepInView(follow);
   }
 
-  /* ---------- Needs you ---------- */
-  function renderNeeds() {
-    const box = el('railNeeds'); box.replaceChildren();
-    el('railNeedsBox').hidden = !needs.length;
-    for (const question of needs) {
-      const card = make('div', null, 'rail-card need'), actions = make('div', null, 'actions');
-      const yes = make('button', 'Yes', 'primary'), no = make('button', 'No'); yes.type = no.type = 'button';
-      yes.onclick = () => { needs = []; renderNeeds(); J.send('yes'); };
-      no.onclick = () => { needs = []; renderNeeds(); J.send('no'); };
-      actions.append(yes, no); card.append(make('p', question), actions); box.append(card);
-    }
-    el('viewConsole').classList.toggle('alert', needs.length > 0);
-  }
-
   /* ---------- The event stream ---------- */
   // 'reset' comes just before the server replays this session's history to a page that has (re)connected.
-  J.on('reset', () => { stream.replaceChildren(empty()); turn = null; needs = []; renderNeeds(); });
+  J.on('reset', () => { stream.replaceChildren(empty()); turn = null; });
   function empty() {
     const e = make('div', null, 'console-empty'); e.id = 'consoleEmpty';
     e.append(make('p', 'Nothing yet this session.'), make('small', 'Type below, or say “Jarvis…”. Commands he runs, files he changes and what each tool proved show up here.'));
     return e;
   }
   J.on('event', ev => {
-    if (ev.type === 'you') { startTurn(String(ev.text || ''), 'you', ev.t); if (!ev.replay) { needs = []; renderNeeds(); } }
+    if (ev.type === 'you') startTurn(String(ev.text || ''), 'you', ev.t);
     else if (ev.type === 'jarvis') {
       const t = current(ev.t), follow = atBottom();
       t.say.textContent = (t.say.textContent ? t.say.textContent + ' ' : '') + String(ev.text || '');
@@ -134,7 +120,7 @@
     else if (ev.type === 'event') {
       const text = String(ev.text || '');
       const asked = text.startsWith('Approval needed: ') ? text.slice(17) : '';
-      if (asked) { addNote('Waiting for your OK: ' + asked, 'wait', ev.t); if (!ev.replay) { needs = [asked.slice(0, 600)]; renderNeeds(); } }
+      if (asked) addNote('Waiting for your OK: ' + asked, 'wait', ev.t);  // the card with Yes and No is cards.js
       else if (text === 'Interrupted') addNote('You cut in.', '', ev.t);
       else if (/ (finished|didn't finish|got blocked|didn't work|was stopped|only partly finished)$/.test(text) || /^(Reminder|Timer|Telegram message|Phone message|Daily review|Briefing|Morning wake-up|Welcome back)/.test(text)) {
         startTurn(text, 'system', ev.t);
@@ -164,7 +150,8 @@
         box.append(card);
       }
       let jobs = [];
-      try { jobs = (await J.api('/jobs', undefined, { timeout: 4000 })).jobs || []; } catch {}
+      // Working lists what is still going; a finished job becomes a card (cards.js) with its buttons.
+      try { jobs = ((await J.api('/jobs', undefined, { timeout: 4000 })).jobs || []).filter(j => ['queued', 'running'].includes(j.status)); } catch {}
       for (const j of jobs) {
         const card = make('div', null, 'rail-card job ' + String(j.status)), top = make('div', null, 'rail-top');
         top.append(make('b', 'Away ' + String(j.kind)), make('small', String(j.label) + (j.attempt ? ' · attempt ' + j.attempt : '')));
@@ -204,21 +191,9 @@
       box.replaceChildren(make('p', clip(data.schedule || 'No calendar connected.', 260)), make('p', clip(data.weather || '', 160), 'muted'));
     } catch { box.replaceChildren(make('p', J.online ? 'Could not read today.' : 'Jarvis is offline.')); }
   }
-  async function refreshHeld() {
-    try {
-      const data = await J.api('/attention', undefined, { timeout: 4000 }), items = data.held || [];
-      el('railHeldBox').hidden = !items.length;
-      el('railHeld').replaceChildren(...items.slice(-8).map(i => {
-        const card = make('div', null, 'rail-card');
-        card.append(make('p', String(i.label)), make('small', new Date((i.t || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' · ' + String(i.why), 'held-why'));
-        return card;
-      }));
-    } catch { el('railHeldBox').hidden = true; }
-  }
-  el('railHeldAsk').onclick = () => J.send('What did I miss?');
   el('railHomeRefresh').onclick = refreshHome;
   const visible = () => document.body.classList.contains('view-console') && !document.hidden;
-  setInterval(() => { if (visible()) { refreshWork(); refreshHeld(); } }, 4000);
+  setInterval(() => { if (visible()) refreshWork(); }, 4000);
   setInterval(() => { if (visible()) refreshHome(); }, 20000);
   setInterval(() => { if (visible()) refreshToday(); }, 300000);
   J.on('receipt', ev => { if (ev.tool === 'home_control' && visible()) setTimeout(refreshHome, 9000); });  // after the server's short cache
@@ -234,7 +209,7 @@
     if (!consoleOn && restoreStage) { restoreStage = false; J.setStage(true, false, false); }
     store.set('view', consoleOn ? 'console' : 'model');
     dispatchEvent(new Event('resize'));
-    if (consoleOn) { refreshWork(); refreshHeld(); refreshHome(); refreshToday(); stream.scrollTop = stream.scrollHeight; if (focus) el('prompt').focus(); }
+    if (consoleOn) { refreshWork(); refreshHome(); refreshToday(); stream.scrollTop = stream.scrollHeight; if (focus) el('prompt').focus(); }
     J.emit('view', consoleOn ? 'console' : 'model');
   }
   J.setView = setView;

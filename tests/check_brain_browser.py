@@ -432,23 +432,40 @@ addEventListener('load', async () => {
     const chips = [...last.querySelectorAll('.chip-proof')].map(c => c.textContent);
     assert(chips.length === 2 && chips[0].includes('could not confirm') && chips[0].startsWith('?') && chips[1].includes('confirmed'), 'receipt chips: ' + chips.join(' | '));
     assert(last.querySelector('.turn-say').textContent === 'I sent it, but the TV still reports off.', 'reply text');
-    assert($('railNeedsBox').hidden, 'nothing waiting yet');
-    emit({ type: 'event', text: 'Approval needed: Delete the old build?' });
-    assert(!$('railNeedsBox').hidden && $('railNeeds').textContent.includes('Delete the old build?'), 'approval card');
-    const sentBefore = window.posts.filter(p => p.path === '/command').length;
-    [...$('railNeeds').querySelectorAll('button')].find(b => b.textContent === 'No').click();
-    await wait(() => window.posts.filter(p => p.path === '/command').length === sentBefore + 1, 'answer sent');
-    assert(window.posts.filter(p => p.path === '/command').at(-1).body.text === 'no' && $('railNeedsBox').hidden, 'the answer is the owner\'s own word, and the card clears');
+    emit({ type: 'event', text: 'Approval needed: Delete the old build folder?' });
+    assert(last.querySelector('.note.wait').textContent.includes('Delete the old build folder?'), 'the question is noted in the stream');
     await wait(() => $('railHome').querySelectorAll('.home-tile').length === 3, 'home tiles');
     assert($('railHome').querySelector('.home-tile.unknown b').textContent === 'unknown', 'an unavailable device reads unknown, never off');
     await wait(() => $('railWork').textContent.includes('Frontier') && !$('railWork').textContent.includes('Docs'), 'only running work is listed');
     await wait(() => $('railToday').textContent.includes('Dentist'), 'today');
-    await wait(() => $('railWork').textContent.includes('Add the shop screen'), 'away job on the board');
-    assert($('railWork').textContent.includes('Jarvis re-ran the tests: 41 passed.') && $('railWork').textContent.includes('jarvis/shop-a1'), 'the job shows Jarvis\'s own check and the branch');
-    await wait(() => !$('railHeldBox').hidden && $('railHeld').textContent.includes('Giant Builder finished'), 'held updates listed');
-    const askedBefore = window.posts.filter(p => p.path === '/command').length;
-    $('railHeldAsk').click();
-    await wait(() => window.posts.filter(p => p.path === '/command').length === askedBefore + 1, 'hear them asks Jarvis');
+    assert(!$('railWork').textContent.includes('Add the shop screen'), 'a finished job is a card, not a second entry under Working');
+
+    stage('cards');
+    const cardOf = id => document.querySelector(`#cards [data-card="${id}"]`);
+    const press = (id, label) => [...cardOf(id).querySelectorAll('button')].find(b => b.textContent === label).click();
+    const sent = () => window.posts.filter(p => p.path === '/command').map(p => p.body.text);
+    await wait(() => cardOf('ask') && cardOf('held') && cardOf('job:a1'), 'cards for the question, held updates and the finished job');
+    assert($('cards').closest('.console-rail'), 'in the Console the cards sit at the top of the rail');
+    assert(cardOf('ask').querySelector('h3').textContent === 'Delete the old build folder?', 'the question is the card');
+    assert(cardOf('job:a1').querySelector('.card-proof.ok').textContent.includes('Jarvis re-ran the tests: 41 passed.'), 'job card shows Jarvis\'s own check');
+    assert(cardOf('job:a1').textContent.includes('jarvis/shop-a1') && cardOf('job:a1').textContent.includes('Nothing was merged'), 'job card names the branch and says it is not merged');
+    let before = sent().length;
+    press('job:a1', 'What changed?');
+    await wait(() => sent().length === before + 1 && sent().at(-1).includes('jarvis/shop-a1'), 'What changed asks Jarvis about that branch');
+    before = sent().length; press('held', 'Hear them');
+    await wait(() => sent().length === before + 1 && sent().at(-1) === 'What did I miss?', 'Hear them asks Jarvis');
+    $('cards').querySelector('.more')?.click();
+    await wait(() => document.querySelector('#cards [data-card^="agent:Docs"]'), 'finished agent card');
+    const agent = document.querySelector('#cards [data-card^="agent:Docs"]');
+    assert(agent.textContent.includes('Wrote the <b>guide</b>') && !agent.querySelector('b'), 'an agent report is shown as text, never as markup');
+    assert(agent.querySelector('.card-proof.note').textContent.includes('own account'), 'an agent report is labelled as its own claim');
+    assert(!document.querySelector('#cards [data-card^="agent:Frontier"]'), 'a running agent is not a finished card');
+    [...agent.querySelectorAll('button')].find(b => b.textContent === 'Dismiss').click();
+    assert(!document.querySelector('#cards [data-card^="agent:Docs"]') && JSON.parse(localStorage.getItem('jarvis.dismissedCards')).length === 1, 'dismiss hides the card and is remembered');
+    before = sent().length; press('ask', 'No');
+    await wait(() => sent().length === before + 1 && sent().at(-1) === 'no', 'No sends the owner\'s own word');
+    assert(!cardOf('ask'), 'an answered question leaves at once');
+    await J.cards.poll(); assert(!cardOf('ask'), 'and stays gone while the same question is still being settled');
     $('prompt').value = ''; $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     assert($('prompt').value === 'TEST COMMAND', 'up arrow recalls the last typed command: ' + $('prompt').value);
     $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); assert($('prompt').value === '', 'down returns to the draft');
@@ -456,8 +473,9 @@ addEventListener('load', async () => {
     assert(!document.body.classList.contains('view-console') && $('console').hidden, 'Ctrl+. goes back to the model');
     assert(document.body.classList.contains('jarvis-main') === wasMain, 'the model view comes back as it was left');
     assert(getComputedStyle($('graph')).display !== 'none', 'graph is back');
+    assert(!$('cards').closest('.console-rail') && getComputedStyle($('cards')).position === 'fixed' && cardOf('job:a1'), 'beside the model the same cards float on their own');
     window.testStream.emit({ type: 'hello', state: 'standby', history: [{ type: 'you', text: 'replayed', t: 3 }, { type: 'event', text: 'Approval needed: old question', t: 4 }] });
-    assert($('consoleStream').querySelectorAll('.turn').length === 1 && $('railNeedsBox').hidden, 'reconnect replays history without re-asking');
+    assert($('consoleStream').querySelectorAll('.turn').length === 1 , 'reconnect replays the history once');
 
     stage('dimension'); $('dimension').click(); assert($('dimension').textContent === '2D', '2D');
     document.documentElement.dataset.check = 'passed';
@@ -507,7 +525,7 @@ def serve(with_checks=True):
             if path == "/":
                 script = CHECK if with_checks else '<script>window.EventSource=class {close(){} addEventListener(){}};</script>'
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + script, 1), "text/html")
-            if path in ("/brain.js", "/holo.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/console.js", "/brain.css"):
+            if path in ("/brain.js", "/holo.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/console.js", "/cards.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": graph_nodes, "links": graph_links, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},
@@ -517,14 +535,16 @@ def serve(with_checks=True):
                 "/home": {"devices": [{"name": "Bedroom Fan", "domain": "switch", "state": "on"}, {"name": "Ceiling Light", "domain": "light", "state": "off"},
                                       {"name": "Living Room TV", "domain": "media_player", "state": "unavailable"}], "error": "", "read_at": 0},
                 "/intel": {"schedule": "Tomorrow 10:30 Dentist.", "weather": "38 and overcast."},
-                "/attention": {"cap": 5, "spoken_today": 5, "held": [{"t": 1794350000, "label": "Giant Builder finished", "why": "today's limit reached"}]},
+                "/attention": {"cap": 5, "spoken_today": 5, "question": "Delete the old build folder?",
+                               "held": [{"t": 1794350000, "label": "Giant Builder finished", "why": "today's limit reached"}]},
                 "/jobs": {"jobs": [{"id": "a1", "kind": "build", "status": "done", "label": "Finished", "what": "Add the shop screen",
                                     "check": "Jarvis re-ran the tests: 41 passed.", "branch": "jarvis/shop-a1", "attempt": 0}]},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
                             "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": [{"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Playtest the build", "timeline":[{"label":"Reading source","status":"completed","started_at":123}]},
-                    {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "Done."}]}, "/tasks": {"tasks": []},
+                    {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "Wrote the <b>guide</b> and checked the links.",
+                     "updated_at": __import__("time").time() - 600}]}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
                 "/workspace": {"folders": []},
                 '/memory': {'revision':'v1','facts':[{'id':'f1','fact':'Likes tea'}],'recent':[],

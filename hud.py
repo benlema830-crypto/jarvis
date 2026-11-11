@@ -310,8 +310,14 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._json({"jobs": [], "error": "Could not read the away-work queue."})
         elif self.path == "/attention":
+            import approvals
             import attention
-            self._json(attention.snapshot())
+            data = attention.snapshot()
+            # The open yes/no question, so a card can show it even on a page opened after it was asked.
+            item = approvals._pending
+            data["question"] = (str(item.get("details") or item.get("question") or "")[:2000]
+                                if item and not item.get("free_text") else "")
+            self._json(data)
         else:
             self.send_error(404)
 
