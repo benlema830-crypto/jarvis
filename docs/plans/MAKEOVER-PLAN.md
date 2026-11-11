@@ -323,6 +323,33 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 3. **OK to delete Holo, Eyes, Watch, Focus, digests, routines, documents and the graph?** The usage says yes. You may know something the logs don't.
 4. **OK to turn off the paid API paths at the start of Phase 0?** This disables `do_on_computer` until Phase 3 replaces it.
 
+## Build log (branch `makeover`)
+
+### Done and running, 2026-11-10
+
+| Step | What changed | Checked how |
+| --- | --- | --- |
+| Phase 0 | Every turn's stage times, tools and tool results are saved (`data/turn_stages.jsonl`). `scripts/measure.py` prints the scorecard. Paid API keys are no longer loaded and "subscription only" is on. `scripts/run_tests.py` fails a run that changes `data/`. | Live turn recorded with its tool. Test proves the keys are blank. |
+| Phase 1, part | End-of-turn model (Smart Turn v3.2) ends a finished sentence after 0.32 s of silence; the old 1.2 s timer is the fallback. A tool running over 1.2 s gets a few spoken words. A newly saved fact no longer restarts the brain session. | Model told finished from unfinished phrases on 8 of 10 synthesised samples, 23 ms each. **Not yet heard by you in real use.** |
+| Phase 2 | Every action leaves a receipt (confirmed, sent, waiting, unknown, failed). The claim gate checks receipts, not just "some tool ran". Jarvis adds the sentence himself when a failure goes unmentioned. | 65 of 65 honesty cases pass, including the TV case. Replayed over 915 past turns, it would have stopped 13 replies. |
+| Phase 3, part | Removed Eyes, Watch, Focus, digests, routines, documents, artifacts, YouTube and Amazon tools. | 802 tests pass. Removed routes return 404 on the live server. |
+| Phase 4 | Console view inside the Jarvis page (switch in the top bar, or Ctrl+.). Page tidy-up. `j` command for any terminal. | Browser check passes, including 30 Console assertions. Live page shows 10 real device tiles. `j` answered in 1.1 s (plain) and 1.9 s (with a lookup). |
+
+### What the measurements corrected
+
+- **Trimming the tool list does not make him faster.** Opus answered in the same time with 85 tools and with 28. Dropped from the plan as a speed measure.
+- **A smaller model is not the fix either.** First text, no tool: Haiku 0.5 s, Sonnet 0.5 s, Opus 0.6 s. With a tool: 1.1, 1.7 and 2.0 s. Haiku also misread a calendar time in a ten-question test. Opus stays.
+- **The brain itself is fast.** On his real prompt with instant tools, Opus gives the first sentence in 1.2 s (no tool) and 2.2 s (tool). The old 5.7 s on tool turns was mostly the tools themselves and session restarts, not thinking.
+- **VoiceStudio cannot stream.** First audio arrives when the whole sentence is built (about 0.8 s for a 4.5 s sentence). Halving its quality steps saves 0.27 s. Getting first audio under 0.3 s needs a different engine, which needs your ear.
+- **Audit error:** I said the voice lock cut-off was 0.74. That was an old log line; it is 0.62 today, so the "43 near-miss rejections" figure does not describe the current setting.
+
+### Still to do
+
+- Phase 1: streaming voice engine (needs you to listen), instant ducking when you speak (needs a live test), and your verdict on the turn detector.
+- Phase 3: delete the extra brains (OpenAI, Anthropic API, Ollama chat, router) and voices (ElevenLabs, Piper), replace the screen agent, move to the built-in MCP client.
+- Phase 4: phone page as a card feed with approve buttons. Diff cards have no Undo button yet.
+- Phases 5 and 6: one memory; away work and heartbeat.
+
 ## Things I could not verify
 
 - How fast he stops when interrupted, and true end-to-end voice timing. Both need a live test with you speaking.
