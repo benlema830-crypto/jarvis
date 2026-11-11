@@ -16,12 +16,16 @@ automation IDs returned 404 during this change.
 - **11:00 PM inclusive to 6:40 AM exclusive, every night:** the empty-room branch
   cannot run. Presence-based fan shutdown and that branch's manual-hold reset are
   suppressed. There is no scheduled forced turn-on and manual controls still work.
-- **6:40 AM to 11:00 PM:** the existing one-minute continuous absence rule applies.
+- **6:40 AM to 11:00 PM:** the **15-minute continuous absence** rule applies.
   A new 6:40 AM trigger also checks for a room that was already empty overnight;
-  it shuts down only if occupancy is currently `off` for at least one minute.
+  it shuts down only if occupancy is currently `off` for at least 15 minutes.
   Occupied, unknown and unavailable sensor states cannot pass that check.
-- Arrival and hand/voice change branches are unchanged. No global condition blocks
-  those branches. The existing one-minute absence state trigger remains in place.
+- Hand/voice change branches are unchanged. No global condition blocks
+  those branches. The absence state trigger and empty safety guard both use 15 minutes.
+- Presence can turn the fan on only while Nap Mode is off. No clear/return
+  transition bypasses an active nap. Existing weekday 06:40–07:10 arrival
+  suppression is preserved. Nap activation can explicitly turn off the plug,
+  including overnight, as before.
 - Jarvis's weekday 6:40 AM wake-up still calls `fan.turn_off` independently. The
   alarm, briefing, morning music and HA 6:35 AM PC-wake automation are unchanged.
 
@@ -53,7 +57,18 @@ token or directly sends fan commands. Backups are under
 `data/reports/bedroom-fan-overnight-*/`. Restoration is an explicit authorized HA
 config write using `before.json`, followed by validation/reload; it is not automatic.
 
-## Applied October 29, 2026
+## Verified November 8, 2026 update
+
+Updated the known one-minute empty trigger and its safety condition to 15 minutes.
+Manual-off rearming in that branch now also waits for 15 continuous empty minutes
+and still respects overnight suppression. Arrival now strictly requires Nap Mode
+off. Quiet hours, the 06:40 recheck, weekday morning guard, manual branches and
+light five-minute timer were preserved. All 25 targeted tests passed. HA validation
+was clean, targeted reloads succeeded and API readbacks matched. No device
+commands were sent. See `docs/BEDROOM-NAP-MODE.md` for timeout/phone changes and
+`data/reports/nap-fan-fix-20261108-203729/` for backups and exact verification.
+
+## Applied October 29, 2026 (historical timing)
 
 The named script, documentation and tests were absent from this checkout despite
 older reports and compiled Python caches. This maintenance tool and regression

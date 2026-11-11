@@ -14,7 +14,7 @@ class OvernightTests(unittest.TestCase):
         self.after = overnight_config(self.before)
         self.empty = self.after['actions'][0]['choose'][1]
 
-    def permits_empty(self, local_time, state='off', seconds=60):
+    def permits_empty(self, local_time, state='off', seconds=900):
         # Evaluate the declarative HA time/state conditions, not a second scheduler.
         for c in self.empty['conditions']:
             if c['condition'] == 'time':
@@ -36,14 +36,16 @@ class OvernightTests(unittest.TestCase):
         for state in ('on', 'unknown', 'unavailable'):
             self.assertFalse(self.permits_empty('06:40:00', state))
 
-    def test_morning_respects_full_minute(self):
-        self.assertFalse(self.permits_empty('06:40:00', seconds=59))
-        self.assertTrue(self.permits_empty('06:40:00', seconds=60))
+    def test_morning_respects_full_fifteen_minutes(self):
+        self.assertFalse(self.permits_empty('06:40:00', seconds=899))
+        self.assertTrue(self.permits_empty('06:40:00', seconds=900))
         self.assertTrue(self.permits_empty('06:40:00', seconds=3600))
 
     def test_existing_empty_at_wake_has_time_trigger(self):
         self.assertIn(MORNING, self.after['triggers'])
-        self.assertEqual(self.after['triggers'][:-1], self.before['triggers'])
+        expected = deepcopy(self.before['triggers'])
+        expected[1]['for'] = {'minutes':15}
+        self.assertEqual(self.after['triggers'][:-1], expected)
 
     def test_arrive_and_manual_branches_unchanged(self):
         for index in (0, 2, 3):
@@ -54,9 +56,10 @@ class OvernightTests(unittest.TestCase):
         expected = deepcopy(self.before)
         expected['description'] = self.after['description']
         expected['triggers'].append(MORNING)
+        expected['triggers'][1]['for'] = {'minutes':15}
         expected['actions'][0]['choose'][1]['conditions'] += [DAYTIME, {
             'condition': 'state', 'entity_id': 'binary_sensor.bedroom_presence_occupancy',
-            'state': 'off', 'for': {'minutes': 1}}]
+            'state': 'off', 'for': {'minutes': 15}}]
         self.assertEqual(self.after, expected)
 
     def test_repeat_apply_is_idempotent_and_input_unchanged(self):

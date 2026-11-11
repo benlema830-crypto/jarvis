@@ -17,8 +17,9 @@ PRESENCE = 'binary_sensor.bedroom_presence_occupancy'
 DAYTIME = {'condition': 'time', 'after': '06:40:00', 'before': '23:00:00'}
 PREVIOUS_DAYTIME = {**DAYTIME, 'before': '21:00:00'}
 MORNING = {'trigger': 'time', 'at': '06:40:00', 'id': 'empty'}
-EMPTY = {'condition': 'state', 'entity_id': PRESENCE, 'state': 'off', 'for': {'minutes': 1}}
-NOTE = ' Presence auto-off is suppressed nightly 23:00-06:40 (HA local time); at 06:40 recheck one continuous empty minute. Manual and wake-up commands remain available.'
+EMPTY_MINUTES = 15
+EMPTY = {'condition': 'state', 'entity_id': PRESENCE, 'state': 'off', 'for': {'minutes': EMPTY_MINUTES}}
+NOTE = ' Presence auto-off is suppressed nightly 23:00-06:40 (HA local time); at 06:40 recheck 15 continuous empty minutes. Manual and wake-up commands remain available.'
 
 
 def overnight_config(original):
@@ -35,19 +36,24 @@ def overnight_config(original):
     if len(off) != 1 or off[0].get('target', {}).get('entity_id') != 'fan.bedroom_fan':
         raise ValueError('Unexpected fan-off action; inspect live automation.')
     triggers = result.get('triggers', [])
-    if not any(t.get('id') == 'empty' and t.get('entity_id') == PRESENCE
-               and t.get('to') == 'off' and t.get('for') == {'minutes': 1} for t in triggers):
-        raise ValueError('Expected existing one-minute absence trigger.')
+    absence = [t for t in triggers if t.get('id') == 'empty' and t.get('entity_id') == PRESENCE
+               and t.get('to') == 'off']
+    if len(absence) != 1 or absence[0].get('for') not in ({'minutes': 1}, {'minutes': EMPTY_MINUTES}):
+        raise ValueError('Expected known one- or fifteen-minute absence trigger.')
+    absence[0]['for'] = {'minutes': EMPTY_MINUTES}
     # Replace the previous guard: adding a second AND condition would still
     # suppress auto-off at 21:00 instead of moving the boundary to 23:00.
-    branch['conditions'] = [deepcopy(DAYTIME) if c == PREVIOUS_DAYTIME else c
+    old_empty = {**EMPTY, 'for': {'minutes': 1}}
+    branch['conditions'] = [deepcopy(EMPTY) if c == old_empty else deepcopy(DAYTIME) if c == PREVIOUS_DAYTIME else c
                             for c in branch['conditions']]
     for condition in (DAYTIME, EMPTY):
         if condition not in branch['conditions']:
             branch['conditions'].append(deepcopy(condition))
     if MORNING not in triggers:
         triggers.append(deepcopy(MORNING))
-    result['description'] = result.get('description', '').replace(NOTE.replace('23:00-', '21:00-'), NOTE)
+    result['description'] = result.get('description', '').replace('Empty 1 min:', 'Empty 15 min:')
+    result['description'] = result['description'].replace('recheck one continuous empty minute.', 'recheck 15 continuous empty minutes.')
+    result['description'] = result['description'].replace(NOTE.replace('23:00-', '21:00-'), NOTE)
     if NOTE not in result.get('description', ''):
         result['description'] = result.get('description', '') + NOTE
     return result
