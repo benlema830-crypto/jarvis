@@ -52,22 +52,32 @@ class SpeechPausesTest(unittest.TestCase):
         turns.probability.side_effect = list(scores)
         return turns
 
-    def test_finished_sentence_ends_after_a_short_pause(self):
+    def test_finished_sentence_ends_after_one_second(self):
         turns = self.detector(0.9)
-        source = self.run_audio([True]*5 + [False]*4, turns=turns)
+        source = self.run_audio([True]*5 + [False]*13, turns=turns)  # 13 blocks = 1.04 s
         self.assertEqual(source._phrases.qsize(), 1)
         self.assertEqual(turns.probability.call_count, 1)
 
+    def test_nothing_ends_before_a_full_second_of_silence(self):
+        turns = self.detector(0.99)
+        source = self.run_audio([True]*5 + [False]*12, turns=turns)  # 0.96 s
+        turns.probability.assert_not_called()
+        self.assertTrue(source._phrases.empty())
+        self.assertGreaterEqual(min(ears.TURN_CHECKS), 1.0)
+
     def test_unfinished_sentence_still_gets_the_full_pause(self):
         turns = self.detector(0.1, 0.2)
-        source = self.run_audio([True]*5 + [False]*10 + [True]*5 + [False]*15, turns=self.detector(0.1, 0.2, 0.1, 0.2))
+        source = self.run_audio([True]*5 + [False]*10 + [True]*5 + [False]*15, turns=self.detector(0.1, 0.2))
         self.assertEqual(source._phrases.qsize(), 1)
         self.assertEqual(len(source._phrases.get()[0]), 35 * ears.BLOCK)
         source = self.run_audio([True]*5 + [False]*10, turns=turns)
         self.assertTrue(source._phrases.empty())
 
-    def test_second_check_can_end_the_phrase(self):
-        source = self.run_audio([True]*5 + [False]*8, turns=self.detector(0.3, 0.8))
+    def test_unfinished_at_one_second_waits_for_the_pause_timer(self):
+        turns = self.detector(0.3)
+        source = self.run_audio([True]*5 + [False]*14, turns=turns)
+        self.assertTrue(source._phrases.empty())
+        source = self.run_audio([True]*5 + [False]*15, turns=self.detector(0.3))
         self.assertEqual(source._phrases.qsize(), 1)
 
     def test_interruptions_do_not_use_the_detector(self):
