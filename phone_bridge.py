@@ -178,10 +178,28 @@ def make_handler(bridge: Bridge):
             except Exception:
                 return None
 
+        def drain(self):
+            """Read a small unread request body before answering. Windows otherwise resets the connection
+            when it closes with bytes unread, and the phone sees a dropped call instead of the reason."""
+            if getattr(self, "_body_read", True):
+                return
+            self._body_read = True
+            previous = self.connection.gettimeout()
+            try:
+                size = int(self.headers.get("Content-Length", 0))
+                if 0 < size <= MAX_BODY:
+                    self.connection.settimeout(.25)
+                    self.rfile.read(size)
+            except (ValueError, OSError):
+                pass
+            finally:
+                self.connection.settimeout(previous)
+
         def refuse(self, status, why, spoken=False):
             # `reply` too, so a Siri Shortcut reads the problem out instead of going silent; on /voice the
             # problem comes back as audio, since Play Sound hangs on a text answer.
             print(f"(Phone request refused: {why})", flush=True)
+            self.drain()
             wav = self.audio(why) if spoken else None
             if wav:
                 return self.reply(status, wav, "audio/wav", {"X-Jarvis-Reply": quote(why)})
@@ -189,6 +207,7 @@ def make_handler(bridge: Bridge):
 
         def do_POST(self):
             route = self.path.split("?")[0]
+            self._body_read = False
             if route not in ("/ask", "/voice"):
                 return self.refuse(404, "Wrong address. It should end in slash ask, or slash voice.")
             if not bridge.allowed(self.headers):
@@ -200,7 +219,9 @@ def make_handler(bridge: Bridge):
                 size = int(self.headers.get("Content-Length", 0))
                 if not 0 < size <= MAX_BODY:
                     raise ValueError
-                text = str(json.loads(self.rfile.read(size)).get("text", "")).strip()
+                body = self.rfile.read(size)
+                self._body_read = True
+                text = str(json.loads(body).get("text", "")).strip()
             except (ValueError, AttributeError):
                 return self.refuse(400, "Jarvis couldn't read that request. The JSON field should be called text.", spoken)
             if not text:

@@ -5,7 +5,6 @@ Assembled on demand from what is already recorded, with no AI call and no store 
   - open to-dos (the vault's Tasks.md)
   - open threads and decisions from recent days (the vault's Journal/, summarized nightly by Codex)
   - each project's latest handoff (data/handoffs/)
-  - how many memory proposals wait for the owner's approval (memory_proposals.py)
 
 jarvis.py adds the brief to the conversation whenever it changes, and the startup briefing uses it.
 Everything here is a record or an AI summary, so the brief says where each part came from.
@@ -205,8 +204,8 @@ def project_brief(project, session="", now=None, today=None) -> str:
     threads, decisions = journal(today)
     related = [f"- {item} ({day})" for day, item in threads + decisions if _mentions(project, item)]
     try:
-        import memory_proposals
-        log = knowledge.read(memory_proposals.DECISION_LOG)["content"]
+        import decision_log
+        log = knowledge.read(decision_log.DECISION_LOG)["content"]
         related += [f"- Decision: {line[3:].strip()}" for line in log.splitlines()
                     if line.startswith("## ") and _mentions(project, line)][-5:]
     except (ValueError, OSError):
@@ -228,7 +227,6 @@ def brief(now=None, today=None) -> str:
     journal threads and decisions are dropped first, so the short, current parts always fit."""
     import away_jobs
     import daily_review
-    import memory_proposals
     import research
     work, todo, projects, fresh = agent_work(now), open_tasks(), handoffs(now), recent_facts(now)
     studies = research.recent_lines(now)
@@ -240,7 +238,6 @@ def brief(now=None, today=None) -> str:
         review_line = (f"Today's daily review ({daily_review.note_for(day)}): {daily_review.spoken(review)} "
                        "Its ideas, research suggestions and Jarvis improvement proposals are in that note "
                        "(read_knowledge_note); they are proposals until the owner says go.")
-    waiting = memory_proposals.count_line()
 
     def compose():
         parts = []
@@ -264,8 +261,6 @@ def brief(now=None, today=None) -> str:
         if decisions:
             parts.append("Recent decisions and preferences (same AI summaries; not confirmed facts):\n"
                          + "\n".join(f"- {item} ({day})" for day, item in decisions))
-        if waiting:
-            parts.append(waiting)
         return "\n\n".join(parts)
 
     text = compose()

@@ -61,6 +61,8 @@ class SessionTest(unittest.TestCase):
                       mock.patch.object(sessions.working_memory, "PROJECT_LOG", self.root / "project_log.jsonl"),
                       mock.patch.object(sessions.working_memory, "HANDOFFS", self.root / "handoffs"),
                       mock.patch.object(sessions.working_memory, "journal", return_value=([], [])),
+                      # Project briefs read the vault's Decision log: the owner's real one must not reach a test.
+                      mock.patch.object(sessions.working_memory.knowledge, "VAULT", self.root / "vault"),
                       mock.patch.object(sessions, "PROJECT", self.root),
                       mock.patch.object(sessions, "executable", return_value="codex.exe"),
                       mock.patch.object(sessions.hud, "emit")):

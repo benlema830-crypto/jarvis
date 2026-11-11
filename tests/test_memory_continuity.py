@@ -9,7 +9,7 @@ from unittest import mock
 import jarvis
 import knowledge
 import memory
-import memory_proposals
+import decision_log
 import model_provider
 import privacy
 import research
@@ -31,7 +31,7 @@ class IsolatedMemory(unittest.TestCase):
                                      (knowledge, 'VAULT', root / 'vault'),
                                      (working_memory, 'SESSIONS', root / 'sessions.json'),
                                      (working_memory, 'HANDOFFS', root / 'handoffs'),
-                                     (memory_proposals, 'STORE', root / 'proposals.json'),
+                                     (decision_log, 'STORE', root / 'decisions.json'),
                                      (research, 'STORE', root / 'research.json')]:
             patcher = mock.patch.object(module, field, value)
             patcher.start()

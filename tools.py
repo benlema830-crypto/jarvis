@@ -451,6 +451,22 @@ def recall_memory(query: str) -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def search_history(query: str, days: int = 60) -> str:
+    """Search what was actually said in earlier conversations with the user (the saved transcripts), by plain
+    words. Use it for "what did I say about...", "when did we talk about...", "what did you tell me last week",
+    or to check what was decided before you answer from memory. It returns the matching lines with their dates;
+    they record what was said then, not what is true now. Finished agent jobs are in the vault: use
+    search_knowledge for those.
+
+    Args:
+        query: A few distinctive words to look for.
+        days: How far back to look, 1 to 730. Default 60.
+    """
+    import history
+    return history.search(query, days)
+
+
+@beta_tool(eager_input_streaming=True)
 def correct_memory(old: str, new: str) -> str:
     """Fix a saved fact that was wrong, or when the user wants the old wording gone. The old
     wording is erased everywhere. When things simply changed (a new job, a new priority), use
@@ -474,28 +490,6 @@ def update_memory(old: str, new: str) -> str:
         new: The full current fact as a short standalone sentence.
     """
     return memory.update(old, new)
-
-
-@beta_tool(eager_input_streaming=True)
-def review_memory_proposals() -> str:
-    """List facts and decisions the nightly journal proposes to remember. They are AI summaries
-    of past conversations and become memory only when the user approves them."""
-    import memory_proposals
-    return memory_proposals.listing()
-
-
-@beta_tool(eager_input_streaming=True)
-def decide_memory_proposals(which: str, approve: bool, reword: str = "") -> str:
-    """Keep or drop memory proposals. Call it only with the user's own answer from this
-    conversation; never approve on your own judgment.
-
-    Args:
-        which: Numbers from the latest review_memory_proposals list (e.g. "1, 3") or "all".
-        approve: True to keep (facts join memory, decisions join the vault's decision log), False to drop.
-        reword: Optional corrected wording for a single approved proposal, as the user put it.
-    """
-    import memory_proposals
-    return memory_proposals.decide(which, approve, reword)
 
 
 @beta_tool(eager_input_streaming=True)
@@ -1459,8 +1453,8 @@ def response_style(settings: str = '{}') -> str:
 
 TOOLS = [open_website, show_search_results, home_control, home_status, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, add_calendar_event, get_weather,
-         recent_activity, remember, recall_memory, correct_memory, update_memory, forget,
-         review_memory_proposals, decide_memory_proposals, performance_report, set_reminder, list_reminders, cancel_reminder,
+         recent_activity, remember, recall_memory, search_history, correct_memory, update_memory, forget,
+         performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,
          terminal_status, stop_terminal_task, open_agent_session, send_agent_task, message_agent,
          agent_session_status, list_agent_sessions, stop_agent_session, move_app_window, list_app_windows,

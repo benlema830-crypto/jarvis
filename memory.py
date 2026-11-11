@@ -17,7 +17,7 @@ from filelock import FileLock
 import privacy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PATH = os.path.join(HERE, "data", "memory.json")
+PATH = DEFAULT_PATH = os.path.join(HERE, "data", "memory.json")
 MAX_FACTS = 1000          # the prompt shows a budgeted selection; recall() searches them all
 PROMPT_BUDGET = 4000      # characters of saved facts placed in every system prompt (~1k tokens)
 PROMPT_FACT_CHARS = 400   # longer facts are shortened in the prompt; recall() returns them in full
@@ -122,6 +122,9 @@ def _save(facts: list[dict]):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(facts, f, indent=1, ensure_ascii=False)
     os.replace(tmp, PATH)
+    if PATH == DEFAULT_PATH:  # keep the readable copy in the vault in step (history.py); never for a test store
+        import history
+        history.write_mirror(facts)
 
 
 def _same(a: str, b: str) -> bool:
@@ -134,7 +137,7 @@ def facts() -> list[str]:
 
 
 def remember(fact: str, core: bool = False, source: str = "") -> str:
-    """`source` says where the fact came from, e.g. an approved journal proposal."""
+    """`source` says where the fact came from, e.g. an import from another assistant."""
     fact = privacy.redact(fact.strip())
     if len(fact) > 2000:
         raise ValueError('Keep each remembered fact under 2000 characters.')

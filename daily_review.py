@@ -148,6 +148,9 @@ def start(announce, stop: threading.Event | None = None) -> threading.Event:
                     if path:
                         print(f"(daily review: wrote {path})", flush=True)
                         summary = spoken(knowledge.read(path)["content"])
+                        if now.weekday() == 6:  # Sundays: say what was saved this week, so a wrong fact gets caught
+                            import history
+                            summary = " ".join(filter(None, [summary, history.weekly_line()]))
                         if settings["speak"] and summary:
                             announce(summary)
             except Exception as e:  # a bad day must not stop future reviews

@@ -104,7 +104,7 @@ the same bullet ("... because ...; rejected: ..."). Don't invent reasons.
 Bullets of lasting facts the owner stated about themselves, their people, work, projects, goals, routines
 or preferences that would still matter next month. One standalone sentence each, e.g. "The owner's game
 project is Rocket Frontier." Only what the owner said, never guesses, test chatter or one-off commands.
-These are proposals the owner will approve, so leave out anything uncertain.
+Leave out anything uncertain; this section is a record of the day, not what JARVIS remembers.
 ## Open threads
 Bullets of things left unfinished or to follow up.
 
@@ -193,9 +193,9 @@ def start_journal(stop: threading.Event | None = None) -> threading.Event:
             try:
                 for path in catch_up():
                     print(f"(journal: wrote {path})", flush=True)
-                import memory_proposals
-                if added := memory_proposals.harvest():
-                    print(f"(journal: {added} memory proposals waiting for approval)", flush=True)
+                import decision_log
+                if added := decision_log.harvest():
+                    print(f"(journal: {added} decisions added to the Decision log)", flush=True)
             except Exception as e:  # never stop journaling for good over one bad day
                 print(f"(journal: {e!r})", flush=True)
             if stop.wait(CHECK_SECONDS):

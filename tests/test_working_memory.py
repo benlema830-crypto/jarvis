@@ -9,7 +9,7 @@ from unittest import mock
 import knowledge
 import away_jobs
 import memory
-import memory_proposals
+import decision_log
 import privacy
 import research
 import working_memory
@@ -25,7 +25,7 @@ class WorkingMemoryTest(unittest.TestCase):
         for module, field, value in [(knowledge, "VAULT", self.vault),
                                      (working_memory, "SESSIONS", self.root / "sessions.json"),
                                      (working_memory, "HANDOFFS", self.root / "handoffs"),
-                                     (memory_proposals, "STORE", self.root / "proposals.json"),
+                                     (decision_log, "STORE", self.root / "decisions.json"),
                                      (research, "STORE", self.root / "research.json"),
                                      (away_jobs, "STORE", self.root / "away_jobs.json"),
                                      (privacy, "STORE", self.root / "privacy.json"),

@@ -42,17 +42,6 @@
   },style.status));
   menu('Response style',style,async()=>showStyle(await J.api('/response-settings')),'jarvis','responseSettingsBtn');
   const mem=panel('memoryDialog','Memory & privacy'); let state;
-  const proposals=make('div'); mem.body.append(proposals);
-  async function renderProposals(data) {
-    proposals.replaceChildren();
-    if(!data.pending.length)return;
-    proposals.append(make('h3','Waiting for your approval'),make('p','Found by the nightly journal or imported from other assistants (AI-written). Nothing is remembered until you keep it. Facts join memory; decisions join the vault\'s Decision log.'));
-    for(const item of data.pending) {
-      const row=make('div'), input=field(row,`Proposed ${item.kind} (from ${item.source})`,'textarea',item.text);input.maxLength=2000;
-      row.append(button('Keep',async()=>{renderProposals(await post('/memory-proposals',{id:item.id,approve:true,text:input.value===item.text?'':input.value}));state=await J.api('/memory');renderMemory();},mem.status),
-        button('Drop',async()=>renderProposals(await post('/memory-proposals',{id:item.id,approve:false})),mem.status));proposals.append(row);
-    }
-  }
   const facts=make('div'); mem.body.append(make('p','Inspect saved facts and recent dialogue. Corrections, deletions and privacy changes reset model conversation context on the next turn. Older excerpts stay viewable here until cleared. Deleting here does not erase existing documents, handoffs, backups or provider history.'),facts);
   const recent=make('details'); recent.append(make('summary','Recent saved conversation')); const turns=make('pre'); turns.style.whiteSpace='pre-wrap';recent.append(turns);mem.body.append(recent);
   const clear=button('Clear recent conversation',async()=>{if(!confirm('Delete the saved recent conversation?'))return;state=await post('/memory',{action:'clear_recent',revision:state.revision});renderMemory();},mem.status);mem.body.append(clear);
@@ -72,5 +61,5 @@
     turns.textContent=state.recent.map(t=>`${t.time}\nYou: ${t.user}\nJarvis: ${t.assistant}`).join('\n\n');
     terms.value=state.privacy.terms.join('\n');email.checked=state.privacy.email;phone.checked=state.privacy.phone;
   }
-  menu('Memory & privacy',mem,async()=>{state=await J.api('/memory');renderMemory();renderProposals(await J.api('/memory-proposals'));},'jarvis','memoryToolsBtn');
+  menu('Memory & privacy',mem,async()=>{state=await J.api('/memory');renderMemory();},'jarvis','memoryToolsBtn');
 })();

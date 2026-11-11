@@ -10,7 +10,7 @@ from unittest import mock
 import chat_history
 import knowledge
 import memory
-import memory_proposals
+import decision_log
 import privacy
 
 NOW = time.time()
@@ -42,7 +42,7 @@ class Isolated(unittest.TestCase):
         self.vault = self.root / "vault"
         self.vault.mkdir()
         for module, field, value in [(knowledge, "VAULT", self.vault),
-                                     (memory_proposals, "STORE", self.root / "proposals.json"),
+                                     (decision_log, "STORE", self.root / "decisions.json"),
                                      (privacy, "STORE", self.root / "privacy.json"),
                                      (memory, "PATH", str(self.root / "memory.json")),
                                      (memory, "RECENT_PATH", str(self.root / "recent.json"))]:
@@ -89,19 +89,6 @@ class ChatHistoryTest(Isolated):
     def test_unknown_or_broken_data_is_ignored(self):
         self.assertEqual(chat_history.conversations({"not": "a list"}), [])
         self.assertEqual(chat_history.conversations([{"title": "x"}, "junk", {"mapping": {}, "current_node": None}]), [])
-
-
-class ImportLinesTest(Isolated):
-    def test_memory_list_becomes_proposals_once(self):
-        memory.remember("The owner prefers short answers.")
-        text = ("1. The owner prefers short answers.\n- Works on a Roblox game called Rocket Frontier\n\n"
-                "• Lives in Minnesota\nok\n")
-        self.assertEqual(memory_proposals.import_lines(text, "ChatGPT memory"), 2)
-        self.assertEqual(memory_proposals.import_lines(text, "ChatGPT memory"), 0)
-        items = memory_proposals.pending()
-        self.assertEqual([i["text"] for i in items], ["Works on a Roblox game called Rocket Frontier", "Lives in Minnesota"])
-        memory_proposals.decide("1", True)
-        self.assertIn("ChatGPT memory (imported, approved by the owner)", memory.recall("Roblox"))
 
 
 if __name__ == "__main__":
