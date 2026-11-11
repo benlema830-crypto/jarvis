@@ -214,6 +214,7 @@ Using your tools:
 - switch_model changes your own conversation model when the user asks you to switch brains.
 - When the user wants something built or researched while they're away, overnight, or "when I'm gone", use queue_away_job. It starts now, runs by itself, texts them progress, and needs no more from you. A build happens in a private copy and comes back as a branch they review, so never tell them it changed their project or call it merged. Its report is the agent's claim; what you can vouch for is the test result you re-ran. "How's it going" or "stop it" means away_jobs. Only queue what they asked for: other ideas stay proposals. An agent stuck behind something only they can do reports blocked; say what it needs.
 - send_telegram sends something to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
+- A message starting [Via Terminal] is the user typing in a terminal window on this PC: your reply is printed there, not spoken. Write for reading: exact names, file paths, commands and short lists are fine, and a few lines of output can be quoted. Stay brief.
 - A message starting [Via Phone] is the user on their iPhone (the phone page or Siri): your reply is shown or read aloud there, not spoken at the PC, so keep it short and plain. Anything needing approval still waits for their "yes" at the PC; say so. [Via Phone as NAME] means that on the phone you are NAME (for example FRIDAY, Tony Stark's other assistant): use that name if you refer to yourself, with a warmer, quicker, more casual manner than JARVIS and no "sir". You are still the same assistant underneath, with the same memory, tools, rules and judgment.
 - {off_limits} may hold the user's work data and are off-limits: never open, read, or operate them.
 
@@ -226,6 +227,9 @@ What you know about the user from earlier sessions:
 
 
 STATE_MARK = "[WORKING STATE - your own records, not the user's words]"
+# Sent to a phone, Telegram or terminal when a turn produced no words. It used to be "Done.", which
+# claimed something happened when nothing was known to have.
+NO_REPLY = "No answer came back."
 
 # Said once, when a tool has run this long and Jarvis hasn't spoken yet this turn, so a slow lookup isn't
 # met with silence. Only for the owner's own spoken or typed requests. None of these claim a result.
@@ -803,7 +807,7 @@ def respond_telegram(brain: Brain, voice: Voice, item: dict):
     with response_routing.telegram_turn(item["telegram"]):
         said = []
         respond(brain, voice, item["prompt"], said.append)
-        send_telegram_reply(item["telegram"], " ".join(said).strip() or "Done.")
+        send_telegram_reply(item["telegram"], " ".join(said).strip() or NO_REPLY)
 
 
 def send_telegram_reply(chat, reply):
@@ -864,11 +868,28 @@ def respond_phone(brain: Brain, voice: Voice, item: dict):
     try:
         respond(brain, voice, prompt, said.append)
         if item.get("voice_reply"):
-            wav = phone_voice_wav(voice, " ".join(said).strip() or "Done.")
+            wav = phone_voice_wav(voice, " ".join(said).strip() or NO_REPLY)
     finally:  # never leave the phone waiting, even if the turn blew up
-        reply = " ".join(said).strip() or "Done."
+        reply = " ".join(said).strip() or NO_REPLY
         hud.emit("jarvis", text=f"(to phone{', as ' + name if name else ''}) " + reply)
         item["phone"](reply, wav)
+
+
+def respond_terminal(brain: Brain, voice: Voice, item: dict):
+    """A question typed into a terminal with the `j` command: the reply goes back as text with the turn's
+    receipts, and nothing is spoken."""
+    said = []
+    runtime_metrics.begin_turn(source="keyboard")
+
+    def collect(sentence):
+        runtime_metrics.mark("first_text")
+        said.append(sentence)
+    try:
+        respond(brain, voice, item["prompt"], collect)
+    finally:  # never leave the terminal waiting, even if the turn blew up
+        reply = " ".join(said).strip() or NO_REPLY
+        hud.emit("jarvis", text=reply)
+        item["terminal"]({"reply": reply, "receipts": truth_guard.receipts()})
 
 
 BRIEFING_WORDS = re.compile(r"(?:good morning|morning|brief me|daily briefing|my briefing|what'?s (?:on )?my day"
@@ -1388,6 +1409,12 @@ def main():
                     voice.wait()
                     turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
                     hud.emit("state", state="listening")
+                    turns.idle.set()
+                    continue
+                if "terminal" in item:  # the `j` command: answer in the terminal, not out loud
+                    hud.emit("state", state="thinking")
+                    respond_terminal(brain, voice, item)
+                    hud.emit("state", state="standby")
                     turns.idle.set()
                     continue
                 if "phone" in item:  # the owner's phone: answer there, not out loud

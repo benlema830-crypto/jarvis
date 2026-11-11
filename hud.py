@@ -152,6 +152,7 @@ def intel(refresh=False) -> dict:
         return _intel_cache[1]
 
 
+ASK_TIMEOUT = 600  # seconds a terminal question may take (direct commands can run for minutes)
 _home_cache = (0.0, None)
 HOME_TTL = 8  # seconds; the Console polls this, Home Assistant shouldn't be asked on every poll
 
@@ -364,6 +365,23 @@ class _Handler(BaseHTTPRequestHandler):
             if on_stop:
                 on_stop()
             self._json({"ok": True})
+            return
+        if self.path == "/ask":  # the `j` terminal command: the reply comes back as text, nothing is spoken
+            try:
+                length = min(int(self.headers.get("Content-Length", 0)), 8000)
+                text = str(json.loads(self.rfile.read(length))["text"]).strip()
+                if not text or self.headers.get("Origin"):
+                    raise ValueError("Nothing to ask.")
+            except (ValueError, KeyError, TypeError):
+                self.send_error(400)
+                return
+            answer: queue.Queue = queue.Queue(1)
+            emit("you", text="(Terminal) " + text)
+            commands.put({"label": "Terminal message", "terminal": answer.put, "prompt": f"[Via Terminal] {text}"})
+            try:
+                self._json(answer.get(timeout=ASK_TIMEOUT))
+            except queue.Empty:
+                self._json({"error": f"Jarvis didn't answer within {ASK_TIMEOUT // 60} minutes. He may still be working."}, 504)
             return
         if self.path != "/command":
             self.send_error(404)

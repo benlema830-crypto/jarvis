@@ -10,7 +10,7 @@
     confirmed: ['✓', 'confirmed', 'ok'], sent: ['→', 'sent, not read back', 'sent'],
     waiting: ['…', 'waiting for your OK', 'wait'], unknown: ['?', 'could not confirm', 'warn'], failed: ['✗', 'failed', 'bad'],
   };
-  const SOURCES = [['(Telegram voice) ', 'Telegram voice'], ['(Telegram) ', 'Telegram'], ['(Phone) ', 'Phone']];
+  const SOURCES = [['(Telegram voice) ', 'Telegram voice'], ['(Telegram) ', 'Telegram'], ['(Phone) ', 'Phone'], ['(Terminal) ', 'Terminal']];
   let turn = null, needs = [];
 
   /* ---------- Turns ---------- */
