@@ -195,6 +195,14 @@ class Watcher:
                 extra = self.briefing()
             except Exception:
                 extra = ''
+        if not extra:  # even a short absence delivers what was held meanwhile, so it isn't left waiting
+            try:
+                import attention
+                held = attention.lines(attention.take())
+                extra = (held + " Tell them about these in a sentence or two, even though they only stepped out."
+                         if held else '')
+            except Exception:
+                extra = ''
         prompt, style = build_prompt(away, arrived, now, self.saved.get('recent', []), extra)
         self.saved['last_greeted'] = now_ts
         _save(self.saved)
