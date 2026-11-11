@@ -47,6 +47,44 @@ class Rendering(unittest.TestCase):
         self.assertIn("isn't running", out.call_args.args[0])
 
 
+class PipedInput(unittest.TestCase):
+    def test_a_silent_open_pipe_does_not_hang_the_question(self):
+        import subprocess
+        import sys
+        import time
+        script = str(Path(__file__).resolve().parent.parent / "scripts" / "j.py")
+        # stdin is a pipe that never sends anything and stays open; port 9 has nothing listening
+        proc = subprocess.Popen([sys.executable, script, "hello"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env={**__import__("os").environ, "JARVIS_HUD_PORT": "9"})
+        began = time.monotonic()
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            self.fail("j hung on a silent input pipe")
+        finally:
+            error = proc.stderr.read()
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                stream.close()
+        self.assertLess(time.monotonic() - began, 20)
+        self.assertIn(b"isn't running", error)
+
+    def test_piped_text_is_still_read(self):
+        import io
+        text = "diff --git a b\n+new line\n"
+        with mock.patch.object(j.sys, "stdin", io.StringIO(text)):
+            self.assertEqual(j.read_piped(True), text)
+            j.sys.stdin.seek(0)
+            self.assertEqual(j.read_piped(False), text)
+
+    def test_a_keyboard_is_not_read(self):
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(j.sys, "stdin", tty):
+            self.assertEqual(j.read_piped(True), "")
+        tty.read.assert_not_called()
+
+
 class AskRoute(unittest.TestCase):
     def setUp(self):
         self.commands = queue.Queue()

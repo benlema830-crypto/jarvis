@@ -336,6 +336,17 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 | Phase 3, part | One talking brain: the Anthropic API, OpenAI API, local chat model and router code is deleted. Claude or Codex on your own plans are the only choices; a plan limit is said aloud and the turn stops. | 766 tests pass. Live `/models` offers only those two. |
 | Phase 4 | Console view inside the Jarvis page (switch in the top bar, or Ctrl+.). Page tidy-up. `j` command for any terminal. | Browser check passes, including 30 Console assertions. Live page shows 10 real device tiles. `j` answered in 1.1 s (plain) and 1.9 s (with a lookup). |
 
+### Added later on 2026-11-10
+
+| Step | What changed | Checked how |
+| --- | --- | --- |
+| Voice | End of turn waits a full second of silence (owner pauses mid-thought). Piper voice deleted at the owner's request. | Tests; live picker no longer lists Piper. |
+| Phase 5 | The memory approval queue is gone. Its 129 items were sorted once: 41 saved with their source, 36 decisions logged, 15 left for the owner, 37 dropped (all listed in `data/reports/memory-proposals-sorted-2026-11-10.md`). Journal decisions now go straight to the vault's Decision log. `search_history` searches past conversations. `Memory/What Jarvis knows about you.md` in the vault is a readable copy of memory. On Sundays he says what he saved that week. | 30 recall questions: 18 found before, 29 after (I wrote the questions knowing the facts, so treat it as a rough check). Live: answered "where do I work" and found a past conversation. |
+| Phase 6 | `attention.py`: unprompted updates are said or held (budget of five a day; held ones come out together at the next welcome back). `heartbeat.py`: half-hourly plain checks, plus an optional checklist note in the vault. Console job board for away jobs. Yes/No buttons on the phone page for open approvals. | 810 tests. Live routes answer; the phone refuses `/pending` without the key. **No real away job or phone approval has been run yet.** |
+| Fixes found on the way | The phone bridge dropped the connection instead of giving its reason (test failed 2 runs in 9; now 0 in 12). `j` hung when started with a silent input pipe. Two tests read the real vault or Spotify sign-in. | Tests added for each. |
+
+Changed from the plan: finished-job reports **stay in the vault**. The graph you chose to keep is built from them, so moving them out would have emptied it.
+
 ### What the measurements corrected
 
 - **Trimming the tool list does not make him faster.** Opus answered in the same time with 85 tools and with 28. Dropped from the plan as a speed measure.
@@ -348,8 +359,8 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 
 - Phase 1: streaming voice engine (needs you to listen), instant ducking when you speak (needs a live test), and your verdict on the turn detector.
 - Phase 3: remove ElevenLabs from `voice.py` (unreachable now that its key isn't loaded; best done with the voice engine swap). Piper stays until you say otherwise: there is a custom voice in `models/piper`. Replace the screen agent (`do_on_computer` is off until then). Move to the built-in MCP client.
-- Phase 4: phone page as a card feed with approve buttons. Diff cards have no Undo button yet.
-- Phases 5 and 6: one memory; away work and heartbeat.
+- Phase 4: diff cards have no Undo button yet. The phone page has approve buttons but is still a chat, not a card feed.
+- Phase 6: prove it with three real overnight jobs and one real phone approval.
 
 ## Things I could not verify
 

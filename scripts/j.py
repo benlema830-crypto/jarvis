@@ -47,9 +47,40 @@ def render(answer):
     return "\n".join(lines)
 
 
+def read_piped(have_question, wait=0.4):
+    """Text piped in (`git diff | j review this`), or "" when nothing is.
+
+    A script or another program can start `j` with an input pipe that never sends anything and never closes;
+    reading it outright hung forever (2026-11-10). So when a question was given, the pipe gets a moment to
+    produce its first bytes; if it stays silent, it is ignored. Once text starts arriving it is read to the end.
+    """
+    if sys.stdin is None or sys.stdin.isatty():
+        return ""
+    if not have_question:
+        return sys.stdin.read()  # `some command | j`: the piped text is the whole question, so wait for it
+    import threading
+    chunks, started, finished = [], threading.Event(), threading.Event()
+
+    def pump():
+        try:
+            while True:
+                piece = sys.stdin.read(4096)
+                started.set()
+                if not piece:
+                    break
+                chunks.append(piece)
+        except (OSError, ValueError):
+            started.set()
+        finished.set()
+    threading.Thread(target=pump, daemon=True).start()
+    if started.wait(wait):
+        finished.wait(30)
+    return "".join(chunks)
+
+
 def main(argv=None):
     arguments = sys.argv[1:] if argv is None else argv
-    piped = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
+    piped = read_piped(bool(arguments))
     text = question(arguments, piped)
     if not text or text in ("-h", "--help"):
         print(__doc__.strip())
