@@ -705,10 +705,14 @@ def hold_update(brain: Brain, item: dict, turns) -> bool:
 
 BRIEF_UNDER = 220  # a report this short is already a quick summary
 BRIEF = ("[UPDATE TO PASS ON] {label}. {note}\nWhat came back, in full:\n{text}\n\n"
-         "Tell the owner what they need from this, the way you would mention it in passing: the outcome in one or "
-         "two sentences, plus anything that needs them or went wrong. Leave out the steps, file names, counts and "
-         "whatever they didn't ask about; the full text is on their screen. Keep whose claim it is: an agent's "
-         "report is the agent's. If nothing in it matters to them right now, reply with exactly (quiet).")
+         "Say this to the owner in one or two sentences, as you would mention it in passing. Lead with the result "
+         "itself, in its own names and numbers: what was found, built or changed. \"The biggest are tools.py at "
+         "1,623 lines and jarvis.py at 1,451\" is a result. \"The agent ranked the files\" only describes the work, "
+         "and is not what they want to hear. Then anything that went wrong or needs them. Leave out how it was "
+         "done, doubts the agent already settled, and detail beyond the first few items; the full text is on their "
+         "screen. It is the agent's claim, so say \"the agent found\" or \"reports\" rather than stating it as your "
+         "own fact. Don't add that nothing needs their attention. If nothing in it matters to them right now, reply "
+         "with exactly (quiet).")
 
 
 def brief_update(brain: Brain, voice: Voice, item: dict, written: bool = False) -> str | None:
