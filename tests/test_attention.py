@@ -70,6 +70,11 @@ class DecideTest(Isolated):
         self.assertEqual(attention.take(), [])
         self.assertEqual(attention.lines([]), "")
 
+    def test_tests_never_read_the_real_store(self):
+        with mock.patch.object(attention, "STORE", attention.DEFAULT_STORE):
+            self.assertEqual(attention.held(), [])
+            self.assertEqual(attention.snapshot()["spoken_today"], 0)
+
     def test_tests_never_write_the_real_store(self):
         with mock.patch.object(attention, "STORE", attention.DEFAULT_STORE):
             before = attention.DEFAULT_STORE.read_bytes() if attention.DEFAULT_STORE.exists() else None

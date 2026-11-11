@@ -36,6 +36,9 @@ def cap() -> int:
 def _load(today=None):
     today = today or datetime.date.today().isoformat()
     try:
+        import testing_guard
+        if STORE == DEFAULT_STORE and testing_guard.under_test():
+            raise ValueError  # a test never sees (or depends on) the owner's real held updates
         data = json.loads(STORE.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("held"), list):
             raise ValueError
