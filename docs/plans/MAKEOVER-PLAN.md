@@ -333,6 +333,7 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 | Phase 1, part | End-of-turn model (Smart Turn v3.2) ends a finished sentence after 0.32 s of silence; the old 1.2 s timer is the fallback. A tool running over 1.2 s gets a few spoken words. A newly saved fact no longer restarts the brain session. | Model told finished from unfinished phrases on 8 of 10 synthesised samples, 23 ms each. **Not yet heard by you in real use.** |
 | Phase 2 | Every action leaves a receipt (confirmed, sent, waiting, unknown, failed). The claim gate checks receipts, not just "some tool ran". Jarvis adds the sentence himself when a failure goes unmentioned. | 65 of 65 honesty cases pass, including the TV case. Replayed over 915 past turns, it would have stopped 13 replies. |
 | Phase 3, part | Removed Eyes, Watch, Focus, digests, routines, documents, artifacts, YouTube and Amazon tools. | 802 tests pass. Removed routes return 404 on the live server. |
+| Phase 3, part | One talking brain: the Anthropic API, OpenAI API, local chat model and router code is deleted. Claude or Codex on your own plans are the only choices; a plan limit is said aloud and the turn stops. | 766 tests pass. Live `/models` offers only those two. |
 | Phase 4 | Console view inside the Jarvis page (switch in the top bar, or Ctrl+.). Page tidy-up. `j` command for any terminal. | Browser check passes, including 30 Console assertions. Live page shows 10 real device tiles. `j` answered in 1.1 s (plain) and 1.9 s (with a lookup). |
 
 ### What the measurements corrected
@@ -346,7 +347,7 @@ Where the sections above say the Brain page, graph, holo or orb are deleted, thi
 ### Still to do
 
 - Phase 1: streaming voice engine (needs you to listen), instant ducking when you speak (needs a live test), and your verdict on the turn detector.
-- Phase 3: delete the extra brains (OpenAI, Anthropic API, Ollama chat, router) and voices (ElevenLabs, Piper), replace the screen agent, move to the built-in MCP client.
+- Phase 3: remove ElevenLabs from `voice.py` (unreachable now that its key isn't loaded; best done with the voice engine swap). Piper stays until you say otherwise: there is a custom voice in `models/piper`. Replace the screen agent (`do_on_computer` is off until then). Move to the built-in MCP client.
 - Phase 4: phone page as a card feed with approve buttons. Diff cards have no Undo button yet.
 - Phases 5 and 6: one memory; away work and heartbeat.
 
