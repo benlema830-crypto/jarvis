@@ -570,33 +570,25 @@ def set_voice_engine(engine: str) -> str:
 @beta_tool(eager_input_streaming=True)
 def switch_voice(engine: str) -> str:
     """Switch speaking voice. 'voicestudio' is the owner's Jarvis-like VoiceStudio clone
-    (the default). 'qwen' is the owner's older local Qwen clone. 'piper' is a fast offline
-    voice the owner downloaded. 'kokoro' is the lightweight local alternative.
+    (the default). 'qwen' is the owner's older local Qwen clone. 'kokoro' is the lightweight local alternative.
     'elevenlabs' requires separate paid API access.
 
-    Any voice the owner saved in VoiceStudio, or downloaded for Piper, can be chosen by its
-    name, e.g. 'JARVIS 2.0' or 'en_US-BEN_Real-medium' ('BEN' is enough for Piper).
+    Any voice the owner saved in VoiceStudio can be chosen by its name, e.g. 'JARVIS 2.0'.
 
     Args:
-        engine: 'voicestudio', 'qwen', 'piper', 'kokoro', 'elevenlabs', or a voice name.
+        engine: 'voicestudio', 'qwen', 'kokoro', 'elevenlabs', or a VoiceStudio voice name.
     """
-    import piper_voice
     import voicestudio_voice
     wanted = engine.strip()
-    piper_named = next((n for n in piper_voice.voices() if len(wanted) > 2 and wanted.casefold() in n.casefold()), None)
-    if piper_named:
-        set_voice_engine(f"piper:{piper_named}")
-        return f"Now speaking with the {piper_named} Piper voice."
     named = next((p for p in voicestudio_voice.profiles(max_age=0)  # a voice saved moments ago counts
                   if wanted.casefold() in (p["name"].casefold(), p["id"].casefold())), None)
     if named:
         set_voice_engine(f"voicestudio:{named['id']}")
         return f"Now speaking with the {named['name']} voice."
     engine = wanted.lower()
-    if engine not in ("voicestudio", "elevenlabs", "kokoro", "qwen", "piper"):
+    if engine not in ("voicestudio", "elevenlabs", "kokoro", "qwen"):
         names = ", ".join(p["name"] for p in voicestudio_voice.profiles()) or "none found; is VoiceStudio open?"
-        return (f"Choose voicestudio, qwen, piper, kokoro, elevenlabs, a VoiceStudio voice ({names}), "
-                f"or a Piper voice ({', '.join(piper_voice.voices()) or 'none in models/piper'}).")
+        return f"Choose voicestudio, qwen, kokoro, elevenlabs, or a VoiceStudio voice ({names})."
     from voice import KOKORO_ONLY
     if KOKORO_ONLY and engine == "elevenlabs":
         return "This installation uses local speech only. ElevenLabs is disabled."

@@ -121,7 +121,6 @@ pywebview==6.2.1
 
 # Reads YouTube watch history headlessly (youtube_history.py)
 playwright==1.64.1
-piper-tts==1.8.0
 
 # Lint check, run by scripts/verify_project.py (settings in ruff.toml)
 ruff==0.17.3

@@ -4,7 +4,6 @@ Engines:
   voicestudio - The owner's VoiceStudio clone, generated on the GPU by the local
                VoiceStudio app. Falls back to Kokoro if the app is closed.
   qwen       - The owner's local Qwen clone.
-  piper      - Downloaded Piper voices (models/piper/*.onnx) on the CPU. Fast and offline.
   elevenlabs - ElevenLabs over the network (most human). Audio streams in, so
                playback starts before the whole sentence is generated.
   kokoro     - Kokoro on the CPU. Instant, offline, and the automatic fallback
@@ -62,8 +61,8 @@ RATE = 24000  # Kokoro's rate, and the PCM format we ask ElevenLabs for
 SOUND_TAGS = re.compile(r"\s*\[(chuckle|laugh|sigh|clear throat|cough|gasp|groan|sniff)\]\s*", re.I)
 ELEVEN_TAGS = {"chuckle": "[soft chuckle]", "laugh": "[laughing]", "sigh": "[sigh]", "clear throat": "[clears throat]"}
 BRITISH_VOICES = ["bm_george", "bm_fable", "bm_lewis", "bm_daniel"]
-ENGINES = ("voicestudio", "qwen", "piper", "kokoro", "elevenlabs")
-ENGINE_LABELS = {"voicestudio": "Jarvis (VoiceStudio)", "qwen": "Qwen clone", "piper": "Piper",
+ENGINES = ("voicestudio", "qwen", "kokoro", "elevenlabs")
+ENGINE_LABELS = {"voicestudio": "Jarvis (VoiceStudio)", "qwen": "Qwen clone",
                  "kokoro": "Kokoro", "elevenlabs": "ElevenLabs"}
 
 
@@ -88,11 +87,8 @@ def voice_choices(current: str = "") -> tuple[list[dict], str]:
                     "label": "VoiceStudio voice (app closed)"}]
     elif current.startswith("voicestudio") and current not in {c["id"] for c in choices}:
         choices.insert(0, {"id": current, "label": "Current VoiceStudio voice (not found in the app)"})
-    import piper_voice
     for e in available_engines():
-        if e == "piper":  # one entry per downloaded Piper voice
-            choices += [{"id": f"piper:{n}", "label": f"{n} (Piper)"} for n in piper_voice.voices()]
-        elif e != "voicestudio":
+        if e != "voicestudio":
             choices.append({"id": e, "label": ENGINE_LABELS[e]})
     return choices, current
 
@@ -354,15 +350,12 @@ class Voice:
         self.eleven = None
         self.local = None
         self.studio = None
-        self.piper = None
         self._studio_failures = 0
         if engine == "voicestudio":
             self._start_voicestudio(profile)
         if engine == 'qwen':
             import qwen_voice
             self.local = qwen_voice.create()
-        if engine == "piper":
-            self._start_piper(profile)
         self._eleven_failures = 0
         if engine == "elevenlabs":
             self._start_elevenlabs()
@@ -523,8 +516,6 @@ class Voice:
             return "voicestudio"
         if getattr(self, "local", None) is not None:
             return 'qwen'
-        if getattr(self, "piper", None) is not None:
-            return "piper"
         return "elevenlabs" if self.eleven else "kokoro"
 
     def _start_elevenlabs(self) -> bool:
@@ -547,23 +538,13 @@ class Voice:
         self.studio = VoiceStudioEngine(self.speed, profile)
         self._studio_failures = 0
 
-    def _start_piper(self, name: str = ""):
-        from piper_voice import PiperEngine
-        try:
-            self.piper = PiperEngine(name, self.speed, RATE)
-        except Exception as e:
-            print(f"(Piper voice unavailable: {e} - using Kokoro)", flush=True)
-            hud.emit("error", text=f"Piper voice unavailable: {e}")
-            self.piper = None
-
     @property
     def choice(self) -> str:
         """The picker id of the current voice, e.g. "voicestudio:27c8e8a9" or "kokoro"."""
         studio = getattr(self, "studio", None)
         if studio is not None:
             return f"voicestudio:{studio.profile}"
-        piper = getattr(self, "piper", None)
-        return f"piper:{piper.name}" if piper is not None else self.engine
+        return self.engine
 
     def switch_engine(self, engine: str) -> str:
         """Switch voice engine while running (see ENGINES, or "voicestudio:<profile id>").
@@ -577,9 +558,6 @@ class Voice:
             self._studio_failures = 0
             threading.Thread(target=self._warm_studio, daemon=True).start()
             return engine
-        if engine == "piper" and getattr(self, "piper", None) is not None and profile and profile != self.piper.name:
-            self._start_piper(profile)  # another Piper voice
-            return self.engine
         if engine == self.engine:
             return engine
         local = getattr(self, 'local', None)
@@ -590,8 +568,6 @@ class Voice:
             self.studio = None
         if engine != 'elevenlabs':
             self.eleven = None
-        if engine != 'piper':
-            self.piper = None
         if engine == 'qwen':
             import qwen_voice
             self.local = qwen_voice.create()
@@ -600,8 +576,6 @@ class Voice:
             threading.Thread(target=self._warm_studio, daemon=True).start()
         elif engine == 'elevenlabs':
             self._start_elevenlabs()
-        elif engine == 'piper':
-            self._start_piper(profile)
         return self.engine
 
     def _drop_elevenlabs(self, reason: str):
@@ -639,15 +613,6 @@ class Voice:
                     # instead of waiting on the dead connection every sentence.
                     self._studio_reopening = True
                     threading.Thread(target=self._reopen_studio, daemon=True).start()
-        piper = getattr(self, "piper", None)
-        if piper is not None:
-            try:
-                samples = piper.render(SOUND_TAGS.sub(' ', text).strip())
-                if len(samples):
-                    yield samples
-                return
-            except Exception as e:
-                print(f"(Piper: {e} - using Kokoro for this sentence)", flush=True)
         if self.local is not None:
             started = time.monotonic()
             samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())
