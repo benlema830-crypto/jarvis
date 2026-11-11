@@ -58,13 +58,13 @@ class ClaimGateTest(unittest.TestCase):
 
     def test_a_successful_tool_backs_the_claim(self):
         gate = tg.ClaimGate()
-        tg.note_tool("home_control", ok=True)
+        tg.record("home_control", {"device": "fan"}, True, "Confirmed: Bedroom Fan is off.")
         self.assertTrue(gate.admit("I've turned the fan off."))
         self.assertEqual(gate.held, [])
 
     def test_a_failed_tool_backs_nothing(self):
         gate = tg.ClaimGate()
-        tg.note_tool("home_control", ok=False)
+        tg.record("home_control", {"device": "fan"}, False, "Home Assistant unreachable")
         self.assertFalse(gate.admit("I've turned the fan off."))
 
     def test_each_turn_starts_clean(self):

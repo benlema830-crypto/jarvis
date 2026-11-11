@@ -36,6 +36,7 @@ from agent_sessions import MANAGER as SESSIONS
 
 HOME = os.path.expanduser("~")
 VOICE = None          # set by jarvis.py at startup
+truth_guard.on_receipt = lambda receipt: hud.emit("receipt", **receipt)  # shown beside the reply
 AGENT = Agent()             # operates the screen for multi-step tasks; jarvis.py wires up its callbacks
 TERMINAL = TerminalWorker()  # Claude Code in the background for terminal jobs
 
@@ -1707,16 +1708,16 @@ def run_tool(block) -> dict:
         tool = TOOLS_BY_NAME[block.name]
         result = tool.call(block.input)  # validates the input against the tool's schema
         content = result if isinstance(result, list) else str(result)
-        truth_guard.note_tool(block.name, ok=True)
-        runtime_metrics.note_tool(block.name, True, time.monotonic() - began)
+        receipt = truth_guard.record(block.name, block.input, True, content)
+        runtime_metrics.note_tool(block.name, True, time.monotonic() - began, receipt and receipt["status"])
         from knowledge_events import result_event
         source_event = result_event(block.name, content)
         if source_event is not None:
             hud.emit('knowledge', **source_event)
         return {"type": "tool_result", "tool_use_id": block.id, "content": content}
     except Exception as e:
-        truth_guard.note_tool(block.name, ok=False)
-        runtime_metrics.note_tool(block.name, False, time.monotonic() - began)
+        receipt = truth_guard.record(block.name, block.input, False, str(e))
+        runtime_metrics.note_tool(block.name, False, time.monotonic() - began, receipt and receipt["status"])
         print(f"  ({block.name} failed: {type(e).__name__})", flush=True)
         if block.name in ('search_knowledge', 'read_knowledge_note'):
             hud.emit('knowledge', sources=[], status='unavailable')

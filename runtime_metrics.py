@@ -53,12 +53,15 @@ def mark(stage):
         _save(row)
 
 
-def note_tool(name, ok, seconds):
+def note_tool(name, ok, seconds, status=None):
     """A tool finished during the current turn (called from tools.run_tool)."""
     with _lock:
         if _turn is not None and 'complete' not in _turn['stages'] and len(_turn['tools']) < 200:
-            _turn['tools'].append({'name': str(name)[:60], 'ok': bool(ok), 'ms': round(seconds*1000),
-                                   'at': round(max(0, time.monotonic()-_turn['started'])*1000)})
+            entry = {'name': str(name)[:60], 'ok': bool(ok), 'ms': round(seconds*1000),
+                     'at': round(max(0, time.monotonic()-_turn['started'])*1000)}
+            if status:
+                entry['receipt'] = status  # confirmed / sent / waiting / unknown / failed (truth_guard)
+            _turn['tools'].append(entry)
 
 
 def _row():

@@ -5,7 +5,7 @@
 data/turn_stages.jsonl  each turn's stages in ms after the end of speech (voice) or the keypress (typed),
                         plus every tool that ran and whether it worked (written by runtime_metrics.py)
 data/turn_metrics.jsonl older record: seconds from the brain being asked to its first sentence
-data/claim_audit.jsonl  nightly count of replies that reported an action no receipt backs (Phase 2)
+data/claim_checks.jsonl each reply the claim gate stopped because no receipt backed it (truth_guard.py)
 """
 import argparse
 import datetime
@@ -74,12 +74,12 @@ def report(since):
         cut = sum(r.get("outcome") == "interrupted" for r in brain)
         out.append(f"{'Turns cut off by the owner':<46} {cut} of {len(brain)} ({100 * cut / len(brain):.0f}%)")
         out.append(f"{'Turns with first sentence under 1 s':<46} {sum(f < 1 for f in firsts)} of {len(firsts)}")
-    audits = rows("claim_audit.jsonl", since)
-    if audits:
-        out.append(f"{'Replies claiming an unbacked action':<46} {sum(a.get('unbacked', 0) for a in audits)} in "
-                   f"{sum(a.get('turns', 0) for a in audits)} turns")
-    else:
-        out.append(f"{'Replies claiming an unbacked action':<46} no audit yet")
+    proof = Counter(t["receipt"] for t in calls if t.get("receipt"))
+    if proof:
+        out.append(f"{'Action receipts':<46} " + ", ".join(f"{count} {status}" for status, count in proof.most_common()))
+    stopped = rows("claim_checks.jsonl", since)
+    out.append(f"{'Unbacked claims stopped before being spoken':<46} {len(stopped)}"
+               + (f" in {len(stages)} turns" if stages else ""))
     tasks = rows("task_effort.jsonl", since)
     for kind in sorted({t.get("kind") for t in tasks}):
         mine = [t for t in tasks if t.get("kind") == kind]

@@ -434,6 +434,11 @@ class Brain:
                 hud.emit("event", text="Checking a claim before saying it")
                 self.messages.append({"role": "user", "content": f"[{stamp}] {gate.correction()}"})
                 self._run(deliver)
+            # An action failed or couldn't be confirmed and the reply never said so: Jarvis says it himself.
+            for sentence in truth_guard.unspoken_failures(spoken):
+                deliver(sentence)
+                if isinstance(self.messages[-1].get("content"), str) and self.messages[-1]["role"] == "assistant":
+                    self.messages[-1]["content"] += " " + sentence
         except Interrupted:
             outcome = "interrupted"
             # Keep the turn, so Jarvis knows what he was saying when you cut in

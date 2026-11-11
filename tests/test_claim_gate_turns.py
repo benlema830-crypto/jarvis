@@ -26,7 +26,7 @@ class GateInTurnTest(unittest.TestCase):
             self.prompts.append(self.brain.messages[-1]["content"])
             for step in next(replies):
                 if step == "TOOL":
-                    truth_guard.note_tool("home_control", ok=True)
+                    truth_guard.record("home_control", {"device": "fan"}, True, "Confirmed: Bedroom Fan is off.")
                 else:
                     deliver(step)
             self.brain.messages.append({"role": "assistant", "content": "reply"})
