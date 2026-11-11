@@ -38,6 +38,13 @@ class InstructionsTest(unittest.TestCase):
     def test_an_app_the_owner_blocks_is_named_again(self):
         self.assertIn("- Teams may hold the user's work data and are off-limits", self.prompt(JARVIS_BLOCK_WORK_APPS="teams"))
 
+    def test_the_codex_brain_is_told_its_tools_are_not_read_only(self):
+        # Codex tells the model its sandbox is read-only. Asked to make and delete a file, Jarvis answered "this
+        # session has read-only file access" instead of using write_file (live, 2026-11-11).
+        source = (Path(jarvis.__file__).parent / "codex_brain.py").read_text(encoding="utf-8")
+        self.assertIn("Your JARVIS tools are not sandboxed", source)
+        self.assertIn("Never say this session is ", source)
+
     def test_agents_are_told_the_same(self):
         import agent
         import agent_sessions
