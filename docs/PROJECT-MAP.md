@@ -191,6 +191,15 @@ Checked for real on 2026-11-11, as the agent user: no drive visible, `sudo`, `su
 and a delete in the read-only share refused by Linux, a Windows program copied into the job's folder would not
 start, and Jarvis's ports 7778, 7781, 7782 and 11435 were closed from inside.
 
+Then with a real agent, started the way an away job starts one. A program it ran could write only in its own
+folder: its home folder, the rules in `/opt/jarvis` and Documents were each "Read-only file system". The same
+program could not read Claude's sign-in file, reach example.com ("host is not on the allow list"), reach Jarvis's
+port or any address by number, and could reach PyPI. A script the agent wrote itself was held the same way. Its
+Write tool outside the folder and `git push` were refused by `cc_guard.py`. A second round continued the same
+conversation, and a run on Fable at high effort worked. One thing to know: `cc_guard.py` reads shell commands
+for Windows paths, so on Linux it let `rm` of a file in Documents through, and it was Linux that refused it.
+Inside the sandbox the guard is what holds Claude's file tools, and the operating system is what holds commands.
+
 What it does not do. The agent can still read the web and whatever was shared in, so a job's folder and, for
 research, Documents could be sent somewhere by an agent that a web page talked into it. A build of a
 Windows-only project (Jarvis itself) can't run its tests inside; Jarvis's own re-run on Windows settles those.
