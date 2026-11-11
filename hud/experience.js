@@ -43,7 +43,6 @@
     if(pane.uri && /^(https?:|obsidian:)/i.test(pane.uri)){
       const a=make('a','Open source');a.href=pane.uri;a.target='_blank';a.rel='noopener noreferrer';actions.append(a);
     }
-    if(pane.artifact)actions.append(button('Open document',async()=>{try{await J.api('/artifacts',{action:'open',name:pane.artifact});}catch(e){J.notice(e.message);}}));
     if(!viewer.open)viewer.showModal();
     if(pane.projectPath){
       body.textContent='Loading source…';
@@ -76,13 +75,10 @@
     body:`${s.status}\n${s.task||''}\n\n${s.progress||s.report||''}`});});
   async function refresh(){
     if(document.hidden||J.online===false)return;
-    const results=await Promise.allSettled([J.api('/tasks'),J.api('/artifacts')]);
-    if(results[0].status==='fulfilled')add({id:'tasks',title:'Tasks',kind:'tasks',source:'Tasks.md',body:(results[0].value.tasks||[]).filter(t=>!t.done).map(t=>`${t.n}. ${t.text}`).join('\n')||'No open tasks.'});
-    if(results[1].status==='fulfilled')for(const f of (results[1].value.files||[]).slice(0,3))add({id:'file:'+f.name,title:f.name,kind:'document',artifact:f.name,body:`Generated document\n${Math.round(f.bytes/1024)} KB\nOpen this panel to launch the file.`});
+    try{const data=await J.api('/tasks');add({id:'tasks',title:'Tasks',kind:'tasks',source:'Tasks.md',body:(data.tasks||[]).filter(t=>!t.done).map(t=>`${t.n}. ${t.text}`).join('\n')||'No open tasks.'});}catch{}
   }
   J.on('hello',refresh);J.on('stage',refresh);setInterval(refresh,12000);refresh();
-  const menu=document.getElementById('moreMenu');
-  const panesButton=button('Holographic panels',()=>{menu.hidden=true;library();listDialog.showModal();});panesButton.id='holoPanelsBtn';menu.prepend(panesButton);
+  J.menuItem('view','Holographic panels',()=>{library();listDialog.showModal();},'holoPanelsBtn');
 
   const resumeDialog=make('dialog'),resumeProject=make('select'),resumeBody=make('div');resumeDialog.id='resumeDialog';
   resumeDialog.setAttribute('aria-label','Resume a project');resumeProject.setAttribute('aria-label','Project to resume');
@@ -108,10 +104,9 @@
     if(!resumeDialog.open)resumeDialog.showModal();
   }
   J.on('project-resume',applyResume);
-  const resumeButton=button('Resume project',()=>{menu.hidden=true;resumeProject.value=store.get('lastProject','Jarvis');resumeDialog.showModal();});resumeButton.id='resumeProjectBtn';menu.prepend(resumeButton);
+  J.menuItem('projects','Resume a project',()=>{resumeProject.value=store.get('lastProject','Jarvis');resumeDialog.showModal();},'resumeProjectBtn');
 
-  const orbButton=button('Desktop orb',async()=>{menu.hidden=true;try{await J.api('/desktop-orb',{});J.notice('Desktop orb opened.');}catch(e){J.notice(e.message);}});
-  orbButton.id='desktopOrbBtn';menu.prepend(orbButton);
+  J.menuItem('view','Desktop orb',async()=>{try{await J.api('/desktop-orb',{});J.notice('Desktop orb opened.');}catch(e){J.notice(e.message);}},'desktopOrbBtn');
   if(new URLSearchParams(location.search).get('compact')==='1'){
     document.body.classList.add('native-orb');J.setCompact(true);
     const chrome=make('div',null,'orb-chrome'),drag=make('span','JARVIS','pywebview-drag-region');

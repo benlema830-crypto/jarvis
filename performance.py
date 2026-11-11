@@ -9,7 +9,6 @@ the current one on real use (and with scripts/benchmark_models.py on a fixed pro
 """
 import json
 import statistics
-import sys
 import threading
 import time
 from collections import defaultdict
@@ -38,9 +37,9 @@ def record_turn(provider, model, local, first_sentence, total, outcome):
 
 
 def under_test() -> bool:
-    """True when the process was started by unittest (same rule as task_effort.record)."""
-    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
-    return bool(spec and spec.name.startswith("unittest"))
+    """True during any test run (see testing_guard.py)."""
+    import testing_guard
+    return testing_guard.under_test()
 
 
 def _rows(path, since):

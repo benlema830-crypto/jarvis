@@ -97,22 +97,12 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
           "/holo.js": ("holo.js", "text/javascript"),
           "/experience.js": ("experience.js", "text/javascript"),
+          "/console.js": ("console.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
-PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel"},
+PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel",
+                 "/home"},
          "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control"}}
-
-
-def notify_assistant(event):
-    """Focus drift/completion -> the assistant, which turns it into a short spoken callout."""
-    import urllib.request
-    from instance_config import HUD_PORT
-    try:
-        request = urllib.request.Request(f"http://127.0.0.1:{HUD_PORT}/notify", data=json.dumps(event).encode(),
-                                         headers={"Content-Type": "application/json"}, method="POST")
-        urllib.request.urlopen(request, timeout=3).close()
-    except OSError:
-        pass  # the assistant may be offline; the Brain still shows the count
 
 
 def serve():
@@ -121,9 +111,6 @@ def serve():
     import urllib.request
     import urllib.error
     from instance_config import HUD_PORT
-    from visual_modes import controller as visuals
-    from eyes import controller as eyes
-    visuals.on_event = notify_assistant
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -171,22 +158,6 @@ def serve():
                 p=self.payload(30000)
                 privacy.configure(p.get('terms',[]),p.get('email',False),p.get('phone',False))
                 return memory.edit('scrub',memory.revision()),200
-            if route == '/digests' and (get or post):
-                import digests
-                if get: return digests.load(),200
-                p=self.payload(16000); action=p.pop('action',None)
-                if action=='configure': return digests.configure(p),200
-                if action=='save': return digests.upsert(p),200
-                if action=='delete': return digests.remove(p.get('id')),200
-                if action=='run': return digests.run(p.get('id')),200
-                if action=='report': return digests.report(p.get('id')),200
-                raise ValueError('Unknown digest action.')
-            if route == '/artifacts' and (get or post):
-                import artifacts
-                if get: return {'files':artifacts.catalog()},200
-                p=self.payload(310000)
-                if p.get('action')=='open': return artifacts.open_file(p.get('name')),200
-                return artifacts.create(p.get('format'),p.get('spec')),200
             if route == "/project-memory" and post:
                 import project_memory
                 payload = self.payload(26000)
@@ -211,52 +182,12 @@ def serve():
             if route == "/knowledge-search" and post:
                 import semantic_search
                 return semantic_search.search(self.payload(4000).get('query', '')), 200
-            if route == "/routines" and (get or post):
-                import routines
-                if get:
-                    return {'routines': routines.catalog()}, 200
-                payload = self.payload(16000)
-                action = payload.get('action')
-                if action == 'preview':
-                    return routines.preview(payload.get('name', '')), 200
-                if action == 'save':
-                    return routines.save(payload.get('name', ''), payload.get('definition')), 200
-                if action == 'run':
-                    return routines.run(payload.get('token', '')), 200
-                if action == 'cancel':
-                    return routines.cancel(), 200
-                raise ValueError('Unknown routine action.')
-            if route == "/visual-modes" and (get or post):
-                if get:
-                    return visuals.snapshot(), 200
-                return visuals.request(self.payload(1000)), 200
-            if route == "/focus-apps" and get:
-                from visual_modes import running_apps
-                return {"apps": running_apps()}, 200
-            if route == "/eyes" and (get or post):
-                if get:
-                    return eyes.snapshot(), 200
-                request = self.payload(900_000)
-                if request.get("action") == "coach":  # periodic glance, only while Eyes are on
-                    if eyes.snapshot()["on"]:
-                        notify_assistant({"event": "eyes_check"})
-                    return eyes.snapshot(), 200
-                return eyes.request(request), 200
             if route == "/orbit" and get:
                 import orbit
                 return orbit.snapshot(), 200
             if route == "/tasks" and get:
                 import tasks
                 return {"tasks": tasks.items()}, 200
-            if route == "/eyes/frame" and get:
-                if self.headers.get("Origin"):
-                    raise PermissionError()
-                try:
-                    jpeg, age = eyes.latest()
-                except LookupError as error:
-                    return {"error": str(error)}, 404
-                import base64
-                return {"jpeg": base64.b64encode(jpeg).decode(), "age": age}, 200
             if route == "/holo" and get:
                 import holo_bridge
                 return holo_bridge.status(), 200
@@ -285,9 +216,6 @@ def serve():
             if route == "/mcp/oauth" and post:
                 import mcp_oauth
                 return mcp_oauth.manage(self.payload(16000)), 200
-            if route == "/build-plan" and get:
-                plan = ROOT / "docs" / "plans" / "NIGHT-BUILD-PROMPT.txt"
-                return {"text": plan.read_text(encoding="utf-8") if plan.is_file() else ""}, 200
             return None
 
         def dispatch(self):
@@ -310,10 +238,6 @@ def serve():
                 return self.send_error(403)
             except (ValueError, UnicodeError) as error:
                 return self.reply({"error": str(error)}, 400)
-            if route == "/stop" and self.command == "POST":
-                import routines
-                routines.cancel()
-                visuals.stop()  # Brain's Stop also ends local observation, even with the assistant offline
             if self.path not in PROXY.get(self.command, set()):
                 return self.send_error(404)
             self.proxy()
@@ -376,14 +300,9 @@ def serve():
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True
-    import digests
-    digest_stop = digests.start()
     try:
         server.serve_forever()
     finally:
-        digest_stop.set()
-        visuals.stop()
-        eyes.request({"action": "stop"})
         server.server_close()
 
 

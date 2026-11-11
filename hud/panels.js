@@ -1,4 +1,4 @@
-/* JARVIS Brain dialogs: armory, activity, tasks & agents, model, voice health, reader, workspace.
+/* JARVIS Brain dialogs: armory, activity, tasks & agents, model, voice health, reader, workspace, More menu.
    Opening a dialog never connects an account, runs a tool or starts capture. */
 'use strict';
 (() => {
@@ -161,7 +161,6 @@
     renderArmory();
   }
   armorySearch.oninput = renderArmory;
-  el('armoryBtn').onclick = () => { armory.showModal(); renderArmory(); loadArmory(); };
 
   const mcp = dialog('mcpDialog', 'Add a tool', "Paste the server's MCP endpoint (Streamable HTTP). Connecting only discovers tools; JARVIS asks you before each call.", true);
   const form = make('form', null, 'form');
@@ -376,26 +375,17 @@
     } catch (e) { wsNote.textContent = e.message; }
   }
 
-  /* ---------- Next steps (build plan) ---------- */
-  const plan = dialog('planDialog', 'Next steps', 'The current build brief for JARVIS. Prepare fills the command bar; nothing starts until you send it.');
-  const planText = make('pre', '', 'plan'), prepare = make('button', 'Prepare build task', 'primary'); prepare.type = 'button';
-  plan.body.append(planText, prepare);
-  prepare.onclick = () => { plan.close(); J.prepare('Open a Codex agent session named Jarvis Builder in the Jarvis project, then have Jarvis Builder implement the task in docs/plans/NIGHT-BUILD-PROMPT.txt in work mode. Start only that task.'); };
-  async function showPlan() { plan.showModal(); try { planText.textContent = (await J.api('/build-plan')).text || 'No build brief saved.'; } catch (e) { planText.textContent = e.message; } }
-
-  /* ---------- More menu ---------- */
+  /* ---------- More menu: everything that isn't needed every minute, in four groups ---------- */
   const menu = el('moreMenu');
-  const items = [
-    ['Voice health', () => { health.showModal(); renderHealth(); loadPacing(); }], ['Change model…', () => J.emit('open-model')],
-    ['Workspace folders', showWorkspace], ['Next steps', showPlan], null,
-    ['Keyboard: / search · F fit · Esc clear', null],
-  ];
-  for (const item of items) {
-    if (!item) { menu.append(make('hr')); continue; }
-    const b = make('button', item[0]); b.type = 'button'; b.setAttribute('role', 'menuitem');
-    if (item[1]) b.onclick = () => { menu.hidden = true; item[1](); }; else b.disabled = true;
-    menu.append(b);
+  for (const [key, title] of Object.entries(J.menuGroups)) {
+    const box = make('div', null, 'menu-group'); box.dataset.group = key; box.hidden = true;
+    box.append(make('small', title)); menu.append(box);
   }
+  for (const item of J.menuQueue.splice(0)) J.menuItem(...item);
+  J.menuItem('jarvis', 'Change model…', () => J.emit('open-model'), 'changeModelBtn');
+  J.menuItem('jarvis', 'Voice health', () => { health.showModal(); renderHealth(); loadPacing(); }, 'voiceHealthBtn');
+  J.menuItem('tools', 'Tool armory', () => { armory.showModal(); renderArmory(); loadArmory(); }, 'armoryBtn');
+  J.menuItem('tools', 'Workspace folders', showWorkspace, 'workspaceBtn');
   el('moreBtn').onclick = e => {
     e.stopPropagation(); menu.hidden = !menu.hidden;
     const r = el('moreBtn').getBoundingClientRect();

@@ -31,6 +31,16 @@ const J = window.J = {
     catch (e) { J.notice(e.message); }
   },
   online: false, health: null, mode: 'wake',
+  // More menu. Scripts add entries to a named group; panels.js draws the groups in this order.
+  menuGroups: { projects: 'Projects', jarvis: 'Jarvis', view: 'View', tools: 'Tools' },
+  menuQueue: [],
+  menuItem(group, label, action, id) {
+    const box = document.querySelector(`#moreMenu [data-group="${group}"]`);
+    if (!box) { this.menuQueue.push([group, label, action, id]); return; }
+    const b = make('button', label); b.type = 'button'; b.setAttribute('role', 'menuitem'); if (id) b.id = id;
+    b.onclick = () => { $('moreMenu').hidden = true; action(); };
+    box.append(b); box.hidden = false;
+  },
 };
 
 // Rendering yields to speech workloads and returns to the saved quality afterwards.
@@ -763,7 +773,7 @@ J.on('audio', ev => {
 J.on('level', v => { level = Math.min(1, Math.max(0, v * 4)); levelAt = performance.now(); });
 
 // Clicking the hologram swaps it with the graph; the view morphs where the browser supports view transitions.
-function setStage(jarvisMain, animate = true) {
+function setStage(jarvisMain, animate = true, remember = true) {
   const apply = () => {
     graphMini = jarvisMain;
     document.body.classList.toggle('jarvis-main', jarvisMain);
@@ -771,7 +781,7 @@ function setStage(jarvisMain, animate = true) {
     $('tooltip').hidden = true;
     const label = jarvisMain ? 'Show the knowledge graph' : 'Make JARVIS the main view';
     $('stageSlot').title = label; $('stageSlot').setAttribute('aria-label', label);
-    store.set('stage', jarvisMain ? 'jarvis' : 'graph');
+    if (remember) store.set('stage', jarvisMain ? 'jarvis' : 'graph');
     resize(); frame(performance.now()); J.emit('stage', jarvisMain);
   };
   if (!animate || !document.startViewTransition || reduced.matches) { apply(); return; }
@@ -781,6 +791,7 @@ function setStage(jarvisMain, animate = true) {
   document.startViewTransition(once); setTimeout(once, 400);
 }
 $('stageSlot').onclick = () => setStage(!graphMini);
+J.setStage = setStage;
 J.setCompact = enabled => { document.body.classList.toggle('compact-orb',!!enabled);setStage(true,false); };
 document.querySelector('.right').addEventListener('scroll', () => { if (graphMini) resize(); });
 
@@ -863,7 +874,6 @@ function addMessage(ev) {
 $('historyToggle').onclick = () => { const log = $('chatLog'); log.hidden = !log.hidden; $('historyToggle').textContent = log.hidden ? 'history' : 'hide'; log.scrollTop = 1e9; };
 $('command').onsubmit = e => { e.preventDefault(); const text = $('prompt').value.trim(); if (!text) return; if (!J.online) { J.notice('JARVIS is offline. Open the JARVIS Brain shortcut to start him.'); return; } $('prompt').value = ''; J.send(text); };
 $('stop').onclick = async () => { try { await J.api('/stop', {}); J.notice('Stopped.'); } catch (e) { J.notice(e.message); } J.emit('stop'); };
-$('screenBtn').onclick = () => J.prepare('Look at my screen and tell me what you see.');
 $('micBtn').onclick = async () => {
   try { const s = await J.api('/settings', { listening_mode: J.mode === 'wake' ? 'continuous' : 'wake' }); settings(s); }
   catch (e) { J.notice(e.message); }
@@ -940,6 +950,7 @@ stream.onmessage = e => {
   if (ev.type === 'hello') {
     $('chatLog').replaceChildren(); chat.turn = [];
     uiState = ev.state || uiState;
+    J.emit('reset');
     for (const h of ev.history || []) { addMessage(h); J.emit('event', { ...h, replay: true }); }
     J.emit('hello', ev);
   } else if (ev.type === 'state') { uiState = ev.state; renderStatus(); }

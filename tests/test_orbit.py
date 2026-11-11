@@ -50,8 +50,10 @@ class OrbitTest(unittest.TestCase):
     def test_events_within_a_day_soonest_first(self):
         now = datetime.datetime.now().astimezone()
         events = [{"start": now + datetime.timedelta(hours=h), "title": f"E{h}", "location": "", "all_day": False} for h in (1, 3, 30)]
+        # Without this the snapshot also asked Spotify what's playing, with the owner's real sign-in.
         with mock.patch.object(context, "calendar_urls", return_value=["https://example.com/c.ics"]), \
-                mock.patch.object(context, "event_list", return_value=events):
+                mock.patch.object(context, "event_list", return_value=events), \
+                mock.patch.object(music, "configured", return_value=False):
             listed = orbit.snapshot()["events"]
         self.assertEqual([e["title"] for e in listed], ["E1", "E3"])
         with mock.patch.object(context, "calendar_urls", return_value=[]):

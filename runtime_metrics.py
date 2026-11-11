@@ -3,7 +3,6 @@ from collections import deque
 from contextlib import contextmanager
 import json
 import math
-import sys
 from pathlib import Path
 import threading
 import time
@@ -70,8 +69,8 @@ def _row():
 
 
 def _under_test():
-    spec = getattr(sys.modules.get('__main__'), '__spec__', None)
-    return bool(spec and spec.name.startswith('unittest'))
+    import testing_guard
+    return testing_guard.under_test()
 
 
 def _save(row):

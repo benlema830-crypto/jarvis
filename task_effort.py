@@ -13,7 +13,6 @@ User stops aren't counted as failures. Data stays in data/task_effort.jsonl.
 """
 import json
 import re
-import sys
 import threading
 import time
 from pathlib import Path
@@ -82,8 +81,8 @@ def choose(kind: str, task: str, normal: str, higher: str) -> tuple[str, str]:
 
 def record(kind: str, task: str, effort: str, ok: bool, seconds: float, report: str = "",
            steps: int = 0, escalated: bool = False, stopped_by_user: bool = False):
-    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
-    if PATH == DEFAULT_PATH and spec and spec.name.startswith("unittest"):
+    import testing_guard
+    if PATH == DEFAULT_PATH and testing_guard.under_test():
         return  # test runs exercise agents with fake tasks; keep them out of the real history
     row = {"t": time.time(), "kind": kind, "words": sorted(words(task)), "effort": effort, "ok": bool(ok),
            "seconds": round(seconds, 1), "steps": steps, "escalated": escalated,

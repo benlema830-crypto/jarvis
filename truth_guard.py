@@ -39,7 +39,7 @@ _QUOTED = re.compile(r"[\"“][^\"”]*[\"”]")  # words about a claim aren't o
 _NOT_A_REPORT = re.compile(r"\b(?:if|once|when|after|before|until|unless|whether|haven'?t|hadn'?t|didn'?t|never|not)\b[^.,;]*$", re.I)
 
 # Tools whose output is written by someone else and may try to give Jarvis instructions.
-UNTRUSTED_TOOLS = {"check_email", "read_email", "read_clipboard", "look_at_screen", "look_through_camera",
+UNTRUSTED_TOOLS = {"check_email", "read_email", "read_clipboard", "look_at_screen",
                    "web_search", "WebSearch", "WebFetch", "call_mcp_tool"}
 
 # "The TV is on." "They're off now." A statement about the state of a thing, ending the clause, so that
@@ -54,12 +54,12 @@ _LOOKED = re.compile(r"\bI(?:'ve|’ve| have)?(?: just| now| already| also)? "
 
 # Tools that only look. Everything else changes something, and only those can back "I've done it".
 READ_TOOLS = frozenset({
-    "home_status", "list_apps", "find_files", "read_clipboard", "look_at_screen", "look_through_camera",
+    "home_status", "list_apps", "find_files", "read_clipboard", "look_at_screen",
     "self_check", "system_status", "get_schedule", "get_weather", "recent_activity", "recall_memory",
     "review_memory_proposals", "performance_report", "list_reminders", "agent_status", "terminal_status",
     "list_app_windows", "agent_session_status", "list_agent_sessions", "search_knowledge", "read_knowledge_note",
     "read_file", "search_text", "list_mcp_tools", "list_tasks", "check_email", "read_email", "research_status",
-    "last_youtube_video", "web_search", "WebSearch", "WebFetch", "show_search_results"})
+    "web_search", "WebSearch", "WebFetch", "show_search_results"})
 # Tools whose normal return is itself the proof: they write a local record and read it back or fail loudly.
 PROVEN_BY_RETURN = frozenset({
     "remember", "update_memory", "correct_memory", "forget", "set_reminder", "cancel_reminder", "add_task",

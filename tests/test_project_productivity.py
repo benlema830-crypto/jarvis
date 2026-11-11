@@ -1,12 +1,10 @@
 from pathlib import Path
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
 import knowledge
 import project_memory as memory
-import routines
 import semantic_search as search
 
 
@@ -20,8 +18,7 @@ class ProductivityTests(unittest.TestCase):
         for module, field, value in [(knowledge, 'VAULT', self.vault),
                 (search, 'STORE', self.root / 'vectors.sqlite'), (memory, 'ROOT', self.root),
                 (memory, 'STORE', self.root / 'handoffs'),
-                (memory, 'PROJECTS', {'Jarvis': self.root, 'Rocket Frontier': self.root}),
-                (routines, 'STORE', self.root / 'routines.json'), (routines, 'REVIEWS', {})]:
+                (memory, 'PROJECTS', {'Jarvis': self.root, 'Rocket Frontier': self.root})]:
             p = patch.object(module, field, value); p.start(); self.addCleanup(p.stop)
 
     def test_handoff_evidence_and_claims_do_not_nest_history(self):
@@ -42,39 +39,6 @@ class ProductivityTests(unittest.TestCase):
         for name in ['../Jarvis', 'C:/', 'Unknown']:
             with self.assertRaises(ValueError): memory.status(name)
         with self.assertRaises(ValueError): memory.handoff('Jarvis', summary='x'*6001)
-
-    def test_review_has_no_effect_and_token_is_one_use(self):
-        with patch.object(routines, 'execute_step', return_value={'ok': True}) as effect:
-            review = routines.preview('Development mode')
-            effect.assert_not_called()
-            result = routines.run(review['token'])
-            self.assertEqual(result['status'], 'completed')
-            self.assertEqual(effect.call_count, 4)
-            with self.assertRaises(ValueError): routines.run(review['token'])
-
-    def test_expired_or_modified_review_does_not_run(self):
-        with patch.object(routines, 'execute_step') as effect:
-            review = routines.preview('Wrap up')
-            routines.REVIEWS[review['token']]['expires'] = time.monotonic()-1
-            with self.assertRaises(ValueError): routines.run(review['token'])
-            review = routines.preview('Wrap up')
-            routines.save('Wrap up', {'project':'Jarvis', 'steps':[{'action':'tasks'}]})
-            with self.assertRaises(ValueError): routines.run(review['token'])
-            effect.assert_not_called()
-
-    def test_failure_stops_remaining_steps_no_automatic_retry(self):
-        with patch.object(routines, 'execute_step', side_effect=[{'ok':True}, OSError('injected')]) as effect:
-            review = routines.preview('Development mode')
-            result = routines.run(review['token'])
-            self.assertEqual(result['status'], 'stopped')
-            self.assertEqual(effect.call_count, 2)
-            self.assertEqual([s['status'] for s in result['steps']], ['completed', 'failed'])
-
-    def test_routines_reject_arbitrary_commands_and_extra_fields(self):
-        for step in [{'action':'shell', 'command':'anything'}, {'action':'tasks', 'command':'anything'},
-                     {'action':'focus', 'app':'Code.exe', 'minutes':True},
-                     {'action':'focus', 'app':'../Code.exe', 'minutes':30}]:
-            with self.assertRaises(ValueError): routines.save('No', {'project':'Jarvis','steps':[step]})
 
     def test_semantic_cache_changes_deletions_and_vault_scope(self):
         knowledge.create('Save.md', '# Persistence\nStore the game state after disconnect.')
@@ -108,29 +72,6 @@ class ProductivityTests(unittest.TestCase):
         with patch.dict('os.environ', {'JARVIS_OLLAMA_ENABLED':'1'}), patch.object(search, '_request', side_effect=[{'models':[{'name':search.MODEL,'digest':'d'}]},
                 {'capabilities':['embedding'], 'remote_host':'external'}]):
             with self.assertRaises(ValueError): search.identity()
-
-    def test_cancel_stops_between_steps(self):
-        def first(*args):
-            routines.cancel()
-            return {'done': True}
-        with patch.object(routines, 'execute_step', side_effect=first) as effect:
-            result = routines.run(routines.preview('Development mode')['token'])
-            self.assertEqual(result['status'], 'cancelled')
-            self.assertEqual(effect.call_count, 1)
-
-    def test_voice_decline_never_runs_routine(self):
-        import tools
-        import approvals
-        import queue
-        review = {'project':'Jarvis', 'descriptions':['Open folder'], 'token':'token'}
-        commands = queue.Queue()
-        with patch.object(tools, '_brain', return_value=review) as brain, \
-                patch.object(approvals, 'ask', return_value=(False, 'no')), patch.object(tools.hud, 'commands', commands):
-            result = tools.named_routine.call({'action':'run', 'name':'Development mode'})
-            self.assertIn('confirmation', result)  # approval is asked after the turn, never assumed
-            self.assertIn('not approved', commands.get(timeout=5)['say'])
-            self.assertEqual(brain.call_count, 1)
-
 
 if __name__ == '__main__':
     unittest.main()

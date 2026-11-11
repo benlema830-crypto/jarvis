@@ -1,9 +1,6 @@
-/* EYES · WATCH · HOLO · FOCUS. Each mode starts only from an explicit click here or a spoken
-   request JARVIS forwards to this page; nothing starts when the page loads.
-   EYES:  camera frames go to this PC's Brain server (newest frame only, memory only).
-   WATCH: masked desktop preview every 5 s, memory only, needs this page visible.
-   HOLO:  hand tracking runs in this page (MediaPipe); landmarks never leave the browser.
-   FOCUS: foreground app names only; JARVIS calls out drift if you let him. */
+/* HOLO hand control. It starts only from an explicit click here or a spoken request JARVIS forwards to
+   this page; nothing starts when the page loads. Hand tracking runs in this page (MediaPipe); landmarks
+   never leave the browser. */
 'use strict';
 (() => {
   const el = id => document.getElementById(id);
@@ -11,7 +8,6 @@
   const toggles = Object.fromEntries([...document.querySelectorAll('.mode')].map(b => [b.dataset.mode, b]));
   const sections = {};
   let openMode = null;
-  const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   function setToggle(mode, text, cls) {
     const b = toggles[mode]; b.querySelector('em').textContent = text;
     b.classList.remove('on', 'busy', 'error'); if (cls) b.classList.add(cls);
@@ -54,12 +50,6 @@
     cam.users.delete(user);
     if (!cam.users.size && cam.stream) { cam.stream.getTracks().forEach(t => t.stop()); cam.stream = null; cam.video.srcObject = null; }
   }
-  // Worker timers keep firing while the Brain tab is in the background (window timers get throttled).
-  function ticker(ms, fn) {
-    const url = URL.createObjectURL(new Blob([`setInterval(()=>postMessage(0),${ms})`], { type: 'text/javascript' }));
-    const worker = new Worker(url); worker.onmessage = fn; URL.revokeObjectURL(url);
-    return () => worker.terminate();
-  }
   function preview(canvas, overlay) {
     const ctx = canvas.getContext('2d');
     (function paint() {
@@ -72,121 +62,7 @@
     })();
   }
 
-  /* ---------- EYES ---------- */
-  const eyes = { on: false, stopTicker: null, stopCoach: null, coach: false, error: '', last: 0 };
-  const eyesBox = section('eyes', 'Eyes · camera');
-  const eyesStatus = make('div', '', 'status'), eyesCanvas = make('canvas', null, 'cam mirror');
-  const eyesBtn = button('Turn on', () => eyes.on ? eyesStop() : eyesStart(), 'primary');
-  const coachLabel = make('label', null, 'check'), coach = make('input'); coach.type = 'checkbox';
-  coachLabel.append(coach, document.createTextNode('Coach me: every 5 minutes JARVIS glances over and speaks up only about posture, your phone or tiredness.'));
-  coach.onchange = () => { eyes.coach = coach.checked; eyes.coach && eyes.on ? startCoach() : stopCoach(); };
-  eyesBox.append(make('p', 'Lets JARVIS see you through your webcam. Ask "Jarvis, what do you see?" while this is on. Only the newest frame is kept, in memory on this PC, and it expires 12 seconds after Eyes turn off.'),
-    coachLabel, make('div', null, 'actions'), eyesStatus, eyesCanvas);
-  eyesBox.querySelector('.actions').append(eyesBtn);
-  const grab = make('canvas');
-  async function sendFrame() {
-    if (!eyes.on || !cam.video.videoWidth) return;
-    grab.width = 640; grab.height = Math.round(640 * cam.video.videoHeight / cam.video.videoWidth);
-    grab.getContext('2d').drawImage(cam.video, 0, 0, grab.width, grab.height);
-    try { await J.api('/eyes', { action: 'frame', jpeg: grab.toDataURL('image/jpeg', .72).split(',')[1] }, { timeout: 5000 }); eyes.last = Date.now(); eyes.error = ''; }
-    catch (e) { eyes.error = e.message; }
-    updateEyes();
-  }
-  function startCoach() { stopCoach(); eyes.stopCoach = ticker(300000, () => J.api('/eyes', { action: 'coach' }).catch(() => {})); }
-  function stopCoach() { eyes.stopCoach?.(); eyes.stopCoach = null; }
-  async function eyesStart() {
-    setToggle('eyes', '…', 'busy');
-    try { await cameraOn('eyes'); eyes.on = true; eyes.error = ''; await sendFrame(); eyes.stopTicker = ticker(3000, sendFrame); if (eyes.coach) startCoach(); }
-    catch (e) { eyes.error = e.message; }
-    updateEyes(); if (openMode === 'eyes') preview(eyesCanvas);
-  }
-  function eyesStop() {
-    eyes.on = false; eyes.stopTicker?.(); eyes.stopTicker = null; stopCoach(); cameraOff('eyes');
-    J.api('/eyes', { action: 'stop' }).catch(() => {}); updateEyes();
-  }
-  function updateEyes() {
-    eyesBtn.textContent = eyes.on ? 'Turn off' : 'Turn on';
-    eyesStatus.textContent = eyes.error || (eyes.on ? `Seeing · last frame ${Math.round((Date.now() - eyes.last) / 1000)}s ago` : 'Off. The camera is not in use.');
-    eyesCanvas.hidden = !eyes.on;
-    setToggle('eyes', eyes.error && !eyes.on ? 'error' : eyes.on ? 'on' : 'off', eyes.error && !eyes.on ? 'error' : eyes.on ? 'on' : '');
-  }
-  updateEyes();
-
-  /* ---------- WATCH and FOCUS (shared local visual-mode backend) ---------- */
-  let visual = null, visualError = '', polling = false;
-  async function vm(payload) { return J.api('/visual-modes', payload, { timeout: 6000 }); }
-  async function pollVisual() {
-    if (polling) return; polling = true;
-    try {
-      const active = visual && ['starting', 'running'].includes(visual.state);
-      visual = active && visual.needs_heartbeat && visual.session && !document.hidden
-        ? await vm({ action: 'heartbeat', session: visual.session }) : await vm();
-      visualError = '';
-    } catch (e) { visualError = e.message; if (visual) visual = await vm().catch(() => null); }
-    finally { polling = false; renderVisual(); }
-  }
-  async function visualStart(payload) {
-    try { visual = await vm({ action: 'start', ...payload }); visualError = ''; } catch (e) { visualError = e.message; }
-    renderVisual();
-  }
-  async function visualStop() { try { visual = await vm({ action: 'stop' }); } catch (e) { visualError = e.message; } renderVisual(); }
-  J.on('stop', visualStop);
-  document.addEventListener('visibilitychange', () => { if (document.hidden && visual?.mode === 'watch' && ['starting', 'running'].includes(visual.state)) visualStop(); });
-
-  const watchBox = section('watch', 'Watch · screen');
-  const watchMinutes = make('input'); watchMinutes.type = 'number'; watchMinutes.min = 1; watchMinutes.max = 30; watchMinutes.value = 15;
-  const watchStatus = make('div', '', 'status'), watchImg = make('img'); watchImg.alt = 'Latest masked desktop preview';
-  const watchBtn = button('Start', () => active('watch') ? visualStop() : visualStart({ mode: 'watch', minutes: Number(watchMinutes.value) }), 'primary');
-  const watchLabel = make('label', 'Minutes (1–30)');
-  watchBox.append(make('p', 'Shares a masked desktop preview every 5 seconds, held in memory only. Work apps are blacked out. Keep this page visible; hiding it stops Watch. JARVIS can also look at your screen any time you ask.'),
-    watchLabel, watchMinutes, make('div', null, 'actions'), watchStatus, watchImg);
-  watchBox.querySelector('.actions').append(watchBtn);
-
-  const focusBox = section('focus', 'Focus lock');
-  const focusApp = make('select'), focusOther = make('input'), focusMinutes = make('input');
-  focusOther.placeholder = 'or type an app, e.g. Code.exe'; focusOther.maxLength = 84;
-  focusMinutes.type = 'number'; focusMinutes.min = 1; focusMinutes.max = 120; focusMinutes.value = 30;
-  const callLabel = make('label', null, 'check'), callouts = make('input'); callouts.type = 'checkbox'; callouts.checked = store.get('focusCallouts', true);
-  callouts.onchange = () => store.set('focusCallouts', callouts.checked);
-  callLabel.append(callouts, document.createTextNode('JARVIS calls me out when I drift'));
-  const focusBtn = button('Start focus', () => active('focus') ? visualStop() : visualStart({ mode: 'focus', minutes: Number(focusMinutes.value), target: (focusOther.value.trim() || focusApp.value), callouts: callouts.checked }), 'primary');
-  const focusStatus = make('div', '', 'status'), evidence = make('ul');
-  focusBox.append(make('p', 'Lock onto one app for a set time. JARVIS watches only which app is in front (no screenshots) and counts a drift when you stay away for 5+ seconds.'),
-    make('label', 'App'), focusApp, focusOther, make('label', 'Minutes (1–120)'), focusMinutes, callLabel, make('div', null, 'actions'), focusStatus, evidence);
-  focusBox.querySelector('.actions').append(focusBtn);
-  J.on('mode-panel', async mode => {
-    if (mode === 'eyes' && eyes.on) preview(eyesCanvas);
-    if (mode === 'holo') { refreshHoloApp(); if (holo.on) preview(holoCanvas, drawHands); }
-    if (mode !== 'focus') return;
-    try {
-      const { apps } = await J.api('/focus-apps'), previous = focusApp.value || store.get('focusApp', '');
-      focusApp.replaceChildren(...apps.map(a => { const o = make('option', a); o.value = a; return o; }));
-      if (apps.includes(previous)) focusApp.value = previous;
-    } catch (e) { focusStatus.textContent = e.message; }
-  });
-  focusApp.onchange = () => store.set('focusApp', focusApp.value);
-
-  function active(mode) { return visual?.mode === mode && ['starting', 'running', 'stopping'].includes(visual.state); }
-  function renderVisual() {
-    const v = visual || {};
-    for (const mode of ['watch', 'focus']) {
-      if (!active(mode)) { setToggle(mode, v.mode === mode && v.state === 'error' ? 'error' : 'off', v.mode === mode && v.state === 'error' ? 'error' : ''); continue; }
-      const label = v.state === 'stopping' ? 'stopping' : fmt(v.remaining_seconds) + (mode === 'focus' ? ' · ' + v.drift_count : '');
-      setToggle(mode, label, v.state === 'running' ? 'on' : 'busy');
-    }
-    const other = mode => visual && active(mode === 'watch' ? 'focus' : 'watch');
-    watchBtn.textContent = active('watch') ? 'Stop' : 'Start'; watchBtn.disabled = other('watch');
-    focusBtn.textContent = active('focus') ? 'Stop focus' : 'Start focus'; focusBtn.disabled = other('focus');
-    const line = mode => !active(mode) ? (visualError || (v.mode === mode ? v.reason + ' ' + (v.error || '') : 'Off.')) :
-      `${v.state} · ${fmt(v.remaining_seconds)} left · ${v.observation}` + (mode === 'focus' ? ` · ${v.drift_count} drift${v.drift_count === 1 ? '' : 's'}` : '');
-    watchStatus.textContent = line('watch'); focusStatus.textContent = line('focus');
-    if (other('watch')) watchStatus.textContent = 'Focus is running; stop it first.';
-    if (other('focus')) focusStatus.textContent = 'Watch is running; stop it first.';
-    if (active('watch') && v.preview && openMode === 'watch') { watchImg.src = 'data:image/jpeg;base64,' + v.preview; watchImg.hidden = false; }
-    else { watchImg.hidden = true; watchImg.removeAttribute('src'); }
-    evidence.replaceChildren(...(v.mode === 'focus' ? (v.evidence || []).slice(-6).reverse() : []).map(e => make('li', `${fmt(e.elapsed_seconds)} — switched to ${e.process}`)));
-  }
-  setInterval(pollVisual, 2000); pollVisual();
+  J.on('mode-panel', mode => { if (mode === 'holo') { refreshHoloApp(); if (holo.on) preview(holoCanvas, drawHands); } });
 
   /* ---------- HOLO: hand control for this graph, plus the separate HOLO app ---------- */
   const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1';
@@ -335,13 +211,10 @@
   updateHolo();
   document.addEventListener('visibilitychange', () => { if (document.hidden && holo.on) holoStop(); });
 
-  /* ---------- Spoken control: JARVIS forwards "turn on your eyes" etc. as a ui event ---------- */
+  /* ---------- Spoken control: JARVIS forwards "turn on hand control" as a ui event ---------- */
   J.on('ui', ev => {
-    if (ev.replay || ev.action !== 'mode') return;
-    const on = ev.on === true;
-    if (ev.mode === 'eyes') on ? (eyes.on || eyesStart()) : (eyes.on && eyesStop());
-    else if (ev.mode === 'holo') on ? (holo.on || holoStart()) : (holo.on && holoStop());
-    else if (ev.mode === 'watch') on ? (active('watch') || visualStart({ mode: 'watch', minutes: 15 })) : (active('watch') && visualStop());
+    if (ev.replay || ev.action !== 'mode' || ev.mode !== 'holo') return;
+    ev.on === true ? (holo.on || holoStart()) : (holo.on && holoStop());
   });
-  addEventListener('pagehide', () => { if (eyes.on) eyesStop(); if (active('watch')) visualStop(); });
+  J.on('stop', () => { if (holo.on) holoStop(); });
 })();

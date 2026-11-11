@@ -335,19 +335,25 @@ addEventListener('load', async () => {
     assert($('modelDialog').querySelectorAll('select')[1].value === 'local:test', 'local model listed');
     $('modelDialog').close();
 
-    stage('focus'); document.querySelector('[data-mode=focus]').click(); assert(!$('modePanel').hidden, 'focus panel');
-    await wait(() => $('modePanel').querySelector('select').options.length === 2, 'focus apps');
-    $('modePanel').querySelector('select').value = 'code.exe';
-    [...$('modePanel').querySelectorAll('button')].find(b => b.textContent === 'Start focus').click();
-    await wait(() => window.posts.some(p => p.path === '/visual-modes' && p.body.mode === 'focus' && p.body.target === 'code.exe' && p.body.callouts === true), 'focus start');
-    await wait(() => document.querySelector('[data-mode=focus] em').textContent.includes('·'), 'focus toggle timer');
-
-    stage('eyes'); document.querySelector('[data-mode=eyes]').click();
-    assert($('modePanel').textContent.includes('Lets JARVIS see you') && document.querySelector('[data-mode=eyes] em').textContent === 'off', 'eyes panel, camera untouched');
+    stage('holo mode'); assert(document.querySelectorAll('.mode').length === 1, 'only the HOLO mode is left');
+    assert(!document.querySelector('[data-mode=eyes],[data-mode=watch],[data-mode=focus]'), 'removed modes are gone');
+    document.querySelector('[data-mode=holo]').click(); assert(!$('modePanel').hidden, 'holo panel');
+    assert($('modePanel').textContent.includes('Control this second brain with your hands') && document.querySelector('[data-mode=holo] em').textContent === 'off', 'holo panel, camera untouched');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     assert($('modePanel').hidden, 'escape closes panel');
 
+    stage('tidy layout');
+    assert(document.querySelectorAll('.command-row .round').length === 5, 'five dock buttons: mic, stop, activity, agents, more');
+    assert(!$('screenBtn') && !document.querySelector('.command-row #armoryBtn'), 'screen and armory left the dock');
+    assert(!$('graphSettings').open && $('graphSettings').contains($('repel')) && $('graphSettings').contains($('showStars')), 'graph settings folded away');
+    assert(!$('lookSettings').open && $('lookSettings').contains(document.querySelector('.appearance')) && $('lookSettings').contains(document.querySelector('.themes')), 'appearance folded away');
+    assert(document.querySelectorAll('.scope button').length === 3, 'one row of three scope choices');
+
     stage('menu'); $('moreBtn').click(); assert(!$('moreMenu').hidden, 'menu');
+    const groups = [...$('moreMenu').querySelectorAll('.menu-group:not([hidden])')].map(g => g.querySelector('small').textContent);
+    assert(groups.join() === 'Projects,Jarvis,View,Tools', 'menu grouped: ' + groups.join());
+    assert(!/Next steps|Scheduled digests|File tools|Keyboard:/.test($('moreMenu').textContent), 'stale menu entries removed');
+    assert($('moreMenu').querySelector('[data-group=tools]').contains($('armoryBtn')), 'armory lives in the menu');
     [...$('moreMenu').querySelectorAll('button')].find(b => b.textContent === 'Voice health').click();
     assert($('healthDialog').open && $('healthDialog').textContent.includes('Mock mic'), 'health');
     const healthButton=label=>[...$('healthDialog').querySelectorAll('button')].find(b=>b.textContent===label);
@@ -370,15 +376,8 @@ addEventListener('load', async () => {
     $('agentsDialog').close();
 
     stage('project tools'); $('projectToolsBtn').click();
-    await wait(() => $('routineSelect').options.length, 'routines loaded');
     const clickTool = label => [...$('projectToolsDialog').querySelectorAll('button')].find(b => b.textContent === label).click();
-    assert(!window.posts.some(p => p.path === '/routines' && p.body.action === 'run'), 'opening ran routine');
-    clickTool('Review saved steps');
-    await wait(() => $('projectToolResult').textContent.includes('Review only'), 'review displayed');
-    assert(!window.posts.some(p => p.path === '/routines' && p.body.action === 'run'), 'preview ran routine');
-    clickTool('Approve and run once');
-    await wait(() => $('projectToolResult').textContent.includes('completed'), 'routine result');
-    assert(window.posts.filter(p => p.path === '/routines' && p.body.action === 'run').length === 1, 'run once');
+    assert(!$('routineSelect') && !$('projectToolsDialog').textContent.includes('routine'), 'routines removed');
     clickTool('Where did we leave off?');
     await wait(() => $('projectToolResult').textContent.includes('fixture evidence'), 'project evidence');
     const query = $('projectToolsDialog').querySelector('[aria-label="Search vault by meaning"]'); query.value = 'player progress';
@@ -399,19 +398,61 @@ addEventListener('load', async () => {
     [...$('memoryDialog').querySelectorAll('button')].find(b=>b.textContent==='Save correction').click();
     await wait(()=>window.posts.some(p=>p.path==='/memory' && p.body.fact==='Likes coffee'),'memory correction');
     $('memoryDialog').close();
-    stage('digest tools'); $('digestToolsBtn').click();
-    await wait(()=>$('digestsDialog').textContent.includes('Nothing runs automatically.'),'empty schedules');
-    assert(!window.posts.some(p=>p.path==='/digests' && p.body.action==='run'),'opening ran digest');
-    [...$('digestsDialog').querySelectorAll('button')].find(b=>b.textContent==='Save schedule').click();
-    await wait(()=>window.posts.some(p=>p.path==='/digests' && p.body.action==='save'),'schedule save');
-    assert(window.posts.find(p=>p.path==='/digests' && p.body.action==='save').body.enabled===false,'schedule enabled by default');
-    $('digestsDialog').close();
-    stage('file tools');$('fileToolsBtn').click();
-    await wait(()=>$('filesDialog').open,'file dialog');
-    [...$('filesDialog').querySelectorAll('button')].find(b=>b.textContent==='Create file').click();
-    await wait(()=>$('filesDialog').textContent.includes('Created Sample.xlsx'),'artifact result');
-    assert(window.posts.find(p=>p.path==='/artifacts').body.spec.rows[0][1]===40,'numeric table parsing');
-    $('filesDialog').close();
+    assert(!$('digestToolsBtn') && !$('fileToolsBtn'), 'digest and file tools removed');
+
+    stage('console');
+    assert($('console').hidden && !document.body.classList.contains('view-console'), 'model view is the default');
+    const wasMain = document.body.classList.contains('jarvis-main');
+    $('viewConsole').click();
+    assert(document.body.classList.contains('view-console') && !$('console').hidden, 'console shown');
+    assert(getComputedStyle($('graph')).display === 'none' && getComputedStyle($('left')).display === 'none', 'graph and its panel step aside');
+    assert(!document.body.classList.contains('jarvis-main'), 'full-screen model steps aside for the console');
+    assert($('viewConsole').getAttribute('aria-pressed') === 'true' && JSON.parse(localStorage.getItem('jarvis.view')) === 'console', 'choice remembered');
+    const emit = v => window.testStream.emit({ t: 10, ...v });
+    emit({ type: 'you', text: '(Telegram) turn on the <img src=x onerror=alert(1)> TV' });
+    emit({ type: 'tool', name: 'home_control', input: { device: 'tv', action: 'turn_on' } });
+    emit({ type: 'result', name: 'home_control', ok: true, text: 'NOT CONFIRMED after 20 seconds' });
+    emit({ type: 'receipt', tool: 'home_control', about: 'tv', status: 'unknown' });
+    emit({ type: 'tool', name: 'run_command', input: { command: 'pytest -q' } });
+    emit({ type: 'result', name: 'run_command', ok: true, text: Array.from({ length: 30 }, (_, i) => 'line ' + i).join('\n') });
+    emit({ type: 'receipt', tool: 'run_command', about: 'pytest -q', status: 'confirmed' });
+    emit({ type: 'tool', name: 'edit_file', input: { path: 'a.py', old_text: 'x = 1', new_text: 'x = 2' } });
+    emit({ type: 'result', name: 'edit_file', ok: true, text: 'Edited a.py: replaced 1 place, checked on disk.' });
+    emit({ type: 'jarvis', text: 'I sent it, but the TV still reports off.' });
+    const last = $('consoleStream').lastElementChild;
+    assert(last.classList.contains('turn') && last.querySelector('.turn-text').textContent.includes('<img src=x'), 'request shown as text');
+    assert(!$('consoleStream').querySelector('img'), 'no markup from event text');
+    assert(last.querySelector('.via').textContent === 'Telegram', 'source label');
+    assert(last.querySelectorAll('.tool').length === 3, 'three tool rows');
+    assert(last.querySelector('.tool code').textContent === 'pytest -q', 'command shown');
+    assert(last.querySelectorAll('.out')[1].textContent.split('\n').length === 14, 'long output clipped');
+    [...last.querySelectorAll('button')].find(b => b.textContent === 'show all 30 lines').click();
+    assert(last.querySelectorAll('.out')[1].textContent.split('\n').length === 30, 'output expands');
+    assert(last.querySelector('.diff .del').textContent.includes('x = 1') && last.querySelector('.diff .add').textContent.includes('x = 2'), 'diff card');
+    const chips = [...last.querySelectorAll('.chip-proof')].map(c => c.textContent);
+    assert(chips.length === 2 && chips[0].includes('could not confirm') && chips[0].startsWith('?') && chips[1].includes('confirmed'), 'receipt chips: ' + chips.join(' | '));
+    assert(last.querySelector('.turn-say').textContent === 'I sent it, but the TV still reports off.', 'reply text');
+    assert($('railNeedsBox').hidden, 'nothing waiting yet');
+    emit({ type: 'event', text: 'Approval needed: Delete the old build?' });
+    assert(!$('railNeedsBox').hidden && $('railNeeds').textContent.includes('Delete the old build?'), 'approval card');
+    const sentBefore = window.posts.filter(p => p.path === '/command').length;
+    [...$('railNeeds').querySelectorAll('button')].find(b => b.textContent === 'No').click();
+    await wait(() => window.posts.filter(p => p.path === '/command').length === sentBefore + 1, 'answer sent');
+    assert(window.posts.filter(p => p.path === '/command').at(-1).body.text === 'no' && $('railNeedsBox').hidden, 'the answer is the owner\'s own word, and the card clears');
+    await wait(() => $('railHome').querySelectorAll('.home-tile').length === 3, 'home tiles');
+    assert($('railHome').querySelector('.home-tile.unknown b').textContent === 'unknown', 'an unavailable device reads unknown, never off');
+    await wait(() => $('railWork').textContent.includes('Frontier') && !$('railWork').textContent.includes('Docs'), 'only running work is listed');
+    await wait(() => $('railToday').textContent.includes('Dentist'), 'today');
+    $('prompt').value = ''; $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    assert($('prompt').value === 'TEST COMMAND', 'up arrow recalls the last typed command: ' + $('prompt').value);
+    $('prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); assert($('prompt').value === '', 'down returns to the draft');
+    dispatchEvent(new KeyboardEvent('keydown', { key: '.', ctrlKey: true }));
+    assert(!document.body.classList.contains('view-console') && $('console').hidden, 'Ctrl+. goes back to the model');
+    assert(document.body.classList.contains('jarvis-main') === wasMain, 'the model view comes back as it was left');
+    assert(getComputedStyle($('graph')).display !== 'none', 'graph is back');
+    window.testStream.emit({ type: 'hello', state: 'standby', history: [{ type: 'you', text: 'replayed', t: 3 }, { type: 'event', text: 'Approval needed: old question', t: 4 }] });
+    assert($('consoleStream').querySelectorAll('.turn').length === 1 && $('railNeedsBox').hidden, 'reconnect replays history without re-asking');
+
     stage('dimension'); $('dimension').click(); assert($('dimension').textContent === '2D', '2D');
     document.documentElement.dataset.check = 'passed';
   } catch (e) { document.documentElement.dataset.check = e.message; }
@@ -460,25 +501,25 @@ def serve(with_checks=True):
             if path == "/":
                 script = CHECK if with_checks else '<script>window.EventSource=class {close(){} addEventListener(){}};</script>'
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + script, 1), "text/html")
-            if path in ("/brain.js", "/holo.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/brain.css"):
+            if path in ("/brain.js", "/holo.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/console.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": graph_nodes, "links": graph_links, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},
                 "/voice-health": HEALTH, "/status": {"state": "standby", "info": {"model": "gpt-test"}, "cpu": 37, "mem": 58, "disk": 40,
                             "gpu": {"util": 22, "temp": 51}, "net_up": 42000, "net_down": 1800000, "uptime": 200000},
-                "/settings": {"listening_mode": "wake"}, "/visual-modes": visual, "/focus-apps": {"apps": ["chrome.exe", "code.exe"]},
+                "/settings": {"listening_mode": "wake"},
+                "/home": {"devices": [{"name": "Bedroom Fan", "domain": "switch", "state": "on"}, {"name": "Ceiling Light", "domain": "light", "state": "off"},
+                                      {"name": "Living Room TV", "domain": "media_player", "state": "unavailable"}], "error": "", "read_at": 0},
+                "/intel": {"schedule": "Tomorrow 10:30 Dentist.", "weather": "38 and overcast."},
                 "/models": {"active": {"provider": "codex", "model": "gpt-test"}, "pending": None, "validating": False, "error": "",
                             "ready": True, "credential": "n/a", "subscription_only": True, "models": {"codex": ["gpt-test"], "ollama": ["local:test"]}},
                 "/mcp": {"connections": [{"id": "saved-test", "name": "Saved test server", "host": "example.test",
                     "enabled": True, "discovery_state": "discovered", "checked_at": 123, "tools": []}]}, "/sessions": {"sessions": [{"name": "Frontier", "project": "Rocket Frontier", "status": "running", "task": "Playtest the build", "timeline":[{"label":"Reading source","status":"completed","started_at":123}]},
                     {"name": "Docs", "project": "Jarvis", "status": "completed", "report": "Done."}]}, "/tasks": {"tasks": []},
                 "/holo": {"installed": False, "running": False, "port": 4890, "path": ""},
-                "/workspace": {"folders": []}, "/build-plan": {"text": ""}, "/eyes": {"on": False, "age": None},
-                "/routines": {"routines": {"Wrap up": {"project":"Jarvis", "steps":[{"action":"tasks"}]}}},
+                "/workspace": {"folders": []},
                 '/memory': {'revision':'v1','facts':[{'id':'f1','fact':'Likes tea'}],'recent':[],
                     'privacy':{'terms':[],'email':False,'phone':False}},
-                '/digests': {'timezone':'America/Chicago','quiet_start':'22:00','quiet_end':'08:00','daily_limit':2,'jobs':[],'runs':[]},
-                '/artifacts': {'files':[]},
                 '/conversation-settings': {'pause_seconds':1.2,'followup_seconds':12,'first_clause_chars':85},
                 '/response-settings': {'humor':25,'directness':75,'detail':'brief','tone':'classic','pushback':'balanced','address':'occasionally'},
             }
@@ -492,7 +533,8 @@ def serve(with_checks=True):
                 from unittest.mock import patch
                 sys.path.insert(0, str(ROOT))
                 import integration_status
-                with patch("mcp_connections.connections", return_value=[]), patch("holo_bridge.find_install", return_value=None):
+                # The owner's real pairings must not decide a fixture's outcome.
+                with patch("mcp_connections.connections", return_value=[]), patch("holo_bridge.find_install", return_value=None),                         patch("telegram_bridge.BRIDGE.status", return_value={"token": False, "paired": False}):
                     return self.send(integration_status.snapshot())
             if path == "/events":
                 return self.send("retry: 100000\n\n", "text/event-stream")

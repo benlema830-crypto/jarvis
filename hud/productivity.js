@@ -1,4 +1,4 @@
-/* Local project tools. Reading a panel never runs a routine. */
+/* Project memory, handoffs and vault search. Opening the panel changes nothing. */
 'use strict';
 (() => {
   const d = make('dialog'); d.id = 'projectToolsDialog';
@@ -41,55 +41,6 @@
       output.append(link, make('p', note.excerpt));
     }
   }));
-  const select = make('select'); select.id = 'routineSelect'; select.setAttribute('aria-label', 'Named routine');
-  const name = make('input'); name.placeholder = 'Routine name'; name.setAttribute('aria-label', 'Routine name'); name.maxLength = 60;
-  const routineProject = make('select'); routineProject.setAttribute('aria-label', 'Routine project');
-  for (const value of ['Jarvis', 'Rocket Frontier', "Don't Wake the Giant", 'KnightShow']) routineProject.append(make('option', value));
-  const editor = make('div'); editor.setAttribute('aria-label', 'Routine steps');
-  const labels = {open_project:'Open project folder', project_status:'Read project status', tasks:'Show unfinished tasks', focus:'Start Focus', handoff:'Save session handoff'};
-  let draftSteps = [];
-  function renderSteps() {
-    editor.replaceChildren();
-    draftSteps.forEach((step, i) => {
-      const row = make('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center';
-      const action = make('select'); action.setAttribute('aria-label', `Step ${i+1}`);
-      for (const [value,label] of Object.entries(labels)) { const option = make('option',label); option.value=value; action.append(option); }
-      action.value = step.action;
-      action.onchange = () => { invalidate(); draftSteps[i] = action.value === 'focus' ? {action:'focus',app:'Code.exe',minutes:30} : {action:action.value}; renderSteps(); };
-      row.append(make('span',`${i+1}.`), action);
-      if (step.action === 'focus') {
-        const app = make('input'); app.value = step.app; app.placeholder = 'Code.exe'; app.setAttribute('aria-label','Focus app'); app.style.width = '180px';
-        const minutes = make('input'); minutes.type='number'; minutes.min=1; minutes.max=120; minutes.value=step.minutes; minutes.style.width='65px'; minutes.setAttribute('aria-label','Focus minutes');
-        app.oninput = () => { invalidate(); step.app=app.value; }; minutes.oninput = () => { invalidate(); step.minutes=Number(minutes.value); };
-        row.append(app,minutes,make('span','minutes'));
-      }
-      const up = button('↑', async () => { if (i) { invalidate(); [draftSteps[i-1],draftSteps[i]]=[draftSteps[i],draftSteps[i-1]]; renderSteps(); } }); up.setAttribute('aria-label',`Move step ${i+1} up`);
-      row.append(up,button('Remove',async () => { invalidate(); draftSteps.splice(i,1); renderSteps(); })); editor.append(row);
-    });
-  }
-  let definitions = {}, review = null;
-  const approve = button('Approve and run once', async () => {
-    if (!review) return;
-    const token = review.token; review = null; approve.hidden = true;
-    show(await post('/routines', {action:'run',token}));
-  }); approve.hidden = true;
-  const invalidate = () => { review = null; approve.hidden = true; };
-  const choose = () => { invalidate(); name.value = select.value; routineProject.value = definitions[select.value].project; draftSteps=structuredClone(definitions[select.value].steps); renderSteps(); };
-  select.onchange = choose; routineProject.onchange = invalidate; name.oninput = invalidate;
-  async function load() {
-    definitions = (await J.api('/routines')).routines; select.replaceChildren();
-    for (const key of Object.keys(definitions)) select.append(make('option', key)); choose();
-  }
-  d.addEventListener('close', invalidate);
-  d.append(make('h3', 'Named routines'), make('p', 'Choose a routine, adjust its steps, and save. Review the saved steps before each run. Change the name to save a new routine.'), select, name, routineProject, editor,
-    button('Add step',async () => { invalidate(); if (draftSteps.length<8) { draftSteps.push({action:'tasks'}); renderSteps(); } }),
-    button('Save routine', async () => { invalidate(); const savedName=name.value; show(await post('/routines', {action:'save', name:savedName, definition:{project:routineProject.value,steps:draftSteps}})); await load(); select.value=savedName; choose(); }),
-    button('Review saved steps', async () => {
-      invalidate(); review = await post('/routines', {action:'preview',name:select.value});
-      show(`${review.name} — ${review.project}\n\n${review.descriptions.map((s,i) => `${i+1}. ${s}`).join('\n')}\n\n${review.notice}`);
-      approve.hidden = false;
-    }), approve, button('Stop routine', async () => { invalidate(); show(await post('/routines',{action:'cancel'})); }), output);
-  const menu = document.getElementById('moreMenu');
-  const entry = button('Project tools', async () => { menu.hidden = true; d.showModal(); await load(); });
-  entry.id = 'projectToolsBtn'; entry.setAttribute('role','menuitem'); menu.prepend(entry);
+  d.append(output);
+  J.menuItem('projects', 'Project memory & search', () => d.showModal(), 'projectToolsBtn');
 })();

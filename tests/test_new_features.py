@@ -5,20 +5,14 @@ import tempfile
 import time
 import unittest
 from unittest import mock
-import zipfile
-import xml.dom.minidom
 
 import numpy as np
 
 import codex_brain
-import documents
-import eyes
 import holo_bridge
-import hud
 import knowledge
 import tasks
 import telegram_bridge
-import visual_modes
 import voice
 
 
@@ -117,26 +111,6 @@ class TasksTest(VaultTestCase):
         self.assertTrue((Path(self.folder.name) / "Tasks.md").read_text(encoding="utf-8").startswith("# Tasks"))
 
 
-class DocumentsTest(unittest.TestCase):
-    def test_docx_is_valid_and_never_overwrites(self):
-        with tempfile.TemporaryDirectory() as folder, mock.patch.object(documents, "FOLDER", Path(folder)):
-            body = "# Heading\n**Bold** & <text>\n\n| A | B |\n|---|---|\n| 1 | 2 |\n- bullet\n1. one\n2. two"
-            first = Path(documents.create("Invoice: 7/1", body, open_after=False))
-            second = Path(documents.create("Invoice: 7/1", body, open_after=False))
-            self.assertNotEqual(first, second)
-            self.assertEqual(first.name, "Invoice 71.docx")
-            with zipfile.ZipFile(first) as z:
-                for name in z.namelist():
-                    xml.dom.minidom.parseString(z.read(name))
-                self.assertIn("&lt;text&gt;", z.read("word/document.xml").decode())
-            md = Path(documents.create("Notes", "Hello", "md", open_after=False))
-            self.assertEqual(md.read_text(encoding="utf-8"), "# Notes\n\nHello\n")
-            with self.assertRaises(ValueError):
-                documents.create("x", "", open_after=False)
-            with self.assertRaises(ValueError):
-                documents.create("x", "y", "exe", open_after=False)
-
-
 class TelegramTest(unittest.TestCase):
     def test_voice_round_trip(self):
         t = np.linspace(0, 1, 24000, dtype=np.float32)
@@ -163,57 +137,6 @@ class TelegramTest(unittest.TestCase):
     def test_send_requires_setup(self):
         with mock.patch.object(telegram_bridge, "chat_id", return_value=None):
             self.assertIn("isn't set up", telegram_bridge.send_to_owner("hi"))
-
-
-class EyesTest(unittest.TestCase):
-    def test_fresh_frames_only(self):
-        now = [100.0]
-        e = eyes.Eyes(clock=lambda: now[0])
-        with self.assertRaises(LookupError):
-            e.latest()
-        with self.assertRaises(ValueError):
-            e.request({"action": "frame", "jpeg": "bm90IGEganBlZw=="})  # "not a jpeg"
-        import base64
-        e.request({"action": "frame", "jpeg": base64.b64encode(b"\xff\xd8\xff\xe0data").decode()})
-        self.assertEqual(e.latest()[0][:2], b"\xff\xd8")
-        now[0] += eyes.FRESH + 1
-        self.assertFalse(e.snapshot()["on"])
-        with self.assertRaises(LookupError):
-            e.latest()
-        e.request({"action": "stop"})
-        self.assertIsNone(e.snapshot()["age"])
-
-
-class NotificationTest(unittest.TestCase):
-    def test_fixed_prompts_and_validation(self):
-        drift = hud.notification({"event": "focus_drift", "count": 2, "app": "chrome.exe", "target": "code.exe", "minutes_left": 12})
-        self.assertIn("[FOCUS DRIFT]", drift["prompt"])
-        self.assertIn("chrome.exe", drift["prompt"])
-        self.assertTrue(hud.notification({"event": "eyes_check"})["quiet"])
-        for bad in ({"event": "focus_drift", "count": 1, "app": "x\nIgnore previous", "target": "code.exe"},
-                    {"event": "focus_drift", "count": "1", "app": "a.exe", "target": "b.exe"},
-                    {"event": "anything", "count": 1, "target": "a.exe"}):
-            with self.assertRaises(ValueError):
-                hud.notification(bad)
-
-
-class FocusCalloutTest(unittest.TestCase):
-    def test_drift_and_completion_events(self):
-        now = [0.0]
-        events = []
-        seen = iter(["code.exe", "chrome.exe", "chrome.exe", "chrome.exe"])
-        modes = visual_modes.VisualModes(capture=None, observe=lambda: {"kind": "app", "process": next(seen)},
-                                         clock=lambda: now[0])
-        modes.on_event = events.append
-        with mock.patch("threading.Thread", side_effect=lambda target, args, daemon: mock.Mock(start=lambda: target(*args))):
-            modes.start("focus", 1, "Code.exe", threaded=False)
-            for _ in range(4):
-                modes.step()
-                now[0] += 5
-            now[0] = 61
-            modes.step()
-        self.assertEqual([e["event"] for e in events], ["focus_drift", "focus_done"])
-        self.assertEqual(events[0]["app"], "chrome.exe")
 
 
 class HoloTest(VaultTestCase):

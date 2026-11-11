@@ -96,27 +96,5 @@ class NoteEditApprovalTest(LoopHarness):
         self.assertTrue(self.commands.empty())
 
 
-class RoutineApprovalTest(LoopHarness):
-    def test_routine_run_asks_without_blocking_and_runs_after_yes(self):
-        review = {'project': 'Jarvis', 'descriptions': ['Open folder'], 'token': 'token'}
-        with mock.patch.object(tools, '_brain', side_effect=[review, {'ok': True, 'steps': ['Opened']}]) as brain:
-            self.assertIn('confirmation', self.call_in_turn('named_routine', {'action': 'run', 'name': 'Dev'}))
-            self.assertIn('Run Dev', self.next_item()['say'])
-            self.assertEqual(brain.call_count, 1)  # nothing ran before the answer
-            approvals.answer('yes')
-            report = self.next_item()
-        self.assertIn('ROUTINE RESULT', report['prompt'])
-        self.assertEqual(brain.call_args.args[1], {'action': 'run', 'token': 'token'})
-
-    def test_routine_decline_never_runs(self):
-        review = {'project': 'Jarvis', 'descriptions': ['Open folder'], 'token': 'token'}
-        with mock.patch.object(tools, '_brain', return_value=review) as brain:
-            self.call_in_turn('named_routine', {'action': 'run', 'name': 'Dev'})
-            self.next_item()
-            approvals.answer('no')
-            self.assertIn('not approved', self.next_item()['say'])
-        self.assertEqual(brain.call_count, 1)
-
-
 if __name__ == '__main__':
     unittest.main()

@@ -19,7 +19,7 @@ KEEP_ALIVE = '30m'  # stay loaded between requests; reloading takes ~3 s
 RECENT = 1
 
 # A 4B model picks tools reliably only from a short list, and all of them overflow its context.
-LOCAL_TOOLS = ('home_control', 'home_status', 'open_website', 'show_search_results', 'amazon_cart', 'youtube', 'open_app', 'media_control',
+LOCAL_TOOLS = ('home_control', 'home_status', 'open_website', 'show_search_results', 'open_app', 'media_control',
                'set_volume', 'app_audio_control', 'set_reminder', 'list_reminders', 'cancel_reminder',
                'get_weather', 'get_schedule', 'add_task', 'list_tasks', 'complete_task', 'system_status')
 

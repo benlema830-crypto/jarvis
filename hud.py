@@ -20,10 +20,8 @@ import datetime
 import json
 import os
 import queue
-import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,7 +52,7 @@ info: dict = {}  # shown on the HUD: voice engine, speech recognition device, mo
 
 _subscribers: list[queue.Queue] = []
 _sub_lock = threading.Lock()
-_history = collections.deque(maxlen=80)  # replayed to a page that opens mid-conversation
+_history = collections.deque(maxlen=400)  # replayed to a page that opens mid-conversation
 _state = "booting"
 
 
@@ -75,8 +73,8 @@ def emit(kind: str, /, **data):
 
 def _under_test() -> bool:
     """The test suite emits fake conversations; keep them out of the real transcript."""
-    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
-    return bool(spec and spec.name.startswith("unittest")) or "pytest" in sys.modules
+    import testing_guard
+    return testing_guard.under_test()
 
 
 def _save_transcript(event: dict):
@@ -154,6 +152,29 @@ def intel(refresh=False) -> dict:
         return _intel_cache[1]
 
 
+_home_cache = (0.0, None)
+HOME_TTL = 8  # seconds; the Console polls this, Home Assistant shouldn't be asked on every poll
+
+
+def home() -> dict:
+    """Device states for the Console's Home tiles, read from Home Assistant just now (or seconds ago).
+    Never raises: an unreachable or unconfigured Home Assistant is reported, not guessed around."""
+    global _home_cache
+    with _intel_lock:
+        if _home_cache[1] is not None and time.time() - _home_cache[0] < HOME_TTL:
+            return _home_cache[1]
+    try:
+        import home_assistant
+        found = [{"name": str(d["name"])[:60], "domain": d["domain"], "state": str(d["state"])[:24]}
+                 for d in home_assistant.devices()][:40]
+        result = {"devices": found, "error": "", "read_at": time.time()}
+    except Exception as error:
+        result = {"devices": [], "error": f"Home Assistant unavailable ({type(error).__name__}).", "read_at": time.time()}
+    with _intel_lock:
+        _home_cache = (time.time(), result)
+    return result
+
+
 def settings():
     return {"listening_mode": preferences.listening_mode(),
             "microphone_enabled": info.get("ears") != "keyboard",
@@ -189,34 +210,6 @@ def update_settings(payload):
     result = settings()
     emit("settings", **result)
     return result
-
-
-_APP = re.compile(r"[\w .()-]{1,84}", re.ASCII)
-
-
-def notification(payload):
-    """Fixed prompts for local system events. The Brain supplies numbers and app names, never prose."""
-    event, count = payload.get("event"), payload.get("count")
-    if event == "eyes_check":
-        return {"label": "Eyes check", "quiet": True, "prompt":
-                "[EYES CHECK] Coach mode: use look_through_camera once. Only if the owner is clearly slouching, "
-                "on their phone, or looks exhausted, say one short, kind, witty sentence about it. "
-                "Otherwise reply with exactly (quiet) and nothing else."}
-    app, target = str(payload.get("app", "")), str(payload.get("target", ""))
-    if type(count) is not int or not 0 <= count <= 999 or not _APP.fullmatch(target) or (app and not _APP.fullmatch(app)):
-        raise ValueError("Invalid notification.")
-    if event == "focus_drift":
-        left = payload.get("minutes_left")
-        left = left if type(left) is int and 0 <= left <= 120 else 0
-        return {"label": f"Focus drift {count}", "prompt":
-                f"[FOCUS DRIFT] During the owner's focus session on {target}, they switched to {app} "
-                f"(drift {count}, about {left} minutes left). Call it out in one short, dry, witty sentence "
-                "and nudge them back. No tools."}
-    if event == "focus_done":
-        return {"label": "Focus complete", "chime": True, "prompt":
-                f"[FOCUS COMPLETE] The owner's focus session on {target} has finished with {count} drift(s). "
-                "Tell them in one sentence, with a little wit."}
-    raise ValueError("Unknown notification.")
 
 
 def update_calendar(payload):
@@ -307,6 +300,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/sessions":
             from agent_sessions import MANAGER
             self._json(MANAGER.snapshot())
+        elif self.path == "/home":
+            self._json(home())
         else:
             self.send_error(404)
 
@@ -368,20 +363,6 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/stop":
             if on_stop:
                 on_stop()
-            self._json({"ok": True})
-            return
-        if self.path == "/notify":
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 2000:
-                    raise ValueError("Request is too large or empty.")
-                payload = json.loads(self.rfile.read(length))
-                if not isinstance(payload, dict) or self.headers.get("Origin"):
-                    raise ValueError("Notifications come from local JARVIS services only.")
-                commands.put(notification(payload))
-            except (ValueError, TypeError):
-                self._json({"error": "Notification rejected."}, 400)
-                return
             self._json({"ok": True})
             return
         if self.path != "/command":
