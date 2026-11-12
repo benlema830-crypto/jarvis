@@ -564,29 +564,52 @@ class _Progress:
         self.pending = ""
 
 
+ON_SCREEN = ("The pictures are captures of the owner's screens, one per monitor. The thing they mean is the "
+             "product, drawing or photograph on the web page or in the viewer there. Ignore the JARVIS interface, "
+             "terminals and every other program; if several products are shown, the one the request names, or the "
+             "largest, is meant.")
+
+
+def _screens():
+    """The owner's screens as they are now: (one picture of all of them, to show on the page; one JPEG per monitor
+    for the model). Both monitors squeezed into one picture left a product 100 pixels tall, and the wrong one
+    was built from it (2026-11-11); a monitor each keeps what is on it readable. Replaced in tests."""
+    import desktop
+    import worksafe
+
+    def jpeg(image, side):
+        image = image.convert("RGB")
+        image.thumbnail((side, side))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=86)
+        return buffer.getvalue()
+
+    monitors = list(desktop.current_layout().monitors)[:3]
+    return jpeg(worksafe.grab(None), 1800), [jpeg(worksafe.grab(tuple(m.rect)), 2000) for m in monitors]
+
+
 def _picture(picture):
-    """(JPEG bytes or None, what to tell the model about it) for "bench", "screen" or ""."""
+    """(JPEG bytes or None, what to tell the model about it, the pictures the model is shown instead or None)
+    for "bench", "screen" or ""."""
     picture = (picture or "").strip().lower()
     if picture in ("", "none", "no"):
-        return None, ""
+        return None, "", None
     if picture == "screen":
-        import worksafe
-        image = worksafe.grab(None)
-        image.thumbnail((1800, 1800))
-        buffer = io.BytesIO()
-        image.convert("RGB").save(buffer, format="JPEG", quality=85)
+        whole, views = _screens()
         (STORE / BENCH).parent.mkdir(parents=True, exist_ok=True)
-        (STORE / BENCH).write_bytes(buffer.getvalue())
-        return buffer.getvalue(), ("The picture is a capture of the owner's screens. Ignore the JARVIS interface "
-                                   "and any other program chrome; build the main subject being shown.")
+        (STORE / BENCH).write_bytes(whole)
+        return whole, ON_SCREEN, views
     path = STORE / BENCH
     if not path.is_file():
         raise ValueError("There's no picture on the workshop bench. Ask the user to drop one on it, or build from "
                          'their screen with picture="screen".')
-    return path.read_bytes(), "The picture is what the owner put on the workshop bench."
+    return path.read_bytes(), "The picture is what the owner put on the workshop bench.", None
 
 
 def _begin(kind, title=""):
+    if kind == "build":
+        with _lock:
+            STATE.pop("queued", None)   # a change waiting for the old model doesn't belong to the new one
     with _lock:
         STATE.update(open=True, busy=kind, thinking="", started=time.time(), tokens=0, done=[], notes=[],
                      error="", errors=[], view="model", model=settings()["model"])
@@ -607,7 +630,7 @@ def _usage_tokens(usage, fallback):
         return fallback
 
 
-def _build(request, image, about, scene_id):
+def _build(request, image, about, scene_id, views=None):
     config, progress = settings(), _Progress()
     import agent_models
     scene = {"id": scene_id, "title": "", "request": request, "setup": "", "steps": [], "versions": [],
@@ -629,13 +652,20 @@ def _build(request, image, about, scene_id):
     scouting = None
     try:
         folder = _folder(scene_id)
+        shots = []
         if image:
             folder.mkdir(parents=True, exist_ok=True)
             (folder / "picture.jpg").write_bytes(image)
-        elif config["references"]:
-            scouting = _Scout(request, folder)   # real photographs, looked up while the first build runs
+            for n, view in enumerate(views or [], 1):
+                (folder / f"screen-{n}.jpg").write_bytes(view)
+                shots.append(folder / f"screen-{n}.jpg")
+            scene["screens"] = len(shots)
+        if config["references"] and (not image or shots):
+            # Real photographs, looked up while the first build runs. With the owner's screens to go by, the scout
+            # starts from the very page they are looking at.
+            scouting = _Scout(request, folder, shots)
         prompt = "Build this: " + request + ("\n\n" + about if about else "")
-        usage = generate(agent_models.CLAUDE[config["model"]], config["effort"], SYSTEM, prompt, image,
+        usage = generate(agent_models.CLAUDE[config["model"]], config["effort"], SYSTEM, prompt, views or image,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
         feed.add("", final=True)
         spoken = parse(feed.text)["spoken"]
@@ -682,9 +712,21 @@ def _build(request, image, about, scene_id):
         if scouting:
             scouting.stop()
         _work.release()
+        _next()
 
 
-def _edit(request, repair=False):
+def _next():
+    """Run the change the owner asked for while the bench was busy (it used to be refused and then forgotten)."""
+    with _lock:
+        queued = STATE.pop("queued", None)
+    if queued:
+        try:
+            edit(queued["request"], queued.get("picture", ""))
+        except Exception as e:
+            print(f"(workshop: the queued change couldn't start: {e!r})", flush=True)
+
+
+def _edit(request, repair=False, views=None):
     config, progress = settings(), _Progress()
     import agent_models
     with _lock:
@@ -704,8 +746,14 @@ def _edit(request, repair=False):
             chosen = list(STATE.get("selected", []))
         pointed = (f"\n\nOn screen the owner has selected: {', '.join(chosen)}. \"This\", \"it\" and \"that part\" "
                    "mean these parts; change nothing else unless asked." if chosen and not repair else "")
-        prompt = (EDIT + "\n\nThe owner says: " + request + pointed + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
-        usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, None,
+        images, shown, _ = _review_material(scene, None)
+        if views:
+            images, shown = images + list(views), (shown + "; then " if images else "") + \
+                "captures of the owner's screens as they are right now, one per monitor (what they mean is on the web " \
+                "page or in the viewer there; ignore the JARVIS interface and other programs)"
+        looking = f"\n\nYou are shown, in order: {shown}. Go by them where the owner refers to them." if images else ""
+        prompt = (EDIT + "\n\nThe owner says: " + request + pointed + looking + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
+        usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, images or None,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
         feed.add("", final=True)
         patch = parse(feed.text)
@@ -760,7 +808,7 @@ def _busy_line():
 def build(request, picture=""):
     """Start building. Returns what to tell the brain: a line of text, or the picture plus the line."""
     request = " ".join(str(request or "").split())[:3000]
-    image, about = _picture(picture)
+    image, about, views = _picture(picture)
     if len(request) < 3 and not image:
         raise ValueError("Say what to build, or put a picture on the bench.")
     request = request or "what the picture shows"
@@ -768,7 +816,7 @@ def build(request, picture=""):
         return _busy_line()
     _begin("build")
     _emit("start", mode="build", picture=bool(image), model=STATE["model"], request=request[:300])
-    _start(_build, request, image, about, _slug(request))
+    _start(_build, request, image, about, _slug(request), views)
     line = ("The build has started in the workshop; it appears piece by piece over the next minute or so, "
             "and you'll speak again by yourself when it's finished. Say one short line now (you're on it), "
             "and don't describe the result yet." + on_screen())
@@ -790,20 +838,25 @@ def _thumbnail(image, size=1024):
     return buffer.getvalue()
 
 
-def edit(request):
+def edit(request, picture=""):
     request = " ".join(str(request or "").split())[:2000]
     _restore()
+    if len(request) < 3:
+        raise ValueError("Say what to change.")
+    if not _work.acquire(blocking=False):   # mid-build there may be nothing finished yet; the change waits for it
+        with _lock:
+            STATE["queued"] = {"request": request, "picture": picture}
+        return ("The workshop is still finishing its last job, so this change is queued: it starts by itself the "
+                "moment that job ends, and you'll speak again when it's in. Tell the user it's queued, in one line.")
     with _lock:
         scene = STATE["scene"]
     if not scene or not scene.get("steps"):
+        _work.release()
         raise ValueError("There's nothing on the bench to change. Build something first.")
-    if len(request) < 3:
-        raise ValueError("Say what to change.")
-    if not _work.acquire(blocking=False):
-        return _busy_line()
+    views = _screens()[1] if str(picture or "").strip().lower() == "screen" else None
     _begin("change")
     _emit("start", mode="change", model=STATE["model"], request=request[:300])
-    _start(_edit, request)
+    _start(_edit, request, False, views)
     return ("The change is being made; it shows in the workshop in about half a minute and you'll speak again by "
             "yourself when it's in. Say one short line now, and don't claim it's done yet.")
 
@@ -1239,13 +1292,14 @@ _sizes = {"at": 0.0, "whole": None, "parts": {}, "ruler": None}
 class _Scout:
     """Looks up photographs of the real thing in the background (workshop_refs.py) while the build runs."""
 
-    def __init__(self, request, folder):
+    def __init__(self, request, folder, shots=()):
         self.found, self.done, self.cancel = [], threading.Event(), threading.Event()
-        threading.Thread(target=self._run, args=(request, Path(folder) / "refs"), daemon=True, name="workshop-scout").start()
+        threading.Thread(target=self._run, args=(request, Path(folder) / "refs", list(shots)), daemon=True,
+                         name="workshop-scout").start()
 
-    def _run(self, request, folder):
+    def _run(self, request, folder, shots):
         try:
-            self.found = find_references(request, folder, cancel=self.cancel)
+            self.found = find_references(request, folder, cancel=self.cancel, shots=shots)
         finally:
             self.done.set()
 
@@ -1262,13 +1316,13 @@ class _Scout:
         self.cancel.set()
 
 
-def find_references(request, folder, cancel=None):
+def find_references(request, folder, cancel=None, shots=()):
     """Replaced in tests; a test that forgets to never reaches the web or Codex."""
     import testing_guard
     import workshop_refs
     if testing_guard.under_test():
         return []
-    return workshop_refs.scout(request, folder, cancel=cancel)
+    return workshop_refs.scout(request, folder, cancel=cancel, shots=shots)
 
 
 def motions(scene):
@@ -1340,7 +1394,14 @@ def _review_material(scene, sheet):
         shown.append("one sheet with four views of your model as it looks now (front, back, from above, pulled apart)")
     folder = _folder(scene["id"])
     truth = "what the owner asked for and what you know of the real thing"
-    if scene.get("picture") and (folder / "picture.jpg").is_file():
+    screens = [folder / f"screen-{n}.jpg" for n in range(1, int(scene.get("screens") or 0) + 1)]
+    screens = [path for path in screens if path.is_file()]
+    if screens:
+        images += [path.read_bytes() for path in screens]
+        shown.append("what was on the owner's screens when they asked, one picture per monitor (the thing they mean "
+                     "is on the web page or in the viewer there; ignore the JARVIS interface and other programs)")
+        truth = "what the owner had on screen"
+    elif scene.get("picture") and (folder / "picture.jpg").is_file():
         images.append((folder / "picture.jpg").read_bytes())
         shown.append("the picture the owner gave you to build from")
         truth = "the owner's picture"
@@ -1422,6 +1483,7 @@ def _detail(request):
         _announce(f"I couldn't improve on it, sir: {reason}", "[WORKSHOP] The detail pass failed; the model is as it was.")
     finally:
         _work.release()
+        _next()
 
 
 def detail(request=""):
@@ -1710,6 +1772,7 @@ def _variants(request):
         _announce(f"The variants didn't come out, sir: {reason}.", "[WORKSHOP] Making variants failed; the model is as it was.")
     finally:
         _work.release()
+        _next()
 
 
 def variants(request=""):

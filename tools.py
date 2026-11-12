@@ -686,6 +686,9 @@ def audio_output(action: str, device: str = "") -> str:
     from elevenlabs_voice import set_env
     from voice import output_devices
 
+    if action == "list":  # rescan first: a speaker that connected after startup isn't in the list yet
+        VOICE.wait()
+        VOICE.refresh_outputs()
     devices = output_devices()
     numbered = "\n".join(f"{n}. {name}" for n, (_, name) in enumerate(devices, 1))
     if action == "list":
@@ -1376,8 +1379,10 @@ def workshop(action: str, request: str = "", picture: str = ""):
             bench), close, status (what is on the bench and its parts, for answering questions about them),
             cancel (end a build that is running).
         request: What to build or change, or the saved model to open.
-        picture: For build only. "bench" when the user put, dropped or pasted a picture on the workshop bench;
-            "screen" to build what is on their screen right now ("build this", "build what I'm looking at");
+        picture: "bench" when the user put, dropped or pasted a picture on the workshop bench; "screen" to
+            build what is on their screen right now ("build this", "build what I'm looking at", "the one on the
+            website I have open"), and with edit when a correction refers to what is on their screen ("no, the
+            one on the website");
             otherwise leave empty: for a real product, photographs of it are then looked up on the web by
             themselves and the model is checked against them, so a build takes three to five minutes.
     """
@@ -1386,7 +1391,7 @@ def workshop(action: str, request: str = "", picture: str = ""):
     if action == "build":
         return bench.build(request, picture)
     if action in ("edit", "change"):
-        return bench.edit(request)
+        return bench.edit(request, picture)
     if action in ("explode", "assemble"):
         return bench.explode(action == "explode")
     if action in ("focus", "select", "show_all"):

@@ -506,7 +506,8 @@ body.view-workshop .reply{background:#060e11f2}
 .ws-panel{position:absolute;left:18px;bottom:112px;width:232px;padding:10px 12px;font-size:12.5px;max-height:34vh;display:flex;flex-direction:column;background:#060e11e6}
 .ws-parts{position:absolute;left:18px;top:74px;width:232px;padding:10px 12px;font-size:12.5px;max-height:calc(62vh - 190px);display:flex;flex-direction:column;gap:8px;background:#060e11e6}
 .ws-parts[hidden]{display:none}
-.ws-parts-list{overflow-y:auto;scrollbar-width:thin;scrollbar-color:#21302e transparent;display:flex;flex-direction:column;gap:3px;min-height:0}
+.ws-compact .ws-parts{max-height:calc(100vh - 250px)}
+.ws-parts-list{flex:1 1 auto;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#21302e transparent;display:flex;flex-direction:column;gap:3px;min-height:0}
 .ws-parts-list button{text-align:left;background:none;border:1px solid transparent;border-radius:7px;padding:4px 8px;font-size:12.5px;color:var(--ink)}
 .ws-parts-list button:hover{background:#14232a}
 .ws-parts-list button.on{background:color-mix(in srgb,var(--accent) 18%,#071116);border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:#fff;font-weight:600}

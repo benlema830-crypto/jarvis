@@ -155,7 +155,7 @@ function fit() {
   const size = box.getSize(V()), sphere = box.getBoundingSphere(new THREE.Sphere());
   radius = Math.max(sphere.radius, .01);
   const width = canvas.clientWidth || 1, height = canvas.clientHeight || 1, tall = height + Math.abs(inset.bottom - inset.top);
-  const clearW = Math.max(width - inset.right, 200), clearH = Math.max(height - inset.bottom - inset.top, 200);
+  const clearW = Math.max(width - inset.right - inset.left, 200), clearH = Math.max(height - inset.bottom - inset.top, 200);
   const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));   // of the whole (padded) view height
   const narrow = Math.atan(tan * Math.min(clearH, clearW) / tall);
   orbit.targetTo.copy(sphere.center); orbit.distTo = radius / Math.sin(narrow) * 1.12;
@@ -168,12 +168,12 @@ function fit() {
   fill.position.set(-radius * 3, radius * 2, radius * 2); rim.position.set(-radius * 2, radius * 2.5, -radius * 4);
   camera.near = radius / 200; camera.far = radius * 400; camera.updateProjectionMatrix();
 }
-const inset = { right: 0, bottom: 0, top: 0 };
-function applyInsets() {
-  const width = canvas.clientWidth, height = canvas.clientHeight, down = inset.bottom - inset.top;
+const inset = { right: 0, bottom: 0, top: 0, left: 0 };
+function applyInsets() {   // centre the view in the part of the window nothing floats over
+  const width = canvas.clientWidth, height = canvas.clientHeight, down = inset.bottom - inset.top, across = inset.right - inset.left;
   if (!width || !height) return;
-  camera.setViewOffset(width + inset.right, height + Math.abs(down), inset.right, Math.max(down, 0), width, height);
-  camera.aspect = (width + inset.right) / (height + Math.abs(down)); camera.updateProjectionMatrix();
+  camera.setViewOffset(width + Math.abs(across), height + Math.abs(down), Math.max(across, 0), Math.max(down, 0), width, height);
+  camera.aspect = (width + Math.abs(across)) / (height + Math.abs(down)); camera.updateProjectionMatrix();
 }
 let drag = null;
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -241,7 +241,7 @@ function placeLabels(width, height) {
   for (const side of [false, true]) {
     const group = points.filter(p => p.right === side && !p.hidden).sort((a, b) => a.y - b.y);
     if (!group.length) continue;
-    const edge = side ? Math.min(width - inset.right - 150, Math.max(...group.map(p => p.x)) + 90) : Math.max(150, Math.min(...group.map(p => p.x)) - 90);
+    const edge = side ? Math.min(width - inset.right - 150, Math.max(...group.map(p => p.x)) + 90) : Math.max(inset.left + 175, Math.min(...group.map(p => p.x)) - 90);
     let last = -1e9;
     for (const p of group) { p.ly = Math.max(p.y, last + 29); last = p.ly; }
     // Pushing only downward drags a crowded column below its parts; slide it back so it sits around them.
@@ -595,7 +595,7 @@ addEventListener('message', event => {
   else if (m.t === 'explode') { explodeTo = m.on ? 1 : 0; fit(); }
   else if (m.t === 'insets') {
     const before = orbit.touched && [orbit.distTo, orbit.targetTo.clone()];
-    Object.assign(inset, { right: +m.right || 0, bottom: +m.bottom || 0, top: +m.top || 0 }); applyInsets(); fit();
+    Object.assign(inset, { right: +m.right || 0, bottom: +m.bottom || 0, top: +m.top || 0, left: +m.left || 0 }); applyInsets(); fit();
     if (before) { orbit.distTo = before[0]; orbit.targetTo.copy(before[1]); }   // the owner's own zoom and pan stay
   }
   else if (m.t === 'level') levelTo = Math.max(levelTo, Math.min(1, +m.v || 0));

@@ -127,14 +127,16 @@ class WorkshopFlowTest(unittest.TestCase):
                 (workshop, "_sizes", {"at": 0.0, "whole": None, "parts": {}, "ruler": None}),
                 (workshop, "OUTBOX", Path(temp.name) / "outbox"), (workshop, "EXPORT_WAIT", 0.6),
                 (workshop, "VIDEO_SECONDS", 0), (workshop, "SNAPSHOT_WAIT", 0.6), (workshop, "SCOUT_WAIT", 2),
-                (workshop, "find_references", lambda request, folder, cancel=None: self.photos(folder)),
+                (workshop, "find_references", lambda request, folder, cancel=None, shots=(): self.photos(folder, shots)),
+                (workshop, "_screens", lambda: (jpeg((90, 30)), [jpeg((60, 40)), jpeg((50, 40))])),
                 (workshop.preferences, "read", lambda: self.prefs)]:
             patcher = mock.patch.object(target, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def photos(self, folder):
+    def photos(self, folder, shots=()):
         """What the photo scout "found": writes the files where the real one would."""
+        self.shots = [Path(shot).name for shot in shots]
         Path(folder).mkdir(parents=True, exist_ok=True)
         for ref in self.found:
             (Path(folder) / ref["name"]).write_bytes(jpeg())
@@ -544,6 +546,60 @@ class WorkshopMoreTest(WorkshopFlowTest):
         self.assertIn("the owner's picture", self.calls[1]["prompt"])
         self.assertEqual(len(self.calls[1]["image"]), 2)               # the sheet and their picture
 
+    def test_building_from_the_screen_shows_a_monitor_each_and_scouts_from_that_page(self):
+        self.prefs = {"workshop": {}}
+        self.found = [{"name": "ref-1.jpg", "about": "the product page's own photograph"}]
+        self.replies[:] = [SCRIPT, REVIEWED]
+        self.page()
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            reply = workshop.build("the vape on the website I have open", "screen")
+            self.wait()
+        self.assertEqual(reply[0]["type"], "image")
+        self.assertEqual(len(self.calls[0]["image"]), 2)                    # one picture per monitor, not one of both
+        self.assertIn("one per monitor", self.calls[0]["prompt"])
+        self.assertEqual(self.shots, ["screen-1.jpg", "screen-2.jpg"])      # the scout sees the page they are on
+        self.assertEqual(len(self.calls[1]["image"]), 4)                    # the sheet, two screens, the photograph
+        self.assertIn("what was on the owner's screens when they asked, one picture per monitor", self.calls[1]["prompt"])
+        self.assertEqual(workshop.STATE["scene"]["refs"][0]["name"], "ref-1.jpg")
+
+    def test_a_change_asked_for_while_busy_is_queued_and_then_made(self):
+        self.page()
+        release = threading.Event()
+        original = workshop.generate
+
+        def slow(*args, **kwargs):
+            if len(self.calls) == 0:
+                release.wait(5)
+            return original(*args, **kwargs)
+        self.replies[:] = [SCRIPT, PATCH]
+        with mock.patch.object(workshop, "generate", slow):
+            workshop.build("a desk lamp")
+            reply = workshop.edit("no, the flat oval one on the website", "screen")
+            self.assertIn("queued", reply)
+            self.assertEqual(len(self.calls), 0)
+            release.set()
+            for _ in range(300):
+                if len(self.calls) == 2 and not workshop.STATE["busy"] and not workshop._work.locked():
+                    break
+                time.sleep(0.02)
+        self.assertIn("the flat oval one on the website", self.calls[1]["prompt"])
+        self.assertEqual(len(self.calls[1]["image"]), 2)                    # the screens as they are when it runs
+        self.assertIn("captures of the owner's screens as they are right now", self.calls[1]["prompt"])
+        self.assertEqual(self.said[-1][0], "The arm is red, sir.")
+        self.assertNotIn("queued", workshop.STATE)
+
+    def test_a_change_is_shown_the_owners_picture(self):
+        self.store.mkdir(parents=True)
+        (self.store / workshop.BENCH).write_bytes(jpeg())
+        self.page()
+        workshop.build("", "bench")
+        self.wait()
+        self.replies.append(PATCH)
+        workshop.edit("make it match the picture better")
+        self.wait()
+        self.assertEqual(len(self.calls[1]["image"]), 1)
+        self.assertIn("the picture the owner gave you to build from", self.calls[1]["prompt"])
+
     def test_detail_pass_on_request_goes_where_the_owner_pointed(self):
         self.lamp()
         workshop.page_report({"action": "select", "parts": ["Arm"]})
@@ -693,7 +749,7 @@ class PhotoScoutTest(unittest.TestCase):
     def scout(self, said, files):
         import workshop_refs
 
-        def run(folder, prompt, seconds, cancel):
+        def run(folder, prompt, seconds, cancel, shots=()):
             self.prompt = prompt
             for name, data in files.items():
                 (Path(folder) / name).write_bytes(data)

@@ -94,7 +94,8 @@
   const panel = make('section', null, 'ws-panel card'), panelHead = make('div', null, 'ws-panel-head'), panelTitle = make('b', 'BUILT');
   const panelBody = make('div', null, 'ws-panel-body'), thought = make('div', null, 'ws-thought'), thoughtHead = make('small', ''), thoughtText = make('p', '');
   const steps = make('ol', null, 'ws-steps');
-  const hide = button('Hide', null, () => { const off = !panelBody.hidden; panelBody.hidden = off; hide.textContent = off ? 'Show' : 'Hide'; }, 'link');
+  let panelAuto = true, leftNow = 0;   // the build list folds away by itself once a job is done, unless the owner set it
+  const hide = button('Hide', null, () => { panelAuto = false; const off = !panelBody.hidden; panelBody.hidden = off; hide.textContent = off ? 'Show' : 'Hide'; draw(); }, 'link');
   panelHead.append(panelTitle, hide); thought.append(thoughtHead, thoughtText); panelBody.append(thought, steps); panel.append(panelHead, panelBody); panel.hidden = true;
 
   /* Parts: click one in the list or on the model to look at it alone; Ctrl-click adds another. */
@@ -180,6 +181,10 @@
     rendered.hidden = view !== 'render' || !renderUrl; frame.style.visibility = view === 'render' && renderUrl ? 'hidden' : 'visible';
     picture.hidden = !(scene?.picture) || view === 'render';
     status.textContent = busy === 'render' ? 'Rendering a realistic picture… about a minute' : status.dataset.keep || status.dataset.job || '';
+    if (panelAuto) { panelBody.hidden = !busy || busy === 'render'; hide.textContent = panelBody.hidden ? 'Show' : 'Hide'; }
+    box.classList.toggle('ws-compact', panelBody.hidden);
+    const edge = !partsPanel.hidden ? partsPanel : !panel.hidden ? panel : null, left = edge ? Math.round(edge.getBoundingClientRect().right + 10) : 0;
+    if (left !== leftNow) { leftNow = left; insets(); }
     drawMeta();
   }
   function note(text) { status.dataset.keep = text || ''; draw(); if (text) setTimeout(() => { if (status.dataset.keep === text) { status.dataset.keep = ''; draw(); } }, 9000); }
@@ -341,7 +346,7 @@
   // The stage fills the window; tell it what floats on top so it frames the model in the clear part.
   function insets() {
     const side = document.querySelector('.right')?.getBoundingClientRect(), dock = el('dock').getBoundingClientRect();
-    send({ t: 'insets', right: side ? Math.max(0, innerWidth - side.left + 8) : 0, bottom: Math.max(0, innerHeight - dock.top + 8), top: 96 });
+    send({ t: 'insets', right: side ? Math.max(0, innerWidth - side.left + 8) : 0, bottom: Math.max(0, innerHeight - dock.top + 8), top: 96, left: visible() ? leftNow : 0 });
   }
   addEventListener('resize', insets);
   let insetTimer = 0;

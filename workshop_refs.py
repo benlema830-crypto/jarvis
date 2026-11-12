@@ -55,7 +55,15 @@ def _jpeg(path):
         return None
 
 
-def run(folder, prompt, seconds, cancel):
+SEEN = """The attached screenshots show the owner's screens right now, one per monitor. They are looking at this
+thing on a web page: the address bar names the page, and the page shows which product and which version they mean.
+Find photographs of exactly that one, starting from that page (its own product pictures are the best source).
+Ignore the other programs on screen.
+
+"""
+
+
+def run(folder, prompt, seconds, cancel, shots=()):
     """One Codex run with web search in `folder`; returns what it printed. Replaced in tests."""
     import agent_sessions
     exe = agent_sessions.executable()
@@ -63,7 +71,8 @@ def run(folder, prompt, seconds, cancel):
         raise RuntimeError("Codex isn't installed, and it looks the photos up.")
     process = subprocess.Popen(
         [exe, "--search", "exec", "--skip-git-repo-check", "-s", "workspace-write",
-         "-c", "sandbox_workspace_write.network_access=true", "--", prompt],
+         "-c", "sandbox_workspace_write.network_access=true",
+         *(part for shot in shots for part in ("--image", str(shot))), "--", prompt],
         cwd=str(folder), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True,
         encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
     output = []
@@ -79,7 +88,7 @@ def run(folder, prompt, seconds, cancel):
     return "".join(output)
 
 
-def scout(request, folder, seconds=SECONDS, cancel=None):
+def scout(request, folder, seconds=SECONDS, cancel=None, shots=()):
     """Look the thing up and leave ref-N.jpg files in `folder`. Returns [{"name": "ref-1.jpg", "about": "..."}],
     empty when it isn't a real thing or nothing usable was found. Never raises."""
     folder = Path(folder)
@@ -87,7 +96,9 @@ def scout(request, folder, seconds=SECONDS, cancel=None):
         folder.mkdir(parents=True, exist_ok=True)
         for old in folder.glob("ref-*"):
             old.unlink()
-        said = run(folder, PROMPT.format(request=" ".join(str(request).split())[:600]), seconds, cancel)
+        shots = [shot for shot in shots if Path(shot).is_file()][:3]
+        said = run(folder, (SEEN if shots else "") + PROMPT.format(request=" ".join(str(request).split())[:600]),
+                   seconds, cancel, shots)
     except Exception as e:
         print(f"(workshop: the photo scout failed: {e!r})", flush=True)
         return []

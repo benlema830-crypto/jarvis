@@ -358,6 +358,11 @@ explode)`, `api.add`, `api.onTick`. A step that throws is reported back and sent
   photograph on a face, so a real label is the real label. "Add more detail" runs the same pass on request, on the
   selected parts if any (`detail`). `preferences "workshop": {"check": false, "references": false}` switch them off.
   A real product now takes three to six minutes.
+- **Building from the screen** sends one capture per monitor (both monitors in one picture left the product about
+  100 pixels tall, and the wrong one was built). The photo scout is shown the same captures, so it starts from the
+  page the owner has open. A change can refer to the screen too (`edit` with `picture="screen"`), and every
+  change is shown the owner's picture and the photographs. A change asked for while the bench is busy is queued
+  and made when the job ends, where it used to be refused and forgotten.
 - **Moving parts**: `api.motion(name, fn)` in the scene code; `move` plays or resets one by voice, and asks the
   builder to add it when the model can't do it yet. They are listed under MOVES in the parts panel.
 - **Measuring**: `measure` shows a box with the real width, height and depth (metric and inches), something
