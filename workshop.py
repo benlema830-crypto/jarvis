@@ -74,6 +74,11 @@ What your code can use:
   the whole model, so the pulled-apart view is unmistakable. Every visible thing that the owner might ask
   about is a part.
 - api.add(object): adds scenery that is not a part (a base plate, a backdrop, a glow).
+- api.print(width, height, function (ctx, w, h) { ... }): returns a texture that you draw with the 2D canvas
+  API (fillText, arcs, paths, gradients). Use it as a material's `map` for everything that is printed on the
+  real thing: its name and lettering, a logo drawn from shapes and text, a label, a warning panel, a dial, a
+  screen. A product is recognised by its printed face, so give it one; a flat colour with a few raised shapes
+  does not read as the product. A CircleGeometry or the cap of a cylinder takes a round label.
 - api.onTick(function (t, dt, level) { ... }): called every frame. t is seconds, level is 0 to 1 and follows
   JARVIS's voice. Use it for one or two subtle touches (a light that breathes, a ring that pulses with the
   voice). Keep it cheap.
@@ -95,7 +100,14 @@ least three materials that differ in colour, roughness and metalness, emissive g
 light up, and the small details that sell it (seams, screws, vents, feet, cables, LEDs, buttons). A product
 has eight to sixteen parts.
 
-From a picture: reproduce what is shown, with its layout and proportions, not a generic version. From a floor
+A real thing is built as it really is. When the owner names a real product, or the picture shows one, model
+its true shape, proportions, colours and printed text, and give it only the parts it really has (a snuff tin is
+a tub, a lid, a label and the pouches inside; it has no battery and no circuit board). Never invent internals,
+electronics or features the real thing does not have. If you don't know what is inside it, model the outside
+and say so in SPOKEN. Design the insides yourself only when the owner asks you to design something new.
+
+From a picture (a photograph, a drawing or a rendered image): build the object it shows. Reproduce what is
+shown, with its layout and proportions, not a generic version. From a floor
 plan: every room where the plan has it, walls 2.7 high and 0.15 thick with gaps for doors, glass for windows,
 simple recognisable furniture, water for a pool, plants and trees, and a roof that is its own see-through
 part (opacity about 0.12) so the inside stays visible. Work out the real size from the plan and say it in
@@ -133,7 +145,7 @@ _work = threading.Lock()   # one build, change or render at a time
 _cancel = threading.Event()
 STATE = {"open": False, "busy": "", "scene": None, "exploded": False, "view": "model", "thinking": "",
          "started": 0.0, "seconds": 0, "tokens": 0, "done": [], "notes": [], "error": "", "errors": [], "render": "",
-         "model": ""}
+         "model": "", "selected": [], "isolate": False}
 
 
 # ---------- Small helpers ----------
@@ -551,7 +563,7 @@ def _begin(kind, title=""):
         STATE.update(open=True, busy=kind, thinking="", started=time.time(), tokens=0, done=[], notes=[],
                      error="", errors=[], view="model", model=settings()["model"])
         if kind == "build":
-            STATE.update(scene=None, exploded=False, render="")
+            STATE.update(scene=None, exploded=False, selected=[], isolate=False, render="")
     _cancel.clear()
 
 
@@ -645,7 +657,11 @@ def _edit(request, repair=False):
 
     feed = Feed(on)
     try:
-        prompt = (EDIT + "\n\nThe owner says: " + request + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
+        with _lock:
+            chosen = list(STATE.get("selected", []))
+        pointed = (f"\n\nOn screen the owner has selected: {', '.join(chosen)}. \"This\", \"it\" and \"that part\" "
+                   "mean these parts; change nothing else unless asked." if chosen and not repair else "")
+        prompt = (EDIT + "\n\nThe owner says: " + request + pointed + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
         usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, None,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
         feed.add("", final=True)
@@ -658,8 +674,11 @@ def _edit(request, repair=False):
             changed.pop("repaired", None)   # a new change may have one repair of its own
         _save(changed)
         seconds, tokens = round(time.time() - STATE["started"]), _usage_tokens(usage, progress.chars // 4)
+        still = {name for name, _ in parts(changed)}
         with _lock:
-            STATE.update(scene=changed, tokens=tokens, seconds=seconds, render="")
+            kept = [n for n in STATE.get("selected", []) if n in still]
+            STATE.update(scene=changed, tokens=tokens, seconds=seconds, render="", selected=kept,
+                         isolate=bool(STATE.get("isolate")) and bool(kept))
         _finish()
         _emit("patch", setup=changed["setup"], steps=changed["steps"], seconds=seconds, tokens=tokens,
               notes=notes or patch["notes"])
@@ -768,6 +787,54 @@ def explode(on):
     return (f"Pulled apart, each part labelled: {names}." if on else "Put back together.") + on_screen()
 
 
+def match_parts(scene, words):
+    """The parts the owner means by what they said, in the model's own order. Speech recognition mangles names
+    ("bass tube" for "base tub"), so each word of a part's name only has to be close to a word that was said."""
+    import difflib
+    said = re.findall(r"[a-z0-9]+", str(words).casefold())
+    names = [name for name, _ in parts(scene)]
+    close = lambda word, cutoff: bool(difflib.get_close_matches(word, said, n=1, cutoff=cutoff))
+    tokens = {name: re.findall(r"[a-z0-9]+", name.casefold()) for name in names}
+    # "sideband" is heard as one word and "side band" as two, so the name run together is tried as well
+    joined = set(said) | {a + b for a, b in zip(said, said[1:])}
+    whole = lambda name: bool(difflib.get_close_matches("".join(tokens[name]), joined, n=1, cutoff=0.82))
+    found = [name for name in names if tokens[name] and (all(close(t, 0.72) for t in tokens[name]) or whole(name))]
+    if not found:   # "the pouches" for "Nicotine pouches": one telling word is enough when nothing matched whole
+        found = [name for name in names if any(len(t) > 3 and close(t, 0.8) for t in tokens[name])]
+    return found
+
+
+WHOLE = re.compile(r"(?:show |see |back to )?(?:everything|all|all of it|the whole (?:thing|model)|the rest|nothing|none|clear)\.?")
+ALONE = re.compile(r"\b(?:only|just|alone|isolate|by itself|by themselves|on its own|hide the rest|nothing else)\b")
+
+
+def focus(words=""):
+    """Look at some parts on their own: they stay as they are and the rest turn faint (or vanish, when the owner
+    says "only"). No words, or "everything", brings the whole model back."""
+    _restore()
+    words = " ".join(str(words or "").split())[:400]
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to look at.")
+    if not words or WHOLE.fullmatch(words.casefold()):
+        with _lock:
+            STATE.update(selected=[], isolate=False, open=True, view="model")
+        _emit("select", parts=[], isolate=False)
+        return "The whole model is showing again." + on_screen()
+    names = match_parts(scene, words)
+    if not names:
+        raise ValueError(f"No part of this model matches \"{words}\". Its parts are: "
+                         + ", ".join(name for name, _ in parts(scene)) + ".")
+    alone = bool(ALONE.search(words.casefold()))
+    with _lock:
+        STATE.update(selected=names, isolate=alone, open=True, view="model")
+    _emit("select", parts=names, isolate=alone)
+    about = " ".join(f"{name}: {text}" for name, text in parts(scene) if name in names)
+    return (f"Selected on screen: {', '.join(names)}" + (", with everything else hidden. " if alone else
+            ", with the rest shown faintly. ") + about + " A change the user asks for now applies to these." + on_screen())
+
+
 def open_bench(words=""):
     """Open the workshop: the empty bench, or a saved scene the owner named."""
     words = " ".join(str(words or "").split())
@@ -782,13 +849,13 @@ def open_bench(words=""):
         return "A build is still running in the workshop." + on_screen()
     with _lock:
         if match:
-            STATE.update(open=True, scene=load(match["id"]), exploded=False, view="model", render="", error="",
+            STATE.update(open=True, scene=load(match["id"]), exploded=False, selected=[], isolate=False, view="model", render="", error="",
                          done=[], notes=[], thinking="")
             _remember(match["id"])
         else:
             STATE.update(open=True, view="model")
             if words:
-                STATE.update(scene=None, render="")
+                STATE.update(scene=None, render="", selected=[], isolate=False)
     _emit("open", scene=bool(match))
     shown = on_screen()
     if match:
@@ -807,7 +874,7 @@ def open_scene(scene_id):
     with _lock:
         if STATE["busy"]:
             raise ValueError("The workshop is busy.")
-        STATE.update(open=True, scene=scene, exploded=False, view="model", render="", error="", done=[], notes=[],
+        STATE.update(open=True, scene=scene, exploded=False, selected=[], isolate=False, view="model", render="", error="", done=[], notes=[],
                      thinking="")
     _remember(scene["id"])
     _emit("open", scene=True)
@@ -818,7 +885,7 @@ def clear():
     with _lock:
         if STATE["busy"]:
             return _busy_line()
-        STATE.update(open=True, scene=None, exploded=False, view="model", render="", error="", done=[], notes=[],
+        STATE.update(open=True, scene=None, exploded=False, selected=[], isolate=False, view="model", render="", error="", done=[], notes=[],
                      thinking="")
     _remember("")
     _emit("open", scene=False)
@@ -845,8 +912,10 @@ def describe():
         saved = ", ".join(s["title"] for s in recent(8))
         return ("Nothing is on the workshop bench." + (f" A {busy} is running." if busy else "")
                 + (f" Saved models: {saved}." if saved else ""))
+    chosen = [n for n in STATE.get("selected", [])]
     return (f"On the bench: \"{scene['title'] or 'being built'}\"" + (f" (a {busy} is running)" if busy else "")
             + f". Parts: {part_lines(scene)}." + (" It is pulled apart." if STATE["exploded"] else "")
+            + (f" The user has selected: {', '.join(chosen)} (\"this\" and \"it\" mean these)." if chosen else "")
             + (f" {len(scene.get('versions', []))} earlier version(s) can be undone." if scene.get("versions") else ""))
 
 
@@ -862,6 +931,7 @@ def snapshot():
                 "tokens": STATE["tokens"],
                 "done": list(STATE["done"]), "notes": list(STATE["notes"]), "error": STATE["error"],
                 "render": STATE["render"], "model": STATE["model"], "now": time.time(),
+                "selected": list(STATE.get("selected", [])), "isolate": bool(STATE.get("isolate")),
                 "scene": scene and {"id": scene["id"], "title": scene["title"], "setup": scene.get("setup", ""),
                                     "steps": scene["steps"], "picture": bool(scene.get("picture")),
                                     "versions": len(scene.get("versions", []))},
@@ -899,6 +969,11 @@ def page_report(payload):
     elif action == "explode":
         with _lock:
             STATE["exploded"] = bool(payload.get("on"))
+    elif action == "select":   # the owner clicked parts on the page; "this" in their next sentence means these
+        with _lock:
+            known = {name for name, _ in parts(STATE["scene"])} if STATE["scene"] else set()
+            chosen = [str(n) for n in payload.get("parts", []) if str(n) in known][:40] if isinstance(payload.get("parts"), list) else []
+            STATE.update(selected=chosen, isolate=bool(payload.get("isolate")) and bool(chosen))
     else:
         raise ValueError("Unknown workshop action.")
     return {"ok": True}

@@ -10,6 +10,7 @@
   const visible = () => document.body.classList.contains('view-workshop');
   let ready = false, queue = [], scene = null, setup = '', busy = '', startedAt = 0, clock = 0, tokens = 0, exploded = false;
   let errors = 0, renderUrl = '', view = 'model', before = 'model', benchStamp = 0;
+  let partList = [], selected = [], isolate = false;
 
   const send = message => { if (ready) stage.postMessage(message, '*'); else queue.push(message); };
   const report = payload => J.api('/workshop', payload).catch(e => J.notice(e.message));
@@ -39,6 +40,36 @@
   const hide = button('Hide', null, () => { const off = !panelBody.hidden; panelBody.hidden = off; hide.textContent = off ? 'Show' : 'Hide'; }, 'link');
   panelHead.append(panelTitle, hide); thought.append(thoughtHead, thoughtText); panelBody.append(thought, steps); panel.append(panelHead, panelBody); panel.hidden = true;
 
+  /* Parts: click one in the list or on the model to look at it alone; Ctrl-click adds another. */
+  const partsPanel = make('section', null, 'ws-parts card'), partsHead = make('div', null, 'ws-panel-head');
+  const showAll = button('Show all', 'Back to the whole model', () => pickParts([], false), 'link');
+  const partsBody = make('div', null, 'ws-parts-list'), partAbout = make('div', null, 'ws-part-about');
+  const only = button('Only this', 'Hide everything else', () => pickParts(selected, !isolate), 'link');
+  partsHead.append(make('b', 'PARTS'), showAll); partsPanel.append(partsHead, partsBody, partAbout); partsPanel.hidden = true;
+  function drawParts() {
+    partsBody.replaceChildren();
+    for (const part of partList) {
+      const row = button(part.name, part.description, e => pickParts(e.ctrlKey || e.shiftKey ? toggle(part.name) : (selected.length === 1 && selected[0] === part.name ? [] : [part.name]), isolate), selected.includes(part.name) ? 'on' : '');
+      partsBody.append(row);
+    }
+    showAll.hidden = !selected.length;
+    partAbout.replaceChildren();
+    const chosen = partList.filter(p => selected.includes(p.name));
+    if (chosen.length === 1) partAbout.append(make('p', chosen[0].description || 'No description.'));
+    else if (chosen.length > 1) partAbout.append(make('p', chosen.length + ' parts selected.'));
+    if (chosen.length) { only.textContent = isolate ? 'Show the rest faintly' : 'Only ' + (chosen.length === 1 ? 'this' : 'these'); partAbout.append(only, make('small', 'Say "make it red", "remove it" or ask about it.')); }
+  }
+  const toggle = name => selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name];
+  function applySelection(names, alone) {
+    const known = new Set(partList.map(p => p.name));
+    selected = (names || []).filter(n => known.has(n)); isolate = !!alone && selected.length > 0;
+    send({ t: 'select', names: selected, isolate });
+    drawParts(); draw();
+  }
+  function pickParts(names, alone) {   // the owner chose on the page: show it, and let Jarvis know what "this" is
+    applySelection(names, alone);
+    report({ action: 'select', parts: selected, isolate });
+  }
   const bench = make('section', null, 'ws-bench card');
   const pick = make('input'); pick.type = 'file'; pick.accept = 'image/*'; pick.hidden = true;
   const choose = button('Choose a picture', null, () => pick.click(), 'primary');
@@ -46,7 +77,9 @@
   const saved = make('div', null, 'ws-saved');
   bench.append(make('h3', 'The workshop'), make('p', 'Put a picture on the bench and I will build it in 3D, ready to pull apart: a floor plan, a product, a sketch, a logo. Or just tell me what to build.'), benchRow, saved, pick);
   const status = make('div', '', 'ws-status'); status.setAttribute('role', 'status');
-  box.append(rendered, head, hint, tabs, actions, picture, panel, bench, status);
+  box.append(rendered, head, hint, tabs, actions, picture, partsPanel, panel, bench, status);
+  // Dragging the render (or any picture already on the page) is not "putting a picture on the bench".
+  rendered.draggable = false; pictureImg.draggable = false;
 
   /* ---------- Drawing ---------- */
   const clockText = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
@@ -67,7 +100,9 @@
     bench.hidden = has || !!busy;
     panel.hidden = !(has || busy) || view === 'render';
     panelTitle.textContent = busy === 'build' ? 'BUILDING' : busy === 'change' ? 'CHANGING' : 'BUILT';
-    hint.textContent = view === 'render' || !has || busy ? '' : exploded ? 'Every part, labelled. Say "Jarvis, put it back together."' : 'Drag to turn it. Say "Jarvis, pull it apart."';
+    hint.textContent = view === 'render' || !has || busy ? '' : selected.length ? 'Click empty space, or "Show all", for the whole model again.'
+      : exploded ? 'Every part, labelled. Click one to look at it alone.' : 'Drag to turn it. Click a part to select it. Say "Jarvis, pull it apart."';
+    partsPanel.hidden = !has || busy === 'build' || view === 'render' || !partList.length;
     apart.textContent = exploded ? 'Put together' : 'Pull apart';
     for (const b of [apart, renderBtn]) b.hidden = !has || view === 'render';
     apart.disabled = renderBtn.disabled = !!busy;
@@ -95,6 +130,7 @@
     send({ t: 'reset' });
     for (const step of scene?.steps || []) send({ t: 'run', name: step.name, code: step.code, setup, quiet: true });
     if (exploded) send({ t: 'explode', on: true });
+    if (selected.length) send({ t: 'select', names: selected, isolate });
   }
   function drawSaved(list) {
     saved.replaceChildren();
@@ -118,7 +154,10 @@
     if (scene?.picture) pictureImg.src = `/workshop/file?scene=${encodeURIComponent(scene.id)}&name=picture.jpg`;
     setRender(data.render); view = data.view === 'render' && data.render ? 'render' : 'model';
     drawSaved(data.recent);
-    if (!same) replay(); else send({ t: 'explode', on: exploded });
+    selected = Array.isArray(data.selected) ? data.selected : []; isolate = !!data.isolate && selected.length > 0;
+    if (!scene) partList = [];
+    if (!same) replay(); else { send({ t: 'explode', on: exploded }); send({ t: 'select', names: selected, isolate }); }
+    drawParts();
     if (data.error) note(data.error);
     draw();
     if ((open === null ? data.open && data.busy : open) && !visible()) enter();
@@ -138,6 +177,7 @@
       status.dataset.keep = '';
       if (ev.mode === 'build') {
         scene = { id: '', title: '', steps: [], picture: !!ev.picture, versions: 0 }; setup = ''; exploded = false; setRender('');
+        partList = []; selected = []; isolate = false; drawParts();
         send({ t: 'reset' });
         if (ev.picture) pictureImg.src = '/workshop/file?scene=bench&name=bench.jpg&at=' + Date.now();
       }
@@ -165,6 +205,7 @@
     else if (p === 'render') { busy = ''; setRender(ev.url + '&at=' + Date.now()); view = 'render'; draw(); enter(); }
     else if (p === 'render-error') { busy = ''; note('The render didn\'t come out: ' + (ev.message || 'unknown')); }
     else if (p === 'view') { show(ev.view); enter(); }
+    else if (p === 'select') { view = 'model'; applySelection(ev.parts, ev.isolate); enter(); }
   });
   function repairIfBroken() { if (errors && !busy) { errors = 0; report({ action: 'repair' }); } }
 
@@ -173,7 +214,13 @@
   addEventListener('message', event => {
     if (event.source !== stage || !event.data || typeof event.data !== 'object') return;
     const m = event.data;
-    if (m.t === 'ready' && !ready) { ready = true; for (const item of queue.splice(0)) stage.postMessage(item, '*'); insets(); }
+    if (m.t === 'parts' && Array.isArray(m.parts)) {
+      const names = m.parts.map(p => p.name).join('|');
+      if (names !== partList.map(p => p.name).join('|')) { partList = m.parts.map(p => ({ name: String(p.name), description: String(p.description || '') })); drawParts(); draw(); }
+    } else if (m.t === 'pick') {
+      if (busy || view === 'render') return;
+      pickParts(m.name ? (m.add ? toggle(m.name) : (selected.length === 1 && selected[0] === m.name ? [] : [m.name])) : [], m.name ? isolate : false);
+    } else if (m.t === 'ready' && !ready) { ready = true; for (const item of queue.splice(0)) stage.postMessage(item, '*'); insets(); }
     else if (m.t === 'error') {
       errors++;
       const row = [...steps.children].find(r => r.dataset.name === m.step); if (row) { row.className = 'bad'; row.title = String(m.message); }
@@ -210,9 +257,17 @@
     } catch (e) { note('Couldn\'t use that picture: ' + e.message); }
   }
   pick.onchange = () => { putOnBench(pick.files[0]); pick.value = ''; };
-  box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('dropping'); });
+  box.addEventListener('dragover', e => { e.preventDefault(); if (!ownDrag) box.classList.add('dropping'); });
   box.addEventListener('dragleave', () => box.classList.remove('dropping'));
-  box.addEventListener('drop', e => { e.preventDefault(); box.classList.remove('dropping'); putOnBench([...e.dataTransfer.files].find(f => f.type.startsWith('image/'))); });
+  let ownDrag = false;   // a drag that began on this page (the render, a button) never counts as a picture for the bench
+  addEventListener('dragstart', () => { ownDrag = true; }, true);
+  addEventListener('dragend', () => { ownDrag = false; }, true);
+  box.addEventListener('drop', e => {
+    e.preventDefault(); box.classList.remove('dropping');
+    if (ownDrag) { ownDrag = false; return; }
+    const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
+    if (file) putOnBench(file);
+  });
   addEventListener('paste', e => {
     if (!visible()) return;
     const file = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));

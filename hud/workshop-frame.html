@@ -66,6 +66,23 @@ floor.add(grid, shadow); scene.add(floor);
 
 const root = new THREE.Group(); scene.add(root);
 let parts = [], extras = [], ticks = [], explodeTo = 0, explodeNow = 0, level = 0, levelTo = 0, radius = 1, firstFit = true;
+/* Picking parts: the chosen ones stay as they are; the rest turn to faint ghosts, or vanish with "only". */
+let selected = new Set(), isolate = false;
+const ghost = new THREE.MeshBasicMaterial({ color: 0x9fd6cc, transparent: true, opacity: .06, depthWrite: false });
+function applySelection() {
+  const active = selected.size > 0;
+  for (const p of parts) {
+    const on = !active || selected.has(p.name);
+    p.hidden = active && isolate && !on;
+    p.holder.traverse(o => {
+      if (!o.isMesh) { if (o.isLight || o.isLine || o.isPoints || o.isSprite) o.visible = on; return; }
+      if (!on && !o.userData.real) { o.userData.real = o.material; o.userData.cast = o.castShadow; o.material = ghost; o.castShadow = false; }
+      else if (on && o.userData.real) { o.material = o.userData.real; o.castShadow = o.userData.cast; delete o.userData.real; }
+    });
+  }
+  for (const e of extras) e.hidden = active;   // scenery steps aside while a part is being looked at
+  fit();
+}
 const orbit = { az: .62, el: .3, dist: 4, target: V(), azTo: .62, elTo: .3, distTo: 4, targetTo: V(), touched: false };
 function emptyBench() {   // nothing built yet: a wide floor seen from a little above
   radius = 1; floor.scale.setScalar(9); orbit.targetTo.set(0, .7, 0); orbit.distTo = 5.2; if (!orbit.touched) orbit.elTo = .3;
@@ -98,14 +115,23 @@ const api = {
   },
   add(object) { if (!object || !object.isObject3D) throw Error('api.add needs an Object3D'); extras.push(hold(object, quietRun)); },
   onTick(fn) { if (typeof fn === 'function' && ticks.length < 40) ticks.push(fn); },
+  print(width, height, draw) {   // a texture drawn with the 2D canvas: lettering, labels, dials
+    const sheet = document.createElement('canvas');
+    sheet.width = Math.min(2048, Math.max(16, width | 0)); sheet.height = Math.min(2048, Math.max(16, height | 0));
+    draw(sheet.getContext('2d'), sheet.width, sheet.height);
+    const texture = new THREE.CanvasTexture(sheet);
+    texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 8;
+    return texture;
+  },
 };
 
 function reset() {
   for (const child of [...root.children]) {
     root.remove(child);
-    child.traverse(o => { o.geometry?.dispose?.(); for (const m of [].concat(o.material || [])) m.dispose?.(); });
+    child.traverse(o => { o.geometry?.dispose?.(); for (const m of [].concat(o.material || [], o.userData.real || [])) if (m !== ghost) m.dispose?.(); });
   }
   parts = []; extras = []; ticks = []; explodeTo = explodeNow = 0; labelsDirty = true; firstFit = !orbit.touched;
+  selected = new Set(); isolate = false;
   emptyBench();
 }
 function run(message) {
@@ -120,8 +146,9 @@ function run(message) {
 /* ---------- Camera ---------- */
 function bounds(k) {
   const box = new THREE.Box3(), moved = new THREE.Box3();
-  for (const p of parts) if (!p.box.isEmpty()) box.union(moved.copy(p.box).translate(p.explode.clone().multiplyScalar(k)));
-  for (const e of extras) if (!e.box.isEmpty()) box.union(e.box);
+  const chosen = selected.size ? parts.filter(p => selected.has(p.name)) : parts;   // frame what is being looked at
+  for (const p of chosen) if (!p.box.isEmpty()) box.union(moved.copy(p.box).translate(p.explode.clone().multiplyScalar(k)));
+  if (!selected.size) for (const e of extras) if (!e.box.isEmpty()) box.union(e.box);
   return box;
 }
 function fit() {
@@ -152,7 +179,23 @@ function applyInsets() {
 }
 let drag = null;
 canvas.addEventListener('contextmenu', e => e.preventDefault());
-canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, pan: e.button !== 0 || e.shiftKey }; canvas.setPointerCapture(e.pointerId); canvas.classList.add('dragging'); });
+canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, pan: e.button !== 0 || e.shiftKey, x0: e.clientX, y0: e.clientY, button: e.button }; canvas.setPointerCapture(e.pointerId); canvas.classList.add('dragging'); });
+const ray = new THREE.Raycaster(), aim2d = new THREE.Vector2();
+function partAt(clientX, clientY) {
+  const box = canvas.getBoundingClientRect();
+  aim2d.set((clientX - box.left) / box.width * 2 - 1, -((clientY - box.top) / box.height) * 2 + 1);
+  ray.setFromCamera(aim2d, camera);
+  const owner = new Map(parts.filter(p => !p.hidden).map(p => [p.holder, p]));
+  const hits = ray.intersectObjects([...owner.keys()], true).filter(h => h.object.isMesh);
+  const solid = h => { const m = h.object.userData.real || h.object.material; const one = Array.isArray(m) ? m[0] : m; return !(one && one.transparent && one.opacity < .5); };
+  const hit = hits.find(solid) || hits[0];   // glass and see-through roofs don't get in the way of what is behind them
+  for (let o = hit && hit.object; o; o = o.parent) if (owner.has(o)) return owner.get(o).name;
+  return null;
+}
+canvas.addEventListener('pointerup', e => {
+  if (drag && drag.button === 0 && Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) < 6)
+    say({ t: 'pick', name: partAt(e.clientX, e.clientY), add: e.ctrlKey || e.shiftKey || e.metaKey });
+});
 canvas.addEventListener('pointermove', e => {
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; orbit.touched = true;
@@ -181,13 +224,15 @@ function buildLabels() {
 const projected = V();
 function placeLabels(width, height) {
   if (labelsDirty) buildLabels();
-  const shown = THREE.MathUtils.clamp((explodeNow - .45) / .4, 0, 1);
+  const shown = selected.size ? 1 : THREE.MathUtils.clamp((explodeNow - .45) / .4, 0, 1);
   labelBox.style.opacity = shown;
   if (!shown || !parts.length) return;
   const points = parts.map((p, i) => {
     projected.copy(p.centre).add(p.holder.position).project(camera);
-    return { i, x: (projected.x + 1) / 2 * width, y: (1 - projected.y) / 2 * height, hidden: projected.z > 1 };
+    return { i, x: (projected.x + 1) / 2 * width, y: (1 - projected.y) / 2 * height,
+             hidden: projected.z > 1 || (selected.size > 0 && !selected.has(p.name)) };
   });
+  if (!points.some(p => !p.hidden)) { for (const n of labelNodes) n.box.style.display = n.line.style.display = n.dot.style.display = 'none'; return; }
   const xs = points.filter(p => !p.hidden).map(p => p.x), mid = (Math.min(...xs) + Math.max(...xs)) / 2;
   for (const p of points) p.right = p.x > mid + width * .035;
   for (const side of [false, true]) {
@@ -238,7 +283,7 @@ function frame(now) {
     if (item.explode) item.holder.position.copy(item.explode).multiplyScalar(explodeNow);
     item.holder.position.y += (1 - t) * radius * .22;
     item.holder.scale.setScalar(.82 + .18 * t);
-    item.holder.visible = age >= 0;
+    item.holder.visible = age >= 0 && !item.hidden;
   }
   for (const fn of [...ticks]) { try { fn(now / 1000, dt, level); } catch (error) { ticks.splice(ticks.indexOf(fn), 1); say({ t: 'error', step: 'animation', message: String(error && error.message || error).slice(0, 300) }); } }
   orbit.az += (orbit.azTo - orbit.az) * ease; orbit.el += (orbit.elTo - orbit.el) * ease; orbit.dist += (orbit.distTo - orbit.dist) * ease; orbit.target.lerp(orbit.targetTo, ease);
@@ -263,6 +308,11 @@ addEventListener('message', event => {
   }
   else if (m.t === 'level') levelTo = Math.max(levelTo, Math.min(1, +m.v || 0));
   else if (m.t === 'fit') { orbit.touched = false; firstFit = true; fit(); }
+  else if (m.t === 'select') {
+    const names = new Set(parts.map(p => p.name));
+    selected = new Set((Array.isArray(m.names) ? m.names : []).filter(n => names.has(n))); isolate = !!m.isolate && selected.size > 0;
+    applySelection();
+  }
   else if (m.t === 'snapshot') {
     let data = '';
     if (syncSize() && parts.length) {

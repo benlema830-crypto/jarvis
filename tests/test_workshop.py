@@ -102,7 +102,7 @@ class WorkshopFlowTest(unittest.TestCase):
         self.calls = []
         fresh = {"open": False, "busy": "", "scene": None, "exploded": False, "view": "model", "thinking": "",
                  "started": 0.0, "seconds": 0, "tokens": 0, "done": [], "notes": [], "error": "", "errors": [],
-                 "render": "", "model": ""}
+                 "render": "", "model": "", "selected": [], "isolate": False}
 
         def generate(model, effort, system, prompt, image=None, on_thinking=None, on_text=None, cancel=None):
             self.calls.append({"model": model, "effort": effort, "prompt": prompt, "image": image})
@@ -311,6 +311,67 @@ class WorkshopFlowTest(unittest.TestCase):
         workshop._page["at"] -= workshop.PAGE_FRESH_SECONDS + 1  # an old page that stopped reporting
         self.assertFalse(workshop.page_open())
 
+    def tin(self):
+        """A model with the parts the owner's tin had, built through the normal path."""
+        names = ["Base tub", "Side band", "Nicotine pouches", "Lid", "Catch lid", "Top label"]
+        steps = "".join(f"=== STEP: Making the {n.lower()}\napi.part(\"{n}\", \"The {n.lower()} of the tin.\", new THREE.Group(), [0, 1, 0]);\n"
+                        for n in names)
+        self.replies[:] = ["TITLE: Pouch Tin\n=== SETUP\n" + steps + "=== SPOKEN\nA tin, sir."]
+        self.page()
+        workshop.build("a tin")
+        self.wait()
+
+    def test_parts_are_found_from_what_was_said_even_when_misheard(self):
+        self.tin()
+        scene = workshop.STATE["scene"]
+        self.assertEqual(workshop.match_parts(scene, "Let's focus on the sideband and the bass tube"), ["Base tub", "Side band"])
+        self.assertEqual(workshop.match_parts(scene, "the side band and the bass tube"), ["Base tub", "Side band"])
+        self.assertEqual(workshop.match_parts(scene, "the lid"), ["Lid"])                 # not the catch lid as well
+        self.assertEqual(workshop.match_parts(scene, "show me the pouches"), ["Nicotine pouches"])
+        self.assertEqual(workshop.match_parts(scene, "the engine"), [])
+
+    def test_focus_selects_parts_without_touching_the_model(self):
+        self.tin()
+        before = workshop.script(workshop.STATE["scene"])
+        reply = workshop.focus("the side band and the base tub")
+        self.assertIn("Base tub, Side band", reply)
+        self.assertIn("rest shown faintly", reply)
+        self.assertIn("The side band of the tin.", reply)        # so he can talk about what he is showing
+        self.assertEqual(self.events[-1], ("select", {"parts": ["Base tub", "Side band"], "isolate": False}))
+        self.assertEqual(workshop.snapshot()["selected"], ["Base tub", "Side band"])
+        self.assertEqual(len(self.calls), 1)                      # the model was not asked for anything
+        self.assertEqual(workshop.script(workshop.STATE["scene"]), before)
+        self.assertIn("everything else hidden", workshop.focus("only the lid"))
+        self.assertTrue(workshop.snapshot()["isolate"])
+        self.assertIn("whole model", workshop.focus("everything"))
+        self.assertEqual(workshop.snapshot()["selected"], [])
+        with self.assertRaises(ValueError) as error:
+            workshop.focus("the engine")
+        self.assertIn("Its parts are: Base tub", str(error.exception))
+
+    def test_parts_clicked_on_the_page_become_what_this_means(self):
+        self.tin()
+        workshop.page_report({"action": "select", "parts": ["Lid", "Not a part"], "isolate": True})
+        self.assertEqual(workshop.snapshot()["selected"], ["Lid"])
+        self.assertIn("The user has selected: Lid", workshop.describe())
+        self.replies.append("=== STEP: Making the lid\napi.part(\"Lid\", \"A red lid.\", new THREE.Group(), [0, 1, 0]);\n=== SPOKEN\nRed, sir.")
+        workshop.edit("make this one red")
+        self.wait()
+        self.assertIn("the owner has selected: Lid", self.calls[1]["prompt"])
+        self.assertEqual(workshop.snapshot()["selected"], ["Lid"])      # still selected after the change
+
+    def test_a_new_build_or_another_model_drops_the_selection(self):
+        self.tin()
+        workshop.focus("the lid")
+        workshop.clear()
+        self.assertEqual(workshop.snapshot()["selected"], [])
+        self.tin()
+        self.assertEqual(workshop.snapshot()["selected"], [])
+
+    def test_the_builder_is_told_to_model_real_things_as_they_are(self):
+        for expected in ("Never invent internals", "api.print(", "it has no battery"):
+            self.assertIn(expected, workshop.SYSTEM)
+
     def test_tool_routes_actions(self):
         import tools
         run = tools.TOOLS_BY_NAME["workshop"]
@@ -321,6 +382,10 @@ class WorkshopFlowTest(unittest.TestCase):
             run.call({"action": "explode"})
             run.call({"action": "assemble"})
             self.assertEqual([c.args for c in explode.call_args_list], [(True,), (False,)])
+        with mock.patch.object(workshop, "focus", return_value="f") as focus:
+            self.assertEqual(run.call({"action": "focus", "request": "the lid"}), "f")
+            run.call({"action": "show_all", "request": "ignored"})
+            self.assertEqual([c.args for c in focus.call_args_list], [("the lid",), ("",)])
         self.assertIn("Unknown workshop action", run.call({"action": "dance"}))
 
 

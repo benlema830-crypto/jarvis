@@ -1352,7 +1352,11 @@ def workshop(action: str, request: str = "", picture: str = ""):
             edit (any change to the model on the bench: "make the housing red", "remove the stairs", "add palm
             trees by the pool"; `request` is the change in their words, including a correction of the last one),
             explode ("pull it apart", "break it apart", "show me inside": every part spread out and labelled),
-            assemble ("put it back together"), render ("render it": a realistic picture of the model, about a
+            assemble ("put it back together"),
+            focus (look at parts on their own: "let's focus on the side band and the base tub", "show me just
+            the lid", "what's this one"; `request` holds the part names as said, plus "only" to hide the rest;
+            an empty `request` or "everything" brings the whole model back. This changes the view, never the
+            model, so never use edit for it), render ("render it": a realistic picture of the model, about a
             minute), show_model or show_render (which of the two is on screen), undo (take back the last change),
             open (open the workshop: the empty bench, or a saved model named in `request`), clear (an empty
             bench), close, status (what is on the bench and its parts, for answering questions about them),
@@ -1370,6 +1374,8 @@ def workshop(action: str, request: str = "", picture: str = ""):
         return bench.edit(request)
     if action in ("explode", "assemble"):
         return bench.explode(action == "explode")
+    if action in ("focus", "select", "show_all"):
+        return bench.focus("" if action == "show_all" else request)
     if action == "render":
         return bench.render()
     if action in ("show_model", "show_render"):
@@ -1386,7 +1392,7 @@ def workshop(action: str, request: str = "", picture: str = ""):
         return bench.stop()
     if action == "status":
         return bench.describe()
-    return ("Unknown workshop action. Use build, edit, explode, assemble, render, show_model, show_render, undo, "
+    return ("Unknown workshop action. Use build, edit, explode, assemble, focus, render, show_model, show_render, undo, "
             "open, clear, close, status or cancel.")
 
 

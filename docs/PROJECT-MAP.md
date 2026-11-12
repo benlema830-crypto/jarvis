@@ -341,6 +341,14 @@ explode)`, `api.add`, `api.onTick`. A step that throws is reported back and sent
   page left open from before the workshop existed showed nothing and he said the model was on screen.
 - An open page reloads itself when the files it is made of change (`/ui-version`, checked every 30 s and when
   Jarvis comes back), unless something is typed in the prompt.
+- Parts can be picked: a click on the model, the PARTS list, or `workshop(action="focus")` by voice (names are
+  matched loosely, since speech recognition hears "bass tube" for "base tub"). Picked parts stay as they are and
+  the rest turn faint, or vanish with "only". The page tells Jarvis what is picked, so "make this one red" changes
+  that part. Focus changes the view, never the model.
+- Real things are built as they are: the builder is told never to invent internals a product doesn't have, and
+  `api.print` gives it a canvas to draw lettering and labels on. Before that a tin came out as embossed shapes,
+  and a render of it, dragged onto the bench by accident, was rebuilt as a gadget with a made-up circuit board.
+  Dragging something already on the page no longer counts as putting a picture on the bench.
 - Scenes live in `data/workshop/<id>/` (script, picture, renders); `bench.json` remembers which one is on the bench
   across a restart.
 - Measured: a product build about 90-120 s at low effort (half of it thinking), a change about 20 s, a floor plan
