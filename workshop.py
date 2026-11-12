@@ -40,6 +40,11 @@ RENDER_SECONDS = 300
 SNAPSHOT_WAIT = 8
 BENCH_FRESH_SECONDS = 900
 MARK = re.compile(r"^===\s*(SETUP|STEP|REMOVE|NOTE|SPOKEN)\b:?\s*(.*?)\s*$")
+VARIANT = re.compile(r"^===\s*VARIANT\b:?\s*(.*?)\s*$", re.M)
+SCOUT_WAIT = 150        # seconds a finished build waits for the photo scout before checking without photos
+EXPORT_WAIT = 25
+VIDEO_SECONDS = 6
+OUTBOX = Path.home() / "Documents" / "Jarvis Workshop"   # exported models and videos, where the owner can find them
 
 FORMAT = """TITLE: <a name for the thing, two to four words>
 === SETUP
@@ -79,6 +84,17 @@ What your code can use:
   real thing: its name and lettering, a logo drawn from shapes and text, a label, a warning panel, a dial, a
   screen. A product is recognised by its printed face, so give it one; a flat colour with a few raised shapes
   does not read as the product. A CircleGeometry or the cap of a cylinder takes a round label.
+- api.photo(n, [x, y, w, h]): when you have been shown numbered photographs of the real thing, this returns
+  photograph n as a texture, cropped to the rectangle given as fractions of the photograph (left, top, width,
+  height). Where a photograph shows a printed face square-on (the top of a tin, the front of a box, a screen),
+  put that region on the face instead of redrawing it: nothing you draw matches the real artwork. For a round
+  face, crop the square that just contains the circle.
+- api.motion(name, function (k) { ... }): something the thing really does, by a plain name the owner would say
+  ("Open the lid", "Extend the antenna"). The page calls the function with k from 0 (rest) to 1 (done) and
+  back, so set positions and rotations from k. For something that keeps going ("Spin the fan"), pass
+  {loop: true} as a third argument and k is the seconds it has been running. Keep the objects it moves in SETUP
+  variables shared with the step that makes them. Give one to three motions to anything with a lid, door,
+  hinge, wheel, drawer, button or moving arm.
 - api.onTick(function (t, dt, level) { ... }): called every frame. t is seconds, level is 0 to 1 and follows
   JARVIS's voice. Use it for one or two subtle touches (a light that breathes, a ring that pulses with the
   voice). Keep it cheap.
@@ -89,22 +105,29 @@ The page already has lights, shadows, a floor grid and a camera that frames what
 of those (a small PointLight inside a glowing part is fine). Shadows are switched on for you.
 
 Each step is its own function body: it sees SETUP and `api` and `THREE`, never another step's variables.
-Use six to fourteen steps, in the order the thing would really be assembled.
+Use eight to eighteen steps, in the order the thing would really be assembled.
 
 The owner is watching and waiting, so write tight code: put every repeated shape in a SETUP helper (a box, a
-wall between two points, a tree, a chair) and call it, write no comments, and keep the whole script under
-about 9,000 tokens. Detail comes from well-chosen shapes, not from length.
+rounded slab, a screw, a chip with its marking, a wall between two points, a tree) and call it, write no
+comments, and keep the whole script under about 14,000 tokens. Spend them on detail, not on repetition.
 
 Make it look made, not blocked out: true proportions, rounded edges (Lathe and Extrude with bevels), at
 least three materials that differ in colour, roughness and metalness, emissive glows where something would
 light up, and the small details that sell it (seams, screws, vents, feet, cables, LEDs, buttons). A product
-has eight to sixteen parts.
+has twelve to twenty-four parts, inside and out, and each part carries its own detail: a logic board has chips
+with printed markings, shield cans, connectors and screw posts; a battery has its printed label and a flex
+cable; a camera has a lens barrel, glass and a sensor board; a screen shows something. A part that is one plain
+box is unfinished.
 
 A real thing is built as it really is. When the owner names a real product, or the picture shows one, model
 its true shape, proportions, colours and printed text, and give it only the parts it really has (a snuff tin is
-a tub, a lid, a label and the pouches inside; it has no battery and no circuit board). Never invent internals,
-electronics or features the real thing does not have. If you don't know what is inside it, model the outside
-and say so in SPOKEN. Design the insides yourself only when the owner asks you to design something new.
+a tub, a lid, a label and the pouches inside; it has no battery and no circuit board). Never add parts the
+real thing does not have. But do build the parts it does have, inside as well as outside: a phone has a display
+assembly, a frame, a battery, a logic board with its chips and shields, camera modules, speakers, a haptic
+motor, a charging coil, antenna bands and screws, laid out the way teardowns of it show. Use what is widely
+known about how the thing is made; where you only know roughly, model it roughly and say in SPOKEN which parts
+are approximate. A pulled-apart view that is only an empty shell is a failure. Design the insides freely only
+when the owner asks you to design something new.
 
 From a picture (a photograph, a drawing or a rendered image): build the object it shows. Reproduce what is
 shown, with its layout and proportions, not a generic version. From a floor
@@ -145,7 +168,7 @@ _work = threading.Lock()   # one build, change or render at a time
 _cancel = threading.Event()
 STATE = {"open": False, "busy": "", "scene": None, "exploded": False, "view": "model", "thinking": "",
          "started": 0.0, "seconds": 0, "tokens": 0, "done": [], "notes": [], "error": "", "errors": [], "render": "",
-         "model": "", "selected": [], "isolate": False}
+         "model": "", "selected": [], "isolate": False, "measuring": False, "cut": None, "moving": [], "variants": []}
 
 
 # ---------- Small helpers ----------
@@ -167,7 +190,9 @@ def settings():
     model = str(value.get("model", "fable")).lower()
     pick = lambda key, default: value[key] if value.get(key) in agent_models.EFFORTS else default
     return {"model": model if model in agent_models.CLAUDE else "fable",
-            "effort": pick("effort", "low"), "edit_effort": pick("edit_effort", "low")}
+            "effort": pick("effort", "low"), "edit_effort": pick("edit_effort", "low"),
+            "check": value.get("check", True) is not False,            # compare with photos and improve after a build
+            "references": value.get("references", True) is not False}  # look real things up on the web first
 
 
 def _slug(text):
@@ -455,11 +480,14 @@ async def _stream(model, effort, system, prompt, image, on_thinking, on_text, ca
         if account.get("apiKeySource") not in (None, "none"):
             raise RuntimeError("Claude Code would use an API key, so the workshop stopped.")
         if image:
+            pictures = [image] if isinstance(image, (bytes, bytearray)) else list(image)
+
             async def messages():
                 yield {"type": "user", "parent_tool_use_id": None, "session_id": "default",
                        "message": {"role": "user", "content": [
-                           {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                                        "data": base64.standard_b64encode(image).decode()}},
+                           *({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                          "data": base64.standard_b64encode(one).decode()}}
+                             for one in pictures),
                            {"type": "text", "text": prompt}]}}
             await client.query(messages())
         else:
@@ -563,7 +591,7 @@ def _begin(kind, title=""):
         STATE.update(open=True, busy=kind, thinking="", started=time.time(), tokens=0, done=[], notes=[],
                      error="", errors=[], view="model", model=settings()["model"])
         if kind == "build":
-            STATE.update(scene=None, exploded=False, selected=[], isolate=False, render="")
+            STATE.update(scene=None, exploded=False, selected=[], isolate=False, measuring=False, cut=None, moving=[], variants=[], render="")
     _cancel.clear()
 
 
@@ -598,11 +626,14 @@ def _build(request, image, about, scene_id):
         _emit(kind, value=value, index=len(scene["steps"]) - 1 if kind == "step" else None)
 
     feed = Feed(on)
+    scouting = None
     try:
+        folder = _folder(scene_id)
         if image:
-            folder = _folder(scene_id)
             folder.mkdir(parents=True, exist_ok=True)
             (folder / "picture.jpg").write_bytes(image)
+        elif config["references"]:
+            scouting = _Scout(request, folder)   # real photographs, looked up while the first build runs
         prompt = "Build this: " + request + ("\n\n" + about if about else "")
         usage = generate(agent_models.CLAUDE[config["model"]], config["effort"], SYSTEM, prompt, image,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
@@ -617,14 +648,24 @@ def _build(request, image, about, scene_id):
         seconds, tokens = round(time.time() - STATE["started"]), _usage_tokens(usage, progress.chars // 4)
         with _lock:
             STATE.update(scene=scene, tokens=tokens, seconds=seconds)
+        _emit("done", seconds=seconds, tokens=tokens, title=scene["title"], checking=config["check"])
+        if config["check"]:
+            scene, better = _check(scene, scouting)
+            spoken = better or spoken
+            seconds = round(time.time() - STATE["started"])
+        elif scouting:
+            scouting.stop()
         _finish()
-        _emit("done", seconds=seconds, tokens=tokens, title=scene["title"])
+        _emit("ready", seconds=seconds, title=scene["title"])
         unseen = on_screen(min(1, PAGE_WAIT_SECONDS))
         _announce((spoken or f"{scene['title']} is built, sir. Say pull it apart to see inside.")
                   + (" It's on the Workshop tab of the Jarvis page, which isn't showing it right now." if NOT_SHOWN in unseen else ""),
                   f"[WORKSHOP] You built \"{scene['title']}\" in the workshop ({len(scene['steps'])} steps, {seconds} s) "
                   f"and told the user so. Its parts, for answering questions: {part_lines(scene)}. "
-                  "workshop(action=...) can edit it, explode it, assemble it, render it or undo a change.")
+                  + (f"Things it can do (workshop action=move): {', '.join(motions(scene))}. " if motions(scene) else "")
+                  + (f"It was checked against {len(scene.get('refs', []))} photographs of the real thing. " if scene.get("refs") else "")
+                  + "workshop(action=...) can edit it, add detail, explode it, focus on parts, move it, measure it, "
+                    "cut it open, show variants, render it, record or export it, or undo a change.")
     except InterruptedError:
         _finish("Stopped.")
         _emit("error", message="Stopped.")
@@ -638,6 +679,8 @@ def _build(request, image, about, scene_id):
         _announce(f"The workshop build didn't finish, sir: {reason}",
                   "[WORKSHOP] The build failed and you told the user why. Nothing usable was built.")
     finally:
+        if scouting:
+            scouting.stop()
         _work.release()
 
 
@@ -682,6 +725,11 @@ def _edit(request, repair=False):
         _finish()
         _emit("patch", setup=changed["setup"], steps=changed["steps"], seconds=seconds, tokens=tokens,
               notes=notes or patch["notes"])
+        with _lock:
+            wanted = STATE.pop("pending_motion", "")
+        added = _match(motions(changed), wanted) if wanted else None
+        if added:
+            _play(added, True)   # the motion that was just asked for, now that the model has it
         if not repair:
             _announce(patch["spoken"] or "Done, sir.",
                       f"[WORKSHOP] You changed \"{changed['title']}\" as asked ({request[:200]}) and told the user. "
@@ -849,13 +897,13 @@ def open_bench(words=""):
         return "A build is still running in the workshop." + on_screen()
     with _lock:
         if match:
-            STATE.update(open=True, scene=load(match["id"]), exploded=False, selected=[], isolate=False, view="model", render="", error="",
+            STATE.update(open=True, scene=load(match["id"]), exploded=False, selected=[], isolate=False, measuring=False, cut=None, moving=[], variants=[], view="model", render="", error="",
                          done=[], notes=[], thinking="")
             _remember(match["id"])
         else:
             STATE.update(open=True, view="model")
             if words:
-                STATE.update(scene=None, render="", selected=[], isolate=False)
+                STATE.update(scene=None, render="", selected=[], isolate=False, measuring=False, cut=None, moving=[], variants=[])
     _emit("open", scene=bool(match))
     shown = on_screen()
     if match:
@@ -874,7 +922,7 @@ def open_scene(scene_id):
     with _lock:
         if STATE["busy"]:
             raise ValueError("The workshop is busy.")
-        STATE.update(open=True, scene=scene, exploded=False, selected=[], isolate=False, view="model", render="", error="", done=[], notes=[],
+        STATE.update(open=True, scene=scene, exploded=False, selected=[], isolate=False, measuring=False, cut=None, moving=[], variants=[], view="model", render="", error="", done=[], notes=[],
                      thinking="")
     _remember(scene["id"])
     _emit("open", scene=True)
@@ -885,7 +933,7 @@ def clear():
     with _lock:
         if STATE["busy"]:
             return _busy_line()
-        STATE.update(open=True, scene=None, exploded=False, selected=[], isolate=False, view="model", render="", error="", done=[], notes=[],
+        STATE.update(open=True, scene=None, exploded=False, selected=[], isolate=False, measuring=False, cut=None, moving=[], variants=[], view="model", render="", error="", done=[], notes=[],
                      thinking="")
     _remember("")
     _emit("open", scene=False)
@@ -932,6 +980,11 @@ def snapshot():
                 "done": list(STATE["done"]), "notes": list(STATE["notes"]), "error": STATE["error"],
                 "render": STATE["render"], "model": STATE["model"], "now": time.time(),
                 "selected": list(STATE.get("selected", [])), "isolate": bool(STATE.get("isolate")),
+                "measuring": bool(STATE.get("measuring")), "cut": STATE.get("cut"),
+                "moving": list(STATE.get("moving", [])), "motions": motions(scene) if scene else [],
+                "refs": list(scene.get("refs", [])) if scene else [],
+                "variants": [{"name": v["name"], "setup": v["scene"].get("setup", ""), "steps": v["scene"]["steps"]}
+                             for v in STATE.get("variants", [])],
                 "scene": scene and {"id": scene["id"], "title": scene["title"], "setup": scene.get("setup", ""),
                                     "steps": scene["steps"], "picture": bool(scene.get("picture")),
                                     "versions": len(scene.get("versions", []))},
@@ -969,6 +1022,23 @@ def page_report(payload):
     elif action == "explode":
         with _lock:
             STATE["exploded"] = bool(payload.get("on"))
+    elif action == "sizes":    # what the page measured: the whole model, each part, and the ruler if two points are set
+        _sizes.update(at=time.time(), whole=_triple(payload.get("whole")), ruler=_number(payload.get("ruler")),
+                      parts={str(k)[:80]: _triple(v) for k, v in list((payload.get("parts") or {}).items())[:60]})
+    elif action in ("measure", "cut", "motion", "variant"):   # the owner used the buttons; keep Jarvis's picture right
+        with _lock:
+            if action == "measure":
+                STATE["measuring"] = bool(payload.get("on"))
+            elif action == "cut":
+                STATE["cut"] = {"axis": str(payload.get("axis", "x"))[:1], "at": float(payload.get("at", .5))} if payload.get("on") else None
+            elif action == "motion":
+                moving = set(STATE.get("moving", []))
+                (moving.add if payload.get("on") else moving.discard)(str(payload.get("name", ""))[:80])
+                STATE["moving"] = sorted(moving)
+        if action == "variant":
+            choose(str(payload.get("name", "")))
+    elif action in ("detail", "export", "video"):
+        {"detail": detail, "export": export, "video": video}[action](str(payload.get("request", "")))
     elif action == "select":   # the owner clicked parts on the page; "this" in their next sentence means these
         with _lock:
             known = {name for name, _ in parts(STATE["scene"])} if STATE["scene"] else set()
@@ -998,11 +1068,12 @@ def repair():
 
 # ---------- A realistic picture, with Codex image generation on the ChatGPT plan ----------
 
-def _snapshot_file():
-    """Ask the page for a picture of the 3D view as the owner has it turned, and wait for it."""
+def _snapshot_file(mode="view"):
+    """Ask the page for a picture of the 3D view as the owner has it turned, and wait for it. mode "review" asks
+    for four views on one sheet instead (front, back, top, pulled apart), for the builder to check its own work."""
     nonce = uuid.uuid4().hex[:12]
     path = STORE / f"snap-{nonce}.jpg"
-    _emit("snapshot", nonce=nonce)
+    _emit("snapshot", nonce=nonce, mode=mode)
     deadline = time.time() + SNAPSHOT_WAIT
     while time.time() < deadline:
         if path.is_file() and path.stat().st_size > 2000:
@@ -1084,3 +1155,611 @@ def show(view):
     _emit("view", view=view)
     return ("The render is the view in the workshop." if view == "render"
             else "The 3D model is the view in the workshop.") + on_screen()
+
+
+# ====================================================================================================
+# Added 2026-11-11 after the first real use: check the model against photographs and add detail, moving
+# parts, measurements, a cut-away view, variants side by side, export, and a turntable clip.
+# ====================================================================================================
+
+PATCH_FORMAT = """=== SETUP
+<the whole new SETUP, only if SETUP has to change>
+=== STEP: <the exact name of an existing step>
+<that step's whole new code>
+=== STEP: <a new name>
+<code for a new step, added at the end>
+=== REMOVE: <the exact name of a step to delete>
+=== NOTE: <one line per change, as JARVIS would say it while working: "Seating the battery under the board">
+=== SPOKEN
+<what JARVIS says aloud>"""
+
+REVIEW = """You built the scene whose script is at the end. Look at it again with fresh eyes, then make it right
+and make it rich.
+
+What you are shown, in order: {shown}
+
+Do three things.
+1. Correct it. Compare the model with {truth}: its overall shape and proportions, its colours and finishes,
+   what is printed on it and where, and the place and number of every feature. Fix parts that float, sink
+   into each other, face the wrong way or are the wrong size, and lettering that is mirrored, cramped or
+   illegible.
+2. Complete it. Add the parts the real thing has that are missing, inside as well as outside, each with its
+   name, description and a pulled-apart offset that keeps it clear of the others. Never add what it does not
+   have.
+3. Detail it. Bring every part up to what a close product photograph shows: edges and seams, fasteners,
+   ports and grilles, printed markings (api.print), surface finishes, the small components on a board, what
+   is on a screen. Where a photograph shows a printed face square-on, put it on the model with api.photo.
+   Give it a motion or two (api.motion) if it has something that opens, turns or slides and has none yet.
+{focus}{errors}
+Reply with only what changes, in this format and nothing else:
+
+""" + PATCH_FORMAT + """
+
+Leave out every step that stays the same. SPOKEN here is JARVIS's last word on the finished model: what it is,
+in one sentence, which parts are approximate if any, and an offer of what he can do next. Dry, British, "sir"."""
+
+VARIANTS = """The owner wants to compare versions of the scene you built, side by side. Its script is at the end.
+They say: {request}
+
+Reply with the variants they asked for (three if they gave no number, never more than four), in this format
+and nothing else. For each one:
+
+=== VARIANT: <a short name the owner would say, e.g. "Midnight blue">
+<then only the patch blocks that differ from the current script for this variant: === SETUP with the whole
+new SETUP, === STEP: <exact existing name> with that step's whole new code, === STEP: <new name>,
+=== REMOVE: <name>>
+
+and after the last variant:
+
+=== SPOKEN
+<One or two sentences JARVIS says aloud: what the choices are, and that the owner can pick one by name.>
+
+Make the variants really different from each other in the way that was asked, and keep everything else the
+same."""
+
+MOTION = re.compile(r"""api\.motion\(\s*(["'`])((?:\\.|(?!\1).)*)\1""", re.S)
+OFF = re.compile(r"\b(?:close|shut|stop|back|reset|retract|fold|lower|off|return|rest|undo)\b")
+HIDE = re.compile(r"\b(?:off|hide|stop|done|away|close|remove|no more|end|whole)\b")
+SWITCH_OFF = ("turn off", "turn it off", "switch off", "switch it off", "hide", "stop", "no more", "close it", "put it back",
+              "make it whole", "back together", "get rid", "remove the", "take away")
+
+
+def _is_off(words):
+    """The owner wants a view aid gone ("off", "hide the measurements"), not "take a third off the top"."""
+    words = words.strip(" .!")
+    return words in ("off", "done", "end", "whole", "none", "close", "close up") or words.startswith(SWITCH_OFF) or HIDE_ONLY.fullmatch(words) is not None
+
+
+HIDE_ONLY = re.compile(r"(?:that'?s |i'?m )?(?:enough|done|finished)(?: with (?:that|it|the \w+))?")
+IDLE_WORDS = {"the", "and", "its", "open", "close", "shut", "start", "stop", "turn", "make", "move", "out", "back",
+              "show", "play", "run", "let", "see", "with", "for", "version", "variant", "option", "one", "number"}
+_sizes = {"at": 0.0, "whole": None, "parts": {}, "ruler": None}
+
+
+class _Scout:
+    """Looks up photographs of the real thing in the background (workshop_refs.py) while the build runs."""
+
+    def __init__(self, request, folder):
+        self.found, self.done, self.cancel = [], threading.Event(), threading.Event()
+        threading.Thread(target=self._run, args=(request, Path(folder) / "refs"), daemon=True, name="workshop-scout").start()
+
+    def _run(self, request, folder):
+        try:
+            self.found = find_references(request, folder, cancel=self.cancel)
+        finally:
+            self.done.set()
+
+    def result(self, wait):
+        """The photographs, waiting at most `wait` seconds more for the scout to finish."""
+        deadline = time.time() + wait
+        while not self.done.is_set() and time.time() < deadline and not _cancel.is_set():
+            time.sleep(0.3)
+        if not self.done.is_set():
+            self.stop()
+        return list(self.found)
+
+    def stop(self):
+        self.cancel.set()
+
+
+def find_references(request, folder, cancel=None):
+    """Replaced in tests; a test that forgets to never reaches the web or Codex."""
+    import testing_guard
+    import workshop_refs
+    if testing_guard.under_test():
+        return []
+    return workshop_refs.scout(request, folder, cancel=cancel)
+
+
+def motions(scene):
+    """The named motions in the script ("Open the lid"), in order."""
+    found = []
+    for step in scene["steps"]:
+        for match in MOTION.finditer(step["code"]):
+            name = " ".join(match.group(2).replace("\\", "").split())
+            if name and name not in found:
+                found.append(name)
+    return found
+
+
+def _match(names, words):
+    """The name the owner most likely means, or None: scored by how many of its telling words were said."""
+    import difflib
+    said = [w for w in re.findall(r"[a-z0-9]+", str(words).casefold())]
+    best, score = None, 0.0
+    for name in names:
+        tokens = [t for t in re.findall(r"[a-z0-9]+", name.casefold()) if t not in IDLE_WORDS and len(t) > 1] or \
+                 re.findall(r"[a-z0-9]+", name.casefold())
+        hits = sum(1 for t in tokens if difflib.get_close_matches(t, said, n=1, cutoff=0.75))
+        share = hits / len(tokens) if tokens else 0
+        if hits and share > score:
+            best, score = name, share
+    return best
+
+
+def _revise(scene, prompt, images, label, effort):
+    """Send the script back with a request and apply what comes back. Returns (the new scene, the patch).
+    Raises ValueError when nothing changed. The caller holds the work lock."""
+    import agent_models
+    config, progress, notes = settings(), _Progress(), []
+
+    def on(kind, value):
+        if kind == "note":
+            notes.append(value)
+            with _lock:
+                STATE["notes"].append(value)
+            _emit("note", value=value)
+
+    feed = Feed(on)
+    usage = generate(agent_models.CLAUDE[config["model"]], effort, SYSTEM, prompt[:MAX_SCRIPT], images or None,
+                     progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
+    feed.add("", final=True)
+    patch = parse(feed.text)
+    changed = apply_patch(scene, patch)
+    changed["versions"] = (scene.get("versions", []) + [
+        {"setup": scene.get("setup", ""), "steps": scene["steps"], "at": time.time(), "request": label}])[-MAX_VERSIONS:]
+    changed["updated"] = time.time()
+    changed.pop("repaired", None)
+    _save(changed)
+    still = {name for name, _ in parts(changed)}
+    seconds, tokens = round(time.time() - STATE["started"]), _usage_tokens(usage, progress.chars // 4)
+    with _lock:
+        kept = [n for n in STATE.get("selected", []) if n in still]
+        STATE.update(scene=changed, tokens=STATE.get("tokens", 0) + tokens if STATE.get("busy") == "check" else tokens,
+                     seconds=seconds, render="", selected=kept, isolate=bool(STATE.get("isolate")) and bool(kept))
+    _emit("patch", setup=changed["setup"], steps=changed["steps"], seconds=seconds, tokens=STATE["tokens"],
+          notes=notes or patch["notes"])
+    return changed, patch
+
+
+def _review_material(scene, sheet):
+    """(the pictures to show, the sentence saying what they are, what to compare against)."""
+    images, shown = [], []
+    if sheet:
+        images.append(Path(sheet).read_bytes())
+        shown.append("one sheet with four views of your model as it looks now (front, back, from above, pulled apart)")
+    folder = _folder(scene["id"])
+    truth = "what the owner asked for and what you know of the real thing"
+    if scene.get("picture") and (folder / "picture.jpg").is_file():
+        images.append((folder / "picture.jpg").read_bytes())
+        shown.append("the picture the owner gave you to build from")
+        truth = "the owner's picture"
+    numbered = []
+    for n, ref in enumerate(scene.get("refs", []), 1):
+        path = folder / "refs" / ref["name"]
+        if path.is_file():
+            images.append(path.read_bytes())
+            numbered.append(f"photograph {n} ({ref.get('about', 'the real thing')})")
+    if numbered:
+        shown.append("photographs of the real thing found on the web, for api.photo: " + "; ".join(numbered))
+        truth = "the photographs of the real thing"
+    return images, "; then ".join(shown) or "nothing but the script", truth
+
+
+def _review_prompt(scene, sheet, focus=""):
+    images, shown, truth = _review_material(scene, sheet)
+    with _lock:
+        errors = list(STATE.get("errors", []))
+    failed = ("\nThese steps threw an error when the page ran them, so they are missing from the sheet; fix them:\n"
+              + "\n".join(f"- \"{e['step']}\": {e['message']}" for e in errors) + "\n") if errors else ""
+    return images, (REVIEW.format(shown=shown, truth=truth, focus=("\n" + focus + "\n") if focus else "", errors=failed)
+                    + "\n\nThe owner asked for: " + scene.get("request", "")[:600] + "\n\nCurrent script:\n" + script(scene))
+
+
+def _check(scene, scouting):
+    """After a build: wait for the photographs, look at the model as it stands, and improve it.
+    Returns (the scene, JARVIS's final words or ""). A failed check leaves the build as it was."""
+    with _lock:
+        STATE.update(busy="check", notes=[], thinking="", errors=list(STATE.get("errors", [])))
+    _emit("start", mode="check", model=STATE["model"], request="Checking it over")
+    if scouting:
+        _emit("status", text="Looking up photographs of the real thing…")
+        refs = scouting.result(SCOUT_WAIT)
+        if refs:
+            scene["refs"] = refs
+            _save(scene)
+            with _lock:
+                STATE["scene"] = scene
+            _emit("refs", refs=refs, scene=scene["id"])
+    _emit("status", text="Checking it against the photographs…" if scene.get("refs") else "Checking it over and adding detail…")
+    try:
+        sheet = _snapshot_file("review") if page_open() else None
+        images, prompt = _review_prompt(scene, sheet)
+        changed, patch = _revise(scene, prompt, images, "the check after building", settings()["effort"])
+        return changed, patch["spoken"]
+    except InterruptedError:
+        raise
+    except Exception as e:
+        print(f"(workshop: the check after building didn't change anything: {e!r})", flush=True)
+        return scene, ""
+    finally:
+        _emit("status", text="")
+
+
+def _detail(request):
+    try:
+        with _lock:
+            scene, chosen = STATE["scene"], list(STATE.get("selected", []))
+        focus = ("The owner asks in particular: " + request + ". " if request else "") + \
+                (f"On screen they have selected: {', '.join(chosen)}. Put the new detail there and leave the rest alone."
+                 if chosen else "")
+        sheet = _snapshot_file("review") if page_open() else None
+        images, prompt = _review_prompt(scene, sheet, focus)
+        changed, patch = _revise(scene, prompt, images, request or "more detail", settings()["effort"])
+        _finish()
+        _emit("ready", seconds=round(time.time() - STATE["started"]), title=changed["title"])
+        _announce(patch["spoken"] or "More detail is in, sir.",
+                  f"[WORKSHOP] You added detail to \"{changed['title']}\" and told the user. Its parts now: "
+                  f"{part_lines(changed)}. workshop(action=\"undo\") takes it back.")
+    except InterruptedError:
+        _finish("Stopped.")
+        _emit("error", message="Stopped.")
+    except Exception as e:
+        reason = str(e) if isinstance(e, (ValueError, RuntimeError)) else type(e).__name__
+        print(f"(workshop: detail pass failed: {e!r})", flush=True)
+        _finish(reason)
+        _emit("error", message=reason)
+        _announce(f"I couldn't improve on it, sir: {reason}", "[WORKSHOP] The detail pass failed; the model is as it was.")
+    finally:
+        _work.release()
+
+
+def detail(request=""):
+    """Look at the model again and make it more accurate and more detailed (all of it, or the selected parts)."""
+    _restore()
+    request = " ".join(str(request or "").split())[:1000]
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to add detail to.")
+    if not _work.acquire(blocking=False):
+        return _busy_line()
+    with _lock:
+        STATE.update(open=True, busy="check", thinking="", started=time.time(), tokens=0, done=[], notes=[], error="",
+                     errors=[], view="model", model=settings()["model"])
+    _cancel.clear()
+    _emit("start", mode="check", model=STATE["model"], request=request or "More detail")
+    _start(_detail, request)
+    return ("A detail pass has started: the model is being compared with what the real thing looks like and "
+            "enriched, in a minute or two, and you'll speak again by yourself when it's in. Say one short line now."
+            + on_screen())
+
+
+# ---------- Moving parts ----------
+
+def _play(name, on):
+    with _lock:
+        moving = set(STATE.get("moving", []))
+        (moving.add if on else moving.discard)(name)
+        STATE.update(moving=sorted(moving), open=True, view="model")
+    _emit("motion", name=name, on=bool(on))
+
+
+def move(words=""):
+    """Play one of the model's motions ("open the lid"), or put it back ("close the lid"). If the model has no
+    such motion yet, the builder is asked to add it, and it plays when it arrives."""
+    _restore()
+    words = " ".join(str(words or "").split())[:300]
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to move.")
+    names = motions(scene)
+    if not words:
+        return ("This model can: " + ", ".join(names) + "." if names else "This model has no motions yet; say what should move.")
+    name = _match(names, words)
+    if not name:
+        with _lock:
+            STATE["pending_motion"] = words
+        started = edit(f"Add a motion with api.motion for this: \"{words}\". Name it the way the owner said it, move "
+                       "the real parts that would move, and change nothing else about the model.")
+        return "This model couldn't do that yet, so the motion is being added and will play when it's in. " + started
+    off = bool(OFF.search(words.casefold())) and not OFF.search(name.casefold())
+    _play(name, not off)
+    return (f"\"{name}\" is {'back at rest' if off else 'playing'} on the model." + on_screen())
+
+
+# ---------- Measuring ----------
+
+def _number(value):
+    try:
+        number = float(value)
+        return number if 0 <= number < 1e6 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _triple(value):
+    numbers = [_number(v) for v in value] if isinstance(value, (list, tuple)) and len(value) == 3 else []
+    return numbers if len(numbers) == 3 and None not in numbers else None
+
+
+def _length(metres):
+    """A length for speaking and reading: metric first, inches or feet after."""
+    inches = metres / 0.0254
+    metric = f"{metres * 1000:.0f} mm" if metres < 0.1 else f"{metres * 100:.1f} cm" if metres < 1 else f"{metres:.2f} m"
+    imperial = f"{inches:.2f} in" if inches < 12 else f"{inches:.1f} in" if inches < 36 else f"{inches / 12:.1f} ft"
+    return f"{metric} ({imperial})"
+
+
+def _dimensions(size):
+    return f"{_length(size[0])} wide, {_length(size[1])} tall and {_length(size[2])} deep"
+
+
+def measure(words=""):
+    """Show the model's real size on screen (with something familiar beside it for scale) and say it."""
+    _restore()
+    words = " ".join(str(words or "").split()).casefold()
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to measure.")
+    if _is_off(words):
+        with _lock:
+            STATE["measuring"] = False
+        _emit("measure", on=False)
+        return "The measurements are hidden." + on_screen()
+    asked = time.time()
+    with _lock:
+        STATE.update(measuring=True, open=True, view="model")
+    _emit("measure", on=True, scale="none" if "no scale" in words or "without" in words else "auto")
+    shown = on_screen()
+    deadline = time.time() + 2.5
+    while _sizes["at"] < asked and time.time() < deadline:
+        time.sleep(0.1)
+    if _sizes["at"] < asked or not _sizes["whole"]:
+        return "The measurements are switched on, but the page hasn't reported the sizes." + shown
+    with _lock:
+        chosen = list(STATE.get("selected", []))
+    lines = [f"Overall it is {_dimensions(_sizes['whole'])}."]
+    lines += [f"{name}: {_dimensions(_sizes['parts'][name])}." for name in chosen if _sizes["parts"].get(name)]
+    if _sizes["ruler"]:
+        lines.append(f"Between the two points the user clicked: {_length(_sizes['ruler'])}.")
+    return (" ".join(lines) + " The sizes are on screen with something familiar beside the model for scale; the user "
+            "can click two points to measure between them. These are the model's sizes, as accurate as the model." + shown)
+
+
+# ---------- Cut-away ----------
+
+def cut(words=""):
+    """Slice the model open on screen to look inside without pulling it apart."""
+    _restore()
+    words = " ".join(str(words or "").split()).casefold()
+    with _lock:
+        if not STATE["scene"]:
+            raise ValueError("There's nothing on the bench to cut open.")
+    if _is_off(words):
+        with _lock:
+            STATE["cut"] = None
+        _emit("cut", on=False)
+        return "The model is whole again." + on_screen()
+    axis = "y" if re.search(r"\b(?:top|bottom|horizontal|across|layer|flat|lid)\b", words) else \
+        "z" if re.search(r"\b(?:front|back|face|screen)\b", words) else "x"
+    at = 0.33 if "third" in words else 0.25 if "quarter" in words else 0.5
+    with _lock:
+        STATE.update(cut={"axis": axis, "at": at}, open=True, view="model")
+    _emit("cut", on=True, axis=axis, at=at)
+    return (f"The model is cut open {'across the top' if axis == 'y' else 'through the front' if axis == 'z' else 'down the middle'}, "
+            "showing what is inside. The user can drag the slider to move the cut." + on_screen())
+
+
+# ---------- Export and video ----------
+
+def _wait_for(path, seconds):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if path.is_file() and path.stat().st_size > 200:
+            time.sleep(0.3)
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _outbox(title, extension):
+    OUTBOX.mkdir(parents=True, exist_ok=True)
+    name = " ".join(re.sub(r"[^\w -]", " ", title or "Workshop model").split())[:60] or "Workshop model"
+    for n in range(1, 200):
+        target = OUTBOX / (f"{name}.{extension}" if n == 1 else f"{name} ({n}).{extension}")
+        if not target.exists():
+            return target
+    raise RuntimeError("Too many exports with this name.")
+
+
+def export(words=""):
+    """Save the model as a file: STL (millimetres, for a slicer or Fusion) or GLB (with colours, for viewing)."""
+    _restore()
+    words = " ".join(str(words or "").split()).casefold()
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to export.")
+    kind = "glb" if re.search(r"\b(?:glb|gltf|blender|colou?rs?|textures?|viewer|ar)\b", words) else "stl"
+    shown = on_screen()
+    if NOT_SHOWN in shown:
+        raise RuntimeError("The model is exported by the Jarvis page, and no page is showing the workshop.")
+    nonce = uuid.uuid4().hex[:12]
+    source = STORE / f"export-{nonce}.{kind}"
+    _emit("export", format=kind, nonce=nonce)
+    if not _wait_for(source, EXPORT_WAIT):
+        raise RuntimeError("The page didn't hand over the file.")
+    target = _outbox(scene["title"], kind)
+    source.replace(target)
+    return (f"Saved as {target} ({target.stat().st_size / 1e6:.1f} MB), checked on disk. "
+            + ("It is an STL in millimetres: open it in a slicer to print, or in Fusion with Insert Mesh. It is the "
+               "model's shapes as they are, overlapping pieces and all, so a slicer may want to repair it."
+               if kind == "stl" else "It is a GLB with the colours and labels, for Blender or any 3D viewer."))
+
+
+def ffmpeg():
+    import glob
+    import shutil
+    return shutil.which("ffmpeg") or next(iter(glob.glob(str(
+        Path.home() / "AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/**/bin/ffmpeg.exe"), recursive=True)), None)
+
+
+def _video(scene, nonce, send):
+    try:
+        source = STORE / f"export-{nonce}.webm"
+        if not _wait_for(source, VIDEO_SECONDS + 25):
+            raise RuntimeError("the page didn't hand over the recording")
+        target, tool = _outbox(scene["title"], "mp4"), ffmpeg()
+        if tool:
+            done = subprocess.run([tool, "-y", "-loglevel", "error", "-i", str(source), "-c:v", "libx264", "-pix_fmt",
+                                   "yuv420p", "-movflags", "+faststart", "-an", str(target)], capture_output=True,
+                                  timeout=120, stdin=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+            if done.returncode or not target.is_file():
+                tool = None
+        if tool:
+            source.unlink(missing_ok=True)
+        else:   # no converter: keep what the browser recorded
+            target = _outbox(scene["title"], "webm")
+            source.replace(target)
+        sent = ""
+        if send:
+            import telegram_bridge
+            sent = " " + telegram_bridge.send_file_to_owner(target, f"{scene['title']}, from the workshop.")
+        _announce("The turntable clip is on your phone, sir." if send else "The turntable clip is saved, sir.",
+                  f"[WORKSHOP] A {VIDEO_SECONDS}-second turntable video of \"{scene['title']}\" is saved as {target}.{sent}")
+    except Exception as e:
+        reason = str(e) if isinstance(e, RuntimeError) else type(e).__name__
+        print(f"(workshop: video failed: {e!r})", flush=True)
+        _announce(f"The clip didn't come out, sir: {reason}.", "[WORKSHOP] The turntable video failed; nothing was saved or sent.")
+
+
+def video(words=""):
+    """Record the model turning once and save it; with "send" in the words it also goes to the owner's Telegram."""
+    _restore()
+    words = " ".join(str(words or "").split()).casefold()
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to record.")
+    shown = on_screen()
+    if NOT_SHOWN in shown:
+        raise RuntimeError("The clip is recorded by the Jarvis page, and no page is showing the workshop.")
+    nonce = uuid.uuid4().hex[:12]
+    send = bool(re.search(r"\b(?:send|text|telegram|phone|message)\b", words))
+    _emit("record", nonce=nonce, seconds=VIDEO_SECONDS)
+    _start(_video, scene, nonce, send)
+    return (f"Recording a {VIDEO_SECONDS}-second turntable clip now" + (" and sending it to their Telegram" if send else "")
+            + "; it is saved in Documents, Jarvis Workshop, and you'll say so yourself when it's done. One short line now.")
+
+
+# ---------- Variants side by side ----------
+
+def _variants(request):
+    import agent_models
+    config, progress = settings(), _Progress()
+    try:
+        with _lock:
+            scene = STATE["scene"]
+        text = []
+        prompt = (VARIANTS.format(request=request) + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
+        usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, None,
+                         progress.thinking, lambda t: (progress.text(t), text.append(t)), _cancel)
+        pieces = VARIANT.split("".join(text))
+        made, spoken = [], ""
+        for name, body in zip(pieces[1::2], pieces[2::2]):
+            patch = parse(body)
+            spoken = patch["spoken"] or spoken
+            try:
+                made.append({"name": " ".join(name.split())[:40] or f"Option {len(made) + 1}", "scene": apply_patch(scene, patch)})
+            except ValueError:
+                continue
+        if len(made) < 2:
+            raise ValueError("fewer than two variants came back")
+        made = made[:4]
+        with _lock:
+            STATE.update(variants=made, tokens=_usage_tokens(usage, progress.chars // 4),
+                         seconds=round(time.time() - STATE["started"]), selected=[], isolate=False)
+        _finish()
+        _emit("variants", list=[{"name": v["name"], "setup": v["scene"].get("setup", ""), "steps": v["scene"]["steps"]}
+                                for v in made])
+        names = ", ".join(f"{n}. {v['name']}" for n, v in enumerate(made, 1))
+        _announce(spoken or f"{len(made)} versions side by side, sir. Say which you'd like.",
+                  f"[WORKSHOP] {len(made)} variants of \"{scene['title']}\" are side by side on screen: {names}. "
+                  "workshop(action=\"choose\", request=the name or number) keeps one; request \"none\" keeps the original.")
+    except InterruptedError:
+        _finish("Stopped.")
+        _emit("error", message="Stopped.")
+    except Exception as e:
+        reason = str(e) if isinstance(e, (ValueError, RuntimeError)) else type(e).__name__
+        print(f"(workshop: variants failed: {e!r})", flush=True)
+        _finish(reason)
+        _emit("error", message=reason)
+        _announce(f"The variants didn't come out, sir: {reason}.", "[WORKSHOP] Making variants failed; the model is as it was.")
+    finally:
+        _work.release()
+
+
+def variants(request=""):
+    _restore()
+    request = " ".join(str(request or "").split())[:800]
+    with _lock:
+        scene = STATE["scene"]
+    if not scene or not scene.get("steps"):
+        raise ValueError("There's nothing on the bench to make variants of.")
+    if len(request) < 3:
+        raise ValueError("Say what should differ between the variants: colours, sizes, styles.")
+    if not _work.acquire(blocking=False):
+        return _busy_line()
+    _begin("change")
+    with _lock:
+        STATE["busy"] = "variants"
+    _emit("start", mode="variants", model=STATE["model"], request=request[:300])
+    _start(_variants, request)
+    return ("The variants are being made and will stand side by side in about a minute; you'll speak again by yourself "
+            "when they're up. Say one short line now." + on_screen())
+
+
+NUMBERS = {"first": 1, "1": 1, "two": 2, "second": 2, "2": 2, "three": 3, "third": 3, "3": 3,
+           "four": 4, "fourth": 4, "4": 4, "left": 1, "last": -1, "right": -1}
+
+
+def choose(words=""):
+    """Keep one of the variants on screen as the model ("the second one", "midnight blue"), or none of them."""
+    words = " ".join(str(words or "").split())
+    with _lock:
+        made, scene = list(STATE.get("variants", [])), STATE["scene"]
+    if not made:
+        raise ValueError("There are no variants on screen to choose from.")
+    if re.search(r"\b(?:none|neither|original|cancel|keep it|as it was)\b", words.casefold()):
+        with _lock:
+            STATE["variants"] = []
+        _emit("patch", setup=scene["setup"], steps=scene["steps"], notes=["Keeping it as it was"], seconds=0, tokens=0)
+        return "The original stays; the variants are gone." + on_screen()
+    said = re.findall(r"[a-z0-9]+", words.casefold())
+    index = next((NUMBERS[w] for w in said if w in NUMBERS), None)
+    name = _match([v["name"] for v in made], words)
+    pick = next((v for v in made if v["name"] == name), None) or \
+        (made[index - 1 if index > 0 else -1] if index and abs(index) <= len(made) else None)
+    if not pick:
+        raise ValueError("Which one? They are: " + ", ".join(f"{n}. {v['name']}" for n, v in enumerate(made, 1)) + ".")
+    chosen = dict(pick["scene"], updated=time.time())
+    chosen["versions"] = (scene.get("versions", []) + [
+        {"setup": scene.get("setup", ""), "steps": scene["steps"], "at": time.time(), "request": "choosing " + pick["name"]}])[-MAX_VERSIONS:]
+    _save(chosen)
+    with _lock:
+        STATE.update(scene=chosen, variants=[], render="")
+    _emit("patch", setup=chosen["setup"], steps=chosen["steps"], notes=[f"Keeping {pick['name']}"], seconds=0, tokens=0)
+    return f"\"{pick['name']}\" is now the model; undo brings the earlier one back." + on_screen()

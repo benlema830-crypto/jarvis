@@ -1356,7 +1356,21 @@ def workshop(action: str, request: str = "", picture: str = ""):
             focus (look at parts on their own: "let's focus on the side band and the base tub", "show me just
             the lid", "what's this one"; `request` holds the part names as said, plus "only" to hide the rest;
             an empty `request` or "everything" brings the whole model back. This changes the view, never the
-            model, so never use edit for it), render ("render it": a realistic picture of the model, about a
+            model, so never use edit for it),
+            detail ("add more detail", "make it more accurate", "the insides are thin": the model is compared
+            with photographs of the real thing and enriched, all of it or the selected parts; a minute or two),
+            move ("open the lid", "spin the wheels", "close it again"; `request` says what should move; an
+            empty `request` lists what this model can do),
+            measure ("how big is it", "show me the dimensions", "measure it"; `request` "off" hides them),
+            cut ("cut it open", "slice it in half", "show me a cross-section"; `request` may say "across the
+            top" or "through the front", and "off" makes it whole again),
+            variants ("show me three colour options", "what would it look like in wood"; `request` says what
+            should differ; they appear side by side), choose (`request` names or numbers the variant to keep,
+            or "none"),
+            export ("save it for 3D printing", "export it for Fusion" gives an STL; `request` "glb" gives a
+            coloured file for Blender or a viewer),
+            video ("record it spinning", "send me a clip": a short turntable video; put "send" in `request`
+            to text it to them), render ("render it": a realistic picture of the model, about a
             minute), show_model or show_render (which of the two is on screen), undo (take back the last change),
             open (open the workshop: the empty bench, or a saved model named in `request`), clear (an empty
             bench), close, status (what is on the bench and its parts, for answering questions about them),
@@ -1364,7 +1378,8 @@ def workshop(action: str, request: str = "", picture: str = ""):
         request: What to build or change, or the saved model to open.
         picture: For build only. "bench" when the user put, dropped or pasted a picture on the workshop bench;
             "screen" to build what is on their screen right now ("build this", "build what I'm looking at");
-            otherwise leave empty.
+            otherwise leave empty: for a real product, photographs of it are then looked up on the web by
+            themselves and the model is checked against them, so a build takes three to five minutes.
     """
     import workshop as bench
     action = action.strip().lower().replace(" ", "_")
@@ -1376,6 +1391,10 @@ def workshop(action: str, request: str = "", picture: str = ""):
         return bench.explode(action == "explode")
     if action in ("focus", "select", "show_all"):
         return bench.focus("" if action == "show_all" else request)
+    extra = {"detail": bench.detail, "move": bench.move, "measure": bench.measure, "cut": bench.cut,
+             "variants": bench.variants, "choose": bench.choose, "export": bench.export, "video": bench.video}
+    if action in extra:
+        return extra[action](request)
     if action == "render":
         return bench.render()
     if action in ("show_model", "show_render"):
@@ -1392,7 +1411,8 @@ def workshop(action: str, request: str = "", picture: str = ""):
         return bench.stop()
     if action == "status":
         return bench.describe()
-    return ("Unknown workshop action. Use build, edit, explode, assemble, focus, render, show_model, show_render, undo, "
+    return ("Unknown workshop action. Use build, edit, detail, explode, assemble, focus, move, measure, cut, "
+            "variants, choose, export, video, render, show_model, show_render, undo, "
             "open, clear, close, status or cancel.")
 
 

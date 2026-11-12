@@ -485,7 +485,22 @@ body.view-workshop .reply{background:#060e11f2}
 .ws-actions{position:absolute;top:16px;right:calc(var(--right-width) + var(--edge)*2);display:flex;gap:6px}
 .ws-actions button{background:#0a1418e6;font-size:13px;font-weight:600;padding:6px 12px}
 .ws-actions .ws-close{background:#f2f7f5;color:#061014;border-color:#f2f7f5}
-.ws-picture{position:absolute;top:62px;right:calc(var(--right-width) + var(--edge)*2);margin:0;width:150px;padding:6px;border-radius:10px;background:#060e11e6;border:1px solid var(--line)}
+.ws-tools{position:absolute;top:56px;right:calc(var(--right-width) + var(--edge)*2);display:flex;gap:6px}
+.ws-tools[hidden],.ws-cutbar[hidden]{display:none}
+.ws-tools button,.ws-cutbar button{background:#0a1418e6;font-size:12.5px;font-weight:600;padding:5px 10px}
+.ws-tools button.on,.ws-cutbar button.on,.ws-moves .chip.on{background:color-mix(in srgb,var(--accent) 22%,#071116);border-color:color-mix(in srgb,var(--accent) 55%,transparent);color:#fff}
+.ws-cutbar{position:absolute;top:96px;right:calc(var(--right-width) + var(--edge)*2);display:flex;gap:6px;align-items:center;padding:5px 8px;border-radius:10px;background:#060e11e6;border:1px solid var(--line)}
+.ws-cutbar small{font:600 10.5px var(--mono);letter-spacing:.12em;color:var(--muted)}
+.ws-cutbar input{width:150px;accent-color:var(--accent)}
+.ws-picture.ws-photos{top:330px}
+.ws-picture[hidden]~.ws-picture.ws-photos{top:140px}
+.ws-photo-row{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.ws-photo-row img{max-height:70px}
+.ws-moves{display:flex;flex-wrap:wrap;gap:5px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
+.ws-moves:empty{display:none}
+.ws-moves small{font:600 10.5px var(--mono);letter-spacing:.12em;color:var(--muted);width:100%}
+.ws-moves .chip{font:600 12px var(--sans);background:#0e1a1f;color:var(--ink);cursor:pointer}
+.ws-picture{position:absolute;top:140px;right:calc(var(--right-width) + var(--edge)*2);margin:0;width:150px;padding:6px;border-radius:10px;background:#060e11e6;border:1px solid var(--line)}
 .ws-picture figcaption{font:600 10.5px var(--mono);letter-spacing:.12em;color:var(--muted);margin-bottom:5px}
 .ws-picture img{display:block;width:100%;max-height:170px;object-fit:contain;border-radius:5px;background:#fff}
 .ws-panel{position:absolute;left:18px;bottom:112px;width:232px;padding:10px 12px;font-size:12.5px;max-height:34vh;display:flex;flex-direction:column;background:#060e11e6}

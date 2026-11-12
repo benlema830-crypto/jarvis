@@ -57,7 +57,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
 | Watching videos | video_watch.py (`watch_video` tool: timed still frames plus captions of a YouTube link or a video file, shown to the brain as pictures), vendor/claude-video (the skill's scripts, unchanged) |
 | Creator watch | creator_watch.py (Zubair Trabzada's YouTube feed and GitHub every 6 hours; new Jarvis videos written up by Codex -> Research/Zubair watch/ in the vault; `creator_watch` tool) |
-| Workshop | workshop.py (`workshop` tool: Fable writes a 3D scene in steps; changes, pull-apart, undo, render), hud/workshop.js (the bench around the stage), hud/workshop-frame.html (the sandboxed three.js stage), hud/vendor/three.module.js, brain.py `/workshop/*` (picture, snapshot, files), hud.py `/workshop` (state) |
+| Workshop | workshop_refs.py (photographs of the real thing, looked up by Codex), workshop.py (`workshop` tool: Fable writes a 3D scene in steps; changes, pull-apart, undo, render), hud/workshop.js (the bench around the stage), hud/workshop-frame.html (the sandboxed three.js stage), hud/vendor/three.module.js, brain.py `/workshop/*` (picture, snapshot, files), hud.py `/workshop` (state) |
 | Screen pointer | screen_pointer.py (`point_at_screen`: a click-through ring and label over a control) |
 | Meeting prep | meeting_prep.py (`meeting_prep` tool, and a brief half an hour before an event when the vault, facts or tasks hold something on it -> Briefs/Meetings/ in the vault) |
 | Reply language | reply_language.py (`reply_language` tool; a line in the brain's instructions and the language given to the voice; preferences `reply_language`) |
@@ -349,6 +349,30 @@ explode)`, `api.add`, `api.onTick`. A step that throws is reported back and sent
   `api.print` gives it a canvas to draw lettering and labels on. Before that a tin came out as embossed shapes,
   and a render of it, dragged onto the bench by accident, was rebuilt as a gadget with a made-up circuit board.
   Dragging something already on the page no longer counts as putting a picture on the bench.
+- **Accuracy and detail** (added after an iPhone came out as an empty shell). Three things happen around a build:
+  a photo scout (`workshop_refs.py`: Codex with web search on the ChatGPT plan, about two minutes, in the
+  background) saves up to four photographs of the real thing in `refs/`; the builder is told to build the parts a
+  thing really has, inside and out, and never ones it doesn't; and after the build a check pass shows Fable four
+  views of its own model on one sheet plus the photographs and has it correct, complete and detail the model
+  (`_check`, the patch format). Jarvis speaks once, at the end. `api.photo(n, [x, y, w, h])` puts a region of a
+  photograph on a face, so a real label is the real label. "Add more detail" runs the same pass on request, on the
+  selected parts if any (`detail`). `preferences "workshop": {"check": false, "references": false}` switch them off.
+  A real product now takes three to six minutes.
+- **Moving parts**: `api.motion(name, fn)` in the scene code; `move` plays or resets one by voice, and asks the
+  builder to add it when the model can't do it yet. They are listed under MOVES in the parts panel.
+- **Measuring**: `measure` shows a box with the real width, height and depth (metric and inches), something
+  familiar beside the model for scale (a quarter, a bank card, a drinks can or a person, by size), and a ruler
+  between two clicked points. The page reports the sizes to Jarvis so he can say them. They are the model's
+  sizes, only as right as the model.
+- **Cut-away**: `cut` slices the model on one axis with a slider (clipping planes on the parts' materials).
+- **Variants**: `variants` asks for two to four versions as patches and stands them side by side; `choose` (or a
+  click) keeps one, with undo.
+- **Files**: `export` saves an STL (millimetres, Z up, for a slicer or Fusion's Insert Mesh) or a GLB with colours;
+  `video` records one turn of the model (MediaRecorder in the page, converted to MP4 with ffmpeg) and can text it.
+  Both land in `Documents\Jarvis Workshop`. The page makes them and uploads them through brain.py `/workshop/upload`.
+- **Hands**: with HOLO on, the gestures that turn the graph turn the model instead while the workshop is up
+  (`hud/workshop.js` wraps `J.camera`): pinch and move to turn, quick pinch to pick a part, two hands apart to
+  zoom and, past a point, pull it apart. Not tried with real hands yet.
 - Scenes live in `data/workshop/<id>/` (script, picture, renders); `bench.json` remembers which one is on the bench
   across a restart.
 - Measured: a product build about 90-120 s at low effort (half of it thinking), a change about 20 s, a floor plan

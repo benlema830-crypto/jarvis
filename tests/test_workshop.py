@@ -99,10 +99,14 @@ class WorkshopFlowTest(unittest.TestCase):
         self.store = Path(temp.name) / "workshop"
         self.events, self.said, self.replies = [], [], [SCRIPT]
         self.opened, self.browser = [], False
+        # The plain flow tests switch off the two things a build now does afterwards; their own tests switch them on.
+        self.prefs = {"workshop": {"check": False, "references": False}}
+        self.found = []
         self.calls = []
         fresh = {"open": False, "busy": "", "scene": None, "exploded": False, "view": "model", "thinking": "",
                  "started": 0.0, "seconds": 0, "tokens": 0, "done": [], "notes": [], "error": "", "errors": [],
-                 "render": "", "model": "", "selected": [], "isolate": False}
+                 "render": "", "model": "", "selected": [], "isolate": False, "measuring": False, "cut": None,
+                 "moving": [], "variants": []}
 
         def generate(model, effort, system, prompt, image=None, on_thinking=None, on_text=None, cancel=None):
             self.calls.append({"model": model, "effort": effort, "prompt": prompt, "image": image})
@@ -120,13 +124,24 @@ class WorkshopFlowTest(unittest.TestCase):
                 (workshop, "_page", {"at": 0.0, "visible": False, "opened": 0.0}),
                 (workshop, "PAGE_WAIT_SECONDS", 0.2), (workshop, "PAGE_LOAD_SECONDS", 0.4),
                 (workshop, "open_page", lambda: self.opened.append(1) or self.browser),
-                (workshop.preferences, "read", lambda: {})]:
+                (workshop, "_sizes", {"at": 0.0, "whole": None, "parts": {}, "ruler": None}),
+                (workshop, "OUTBOX", Path(temp.name) / "outbox"), (workshop, "EXPORT_WAIT", 0.6),
+                (workshop, "VIDEO_SECONDS", 0), (workshop, "SNAPSHOT_WAIT", 0.6), (workshop, "SCOUT_WAIT", 2),
+                (workshop, "find_references", lambda request, folder, cancel=None: self.photos(folder)),
+                (workshop.preferences, "read", lambda: self.prefs)]:
             patcher = mock.patch.object(target, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def photos(self, folder):
+        """What the photo scout "found": writes the files where the real one would."""
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        for ref in self.found:
+            (Path(folder) / ref["name"]).write_bytes(jpeg())
+        return list(self.found)
+
     def wait(self):
-        for _ in range(200):
+        for _ in range(400):
             if not workshop.STATE["busy"] and not workshop._work.locked():
                 return
             time.sleep(0.02)
@@ -369,7 +384,7 @@ class WorkshopFlowTest(unittest.TestCase):
         self.assertEqual(workshop.snapshot()["selected"], [])
 
     def test_the_builder_is_told_to_model_real_things_as_they_are(self):
-        for expected in ("Never invent internals", "api.print(", "it has no battery"):
+        for expected in ("Never add parts the", "api.print(", "it has no battery"):
             self.assertIn(expected, workshop.SYSTEM)
 
     def test_tool_routes_actions(self):
@@ -432,6 +447,286 @@ class WorkshopFilesTest(unittest.TestCase):
             (hud_folder / "brain.js").write_text("two!")
             os.utime(hud_folder / "brain.js", ns=(1, 1))
             self.assertNotEqual(first, brain.ui_version())
+
+
+REVIEWED = """=== STEP: Raising the arm
+api.part('Arm', 'A brushed tube with a printed maker mark.', new THREE.Mesh(new THREE.CylinderGeometry(.01, .01, .4), steel), [0, 0.2, 0]);
+api.motion("Tilt the arm", function (k) { });
+=== STEP: Fitting the switch
+api.part("Switch", "A rocker switch on the base.", new THREE.Group(), [0.1, 0, 0]);
+=== NOTE: Fitting the rocker switch
+=== SPOKEN
+Your lamp, sir, now with its switch; the maker mark is my approximation."""
+THREE_COLOURS = """=== VARIANT: Brass
+=== SETUP
+const steel = new THREE.MeshStandardMaterial({ color: 0xb08d57 });
+=== VARIANT: Matte black
+=== SETUP
+const steel = new THREE.MeshStandardMaterial({ color: 0x111111 });
+=== VARIANT: Unchanged
+=== VARIANT: Racing green
+=== SETUP
+const steel = new THREE.MeshStandardMaterial({ color: 0x0b3d2e });
+=== SPOKEN
+Brass, matte black or racing green, sir. Say which."""
+
+
+class WorkshopMoreTest(WorkshopFlowTest):
+    """What a build does afterwards, and the tools around a finished model."""
+    locals().update({name: None for name in dir(WorkshopFlowTest) if name.startswith("test_")})   # run those once only
+
+    def lamp(self):
+        self.page()
+        workshop.build("a desk lamp")
+        self.wait()
+
+    def page_answers(self, phase, **data):
+        """The Jarvis page as far as Jarvis can tell: it hands over what it is asked for."""
+        self.events.append((phase, data))
+        if phase == "snapshot":
+            (self.store / f"snap-{data['nonce']}.jpg").write_bytes(jpeg((400, 300)) * 3)
+        elif phase == "export":
+            (self.store / f"export-{data['nonce']}.{data['format']}").write_bytes(b"glTF" + b"x" * 400)
+        elif phase == "record":
+            (self.store / f"export-{data['nonce']}.webm").write_bytes(b"\x1a\x45\xdf\xa3" + b"x" * 400)
+        elif phase == "measure" and data.get("on"):
+            workshop.page_report({"action": "sizes", "whole": [0.2, 0.45, 0.2], "ruler": 0.3048,
+                                  "parts": {"Base": [0.2, 0.02, 0.2], "Arm": [0.02, 0.4, 0.02]}})
+
+    def checked_build(self, review=REVIEWED):
+        self.prefs = {"workshop": {}}
+        self.found = [{"name": "ref-1.jpg", "about": "the lamp from the front, black with a brass shade"}]
+        self.replies[:] = [SCRIPT, review]
+        self.page()
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            workshop.build("an Anglepoise desk lamp")
+            self.wait()
+
+    def test_a_build_is_checked_against_photographs_before_jarvis_speaks(self):
+        self.checked_build()
+        build, check = self.calls
+        self.assertIsNone(build["image"])
+        self.assertEqual(len(check["image"]), 2)                       # the four-view sheet, then the photograph
+        for expected in ("four views of your model", "photograph 1 (the lamp from the front, black with a brass shade)",
+                         "the photographs of the real thing", "=== STEP: Turning the base", "an Anglepoise desk lamp"):
+            self.assertIn(expected, check["prompt"])
+        scene = workshop.STATE["scene"]
+        self.assertEqual([s["name"] for s in scene["steps"]], ["Turning the base", "Raising the arm", "Fitting the switch"])
+        self.assertEqual(scene["refs"][0]["name"], "ref-1.jpg")
+        self.assertTrue((self.store / scene["id"] / "refs" / "ref-1.jpg").is_file())
+        self.assertEqual(len(scene["versions"]), 1)                    # the unchecked build can be brought back
+        self.assertEqual(len(self.said), 1)                            # he speaks once, at the end
+        self.assertTrue(self.said[0][0].startswith("Your lamp, sir, now with its switch"))
+        self.assertIn("checked against 1 photographs", self.said[0][1])
+        self.assertIn("Tilt the arm", self.said[0][1])
+        phases = [p for p in self.phases() if p in ("start", "done", "refs", "patch", "ready")]
+        self.assertEqual(phases, ["start", "done", "start", "refs", "patch", "ready"])
+        self.assertEqual(workshop.snapshot()["busy"], "")
+        self.assertEqual(workshop.snapshot()["refs"], scene["refs"])
+
+    def test_a_check_that_changes_nothing_leaves_the_build_and_its_words(self):
+        self.checked_build(review="=== SPOKEN\nNothing to add, sir.")
+        self.assertEqual(len(workshop.STATE["scene"]["steps"]), 2)
+        self.assertTrue(self.said[0][0].startswith("A desk lamp, sir."))
+        self.assertEqual(self.phases()[-1], "ready")
+
+    def test_a_picture_from_the_owner_is_the_reference_and_nothing_is_looked_up(self):
+        self.prefs = {"workshop": {}}
+        self.found = [{"name": "ref-1.jpg", "about": "never used"}]
+        self.replies[:] = [SCRIPT, REVIEWED]
+        self.store.mkdir(parents=True)
+        (self.store / workshop.BENCH).write_bytes(jpeg())
+        self.page()
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            workshop.build("", "bench")
+            self.wait()
+        self.assertNotIn("refs", workshop.STATE["scene"])
+        self.assertIn("the owner's picture", self.calls[1]["prompt"])
+        self.assertEqual(len(self.calls[1]["image"]), 2)               # the sheet and their picture
+
+    def test_detail_pass_on_request_goes_where_the_owner_pointed(self):
+        self.lamp()
+        workshop.page_report({"action": "select", "parts": ["Arm"]})
+        self.replies.append(REVIEWED)
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            self.assertIn("detail pass has started", workshop.detail("more detail on the joints"))
+            self.wait()
+        self.assertIn("more detail on the joints", self.calls[1]["prompt"])
+        self.assertIn("they have selected: Arm", self.calls[1]["prompt"])
+        self.assertTrue(self.said[-1][0].startswith("Your lamp, sir"))
+        self.assertIn("Undone", workshop.undo())
+
+    def test_the_builder_is_told_to_build_real_insides_and_what_it_may_use(self):
+        for expected in ("A pulled-apart view that is only an empty shell is a failure", "api.photo(", "api.motion(",
+                         "twelve to twenty-four parts", "Never add parts the"):
+            self.assertIn(expected, workshop.SYSTEM)
+
+    def test_motions_play_stop_and_are_added_when_missing(self):
+        self.lamp()
+        self.assertIn("no motions yet", workshop.move())
+        self.replies.append(REVIEWED)
+        reply = workshop.move("tilt the arm")
+        self.assertIn("is being added", reply)
+        self.wait()
+        self.assertIn('"tilt the arm"', self.calls[1]["prompt"])
+        self.assertEqual(workshop.motions(workshop.STATE["scene"]), ["Tilt the arm"])
+        self.assertIn(("motion", {"name": "Tilt the arm", "on": True}), self.events)     # played as soon as it existed
+        self.assertIn("back at rest", workshop.move("put the arm back"))
+        self.assertEqual(self.events[-1], ("motion", {"name": "Tilt the arm", "on": False}))
+        self.assertIn("playing", workshop.move("tilt the arm again"))
+        self.assertEqual(workshop.snapshot()["moving"], ["Tilt the arm"])
+        self.assertIn("This model can: Tilt the arm", workshop.move())
+
+    def test_measuring_says_the_size_in_both_units(self):
+        self.lamp()
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            reply = workshop.measure("how big is it")
+        self.assertIn("Overall it is 20.0 cm (7.87 in) wide, 45.0 cm (17.7 in) tall and 20.0 cm (7.87 in) deep.", reply)
+        self.assertIn("Between the two points the user clicked: 30.5 cm (12.0 in).", reply)
+        self.assertTrue(workshop.snapshot()["measuring"])
+        self.assertIn("hidden", workshop.measure("off"))
+        self.assertFalse(workshop.snapshot()["measuring"])
+        self.assertEqual(workshop._length(0.0243), "24 mm (0.96 in)")
+        self.assertEqual(workshop._length(2.5), "2.50 m (8.2 ft)")
+
+    def test_measuring_without_an_answer_from_the_page_says_so(self):
+        self.lamp()
+        self.assertIn("hasn't reported the sizes", workshop.measure(""))
+
+    def test_cutting_open_picks_the_axis_from_the_words(self):
+        self.lamp()
+        workshop.cut("slice it in half")
+        self.assertEqual(self.events[-1], ("cut", {"on": True, "axis": "x", "at": 0.5}))
+        workshop.cut("take a third off across the top")
+        self.assertEqual(self.events[-1], ("cut", {"on": True, "axis": "y", "at": 0.33}))
+        self.assertEqual(workshop.snapshot()["cut"], {"axis": "y", "at": 0.33})
+        self.assertIn("whole again", workshop.cut("off"))
+        self.assertIsNone(workshop.snapshot()["cut"])
+
+    def test_export_saves_the_file_where_the_owner_can_find_it(self):
+        self.lamp()
+        with mock.patch.object(workshop, "_emit", self.page_answers):
+            reply = workshop.export("for 3D printing")
+            again = workshop.export("as a glb for Blender")
+        self.assertTrue((workshop.OUTBOX / "Desk Lamp.stl").is_file())
+        self.assertTrue((workshop.OUTBOX / "Desk Lamp.glb").is_file())
+        self.assertIn("millimetres", reply)
+        self.assertIn("colours", again)
+        self.assertEqual(list(self.store.glob("export-*")), [])
+
+    def test_export_needs_a_page_and_says_when_none_answers(self):
+        self.lamp()
+        with self.assertRaises(RuntimeError):
+            workshop.export("stl")                      # the page never hands a file over
+        workshop._page["at"] = 0
+        with self.assertRaises(RuntimeError) as error:
+            workshop.export("stl")
+        self.assertIn("no page is showing", str(error.exception))
+
+    def test_turntable_clip_is_saved_and_sent_only_when_asked(self):
+        self.lamp()
+        sent = []
+        import telegram_bridge
+        with mock.patch.object(workshop, "_emit", self.page_answers), mock.patch.object(workshop, "ffmpeg", return_value=None), \
+                mock.patch.object(telegram_bridge, "send_file_to_owner", side_effect=lambda path, text="": sent.append(path) or "Sent.") as send:
+            workshop.video("record it spinning")
+            for _ in range(100):
+                if len(self.said) > 1:
+                    break
+                time.sleep(0.02)
+            send.assert_not_called()
+            self.assertEqual(self.said[-1][0], "The turntable clip is saved, sir.")
+            workshop.video("and send it to my phone")
+            for _ in range(100):
+                if len(self.said) > 2:
+                    break
+                time.sleep(0.02)
+        self.assertEqual(self.said[-1][0], "The turntable clip is on your phone, sir.")
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(len(list(workshop.OUTBOX.glob("Desk Lamp*.webm"))), 2)
+
+    def test_variants_stand_side_by_side_and_one_can_be_kept(self):
+        self.lamp()
+        self.replies.append(THREE_COLOURS)
+        self.assertIn("side by side", workshop.variants("three colour options"))
+        self.wait()
+        made = workshop.snapshot()["variants"]
+        self.assertEqual([v["name"] for v in made], ["Brass", "Matte black", "Racing green"])   # the one that changed nothing is dropped
+        self.assertIn("0xb08d57", made[0]["setup"])
+        self.assertIn("1. Brass, 2. Matte black, 3. Racing green", self.said[-1][1])
+        with self.assertRaises(ValueError):
+            workshop.choose("the purple one")
+        self.assertIn('"Matte black" is now the model', workshop.choose("the second one"))
+        self.assertIn("0x111111", workshop.STATE["scene"]["setup"])
+        self.assertEqual(workshop.snapshot()["variants"], [])
+        workshop.undo()
+        self.assertIn("0x888888", workshop.STATE["scene"]["setup"])
+
+    def test_variants_can_be_turned_down_or_chosen_by_name(self):
+        self.lamp()
+        self.replies.append(THREE_COLOURS)
+        workshop.variants("three colour options")
+        self.wait()
+        self.assertIn("original stays", workshop.choose("none of them"))
+        self.assertIn("0x888888", workshop.STATE["scene"]["setup"])
+        self.replies.append(THREE_COLOURS)
+        workshop.variants("three colour options")
+        self.wait()
+        workshop.page_report({"action": "variant", "name": "Racing green"})     # clicked on the page
+        self.assertIn("0x0b3d2e", workshop.STATE["scene"]["setup"])
+
+    def test_tool_reaches_the_new_actions(self):
+        import tools
+        run = tools.TOOLS_BY_NAME["workshop"]
+        for action in ("detail", "move", "measure", "cut", "variants", "choose", "export", "video"):
+            with mock.patch.object(workshop, action, return_value=action) as called:
+                self.assertEqual(run.call({"action": action, "request": "x"}), action)
+                called.assert_called_once_with("x")
+
+
+class PhotoScoutTest(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name) / "refs"
+
+    def scout(self, said, files):
+        import workshop_refs
+
+        def run(folder, prompt, seconds, cancel):
+            self.prompt = prompt
+            for name, data in files.items():
+                (Path(folder) / name).write_bytes(data)
+            return said
+        with mock.patch.object(workshop_refs, "run", run):
+            return workshop_refs.scout("Grizzly nicotine pouches 12 mg can", self.folder)
+
+    def test_photos_are_checked_renumbered_and_resaved_as_jpeg(self):
+        found = self.scout("ref-1.png: The lid, black and silver with a roaring bear.\nref-2.jpg: junk\nref-3.webp: The side label.\n",
+                           {"ref-1.png": jpeg((300, 300)), "ref-2.jpg": b"<html>not a picture</html>", "ref-3.webp": jpeg((300, 200)),
+                            "notes.txt": b"left behind", "page.html": b"<html>"})
+        self.assertEqual(found, [{"name": "ref-1.jpg", "about": "The lid, black and silver with a roaring bear."},
+                                 {"name": "ref-2.jpg", "about": "The side label."}])
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["ref-1.jpg", "ref-2.jpg"])
+        self.assertEqual((self.folder / "ref-2.jpg").read_bytes()[:3], b"\xff\xd8\xff")
+        self.assertIn("Grizzly nicotine pouches 12 mg can", self.prompt)
+
+    def test_an_invented_thing_or_a_failed_scout_finds_nothing(self):
+        import workshop_refs
+        self.assertEqual(self.scout("NONE", {}), [])
+        with mock.patch.object(workshop_refs, "run", side_effect=RuntimeError("no codex")):
+            self.assertEqual(workshop_refs.scout("anything", self.folder), [])
+
+    def test_tests_never_reach_the_real_scout(self):
+        self.assertEqual(workshop.find_references("an iPhone", self.folder), [])
+
+
+class UploadTest(unittest.TestCase):
+    def test_each_kind_of_upload_must_begin_like_its_kind(self):
+        self.assertEqual(brain.UPLOADS["glb"], (b"glTF",))
+        self.assertTrue((b"\x1a\x45\xdf\xa3" + b"rest").startswith(brain.UPLOADS["webm"]))
+        self.assertIsNone(brain.UPLOADS["stl"])       # a binary STL has no signature; only its length is checked
+        self.assertIn("/vendor/GLTFExporter.js", brain.PUBLIC)
 
 
 if __name__ == "__main__":

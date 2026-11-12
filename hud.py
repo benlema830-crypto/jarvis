@@ -406,7 +406,7 @@ class _Handler(BaseHTTPRequestHandler):
             import workshop
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 4000:
+                if not 0 < length <= 16000:
                     raise ValueError("Invalid request size.")
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):

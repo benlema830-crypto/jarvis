@@ -102,10 +102,14 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/workshop.js": ("workshop.js", "text/javascript"),
           "/workshop-frame.html": ("workshop-frame.html", "text/html"),
           "/vendor/three.module.js": ("vendor/three.module.js", "text/javascript"),
+          "/vendor/GLTFExporter.js": ("vendor/GLTFExporter.js", "text/javascript"),
+          "/vendor/TextureUtils.js": ("vendor/TextureUtils.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # The workshop's 3D stage is a sandboxed frame, so its request for three.js arrives with no origin ("null").
 # That one file is a public library with nothing of the owner's in it, so any page may read it.
-PUBLIC = {"/vendor/three.module.js"}
+PUBLIC = {"/vendor/three.module.js", "/vendor/GLTFExporter.js", "/vendor/TextureUtils.js"}
+# What the workshop page may hand over for saving, and how each kind must begin (never trust the label alone).
+UPLOADS = {"glb": (b"glTF",), "stl": None, "webm": (b"\x1a\x45\xdf\xa3",)}
 WORKSHOP = ROOT / "data" / "workshop"
 
 
@@ -145,8 +149,9 @@ def workshop_file(query):
         raise ValueError("Unknown workshop file.")
     folder = WORKSHOP if scene == "bench" else WORKSHOP / scene
     path = folder / name
-    if not path.is_file():
-        path = folder / "renders" / name
+    for inside in ("renders", "refs"):
+        if not path.is_file():
+            path = folder / inside / name
     if not path.is_file():
         raise ValueError("Unknown workshop file.")
     return path.read_bytes(), "image/png" if name.endswith(".png") else "image/jpeg"
@@ -269,6 +274,24 @@ def serve():
                 WORKSHOP.mkdir(parents=True, exist_ok=True)
                 (WORKSHOP / workshop.BENCH).write_bytes(raw)
                 return {"ok": True}, 200
+            if route == "/workshop/upload" and post:    # an exported model or a recorded clip, made by the page
+                import base64
+                import binascii
+                import re
+                p = self.payload(90_000_000)
+                kind = str(p.get("kind", ""))
+                if kind not in UPLOADS or not re.fullmatch(r"[a-f0-9]{12}", str(p.get("nonce", ""))):
+                    raise ValueError("Unknown upload.")
+                try:
+                    raw = base64.b64decode(p.get("data") or "", validate=True)
+                except (binascii.Error, ValueError, TypeError):
+                    raise ValueError("That upload can't be read.") from None
+                if len(raw) < 84 or (UPLOADS[kind] and not raw.startswith(UPLOADS[kind])):
+                    raise ValueError(f"That isn't a {kind} file.")
+                WORKSHOP.mkdir(parents=True, exist_ok=True)
+                (WORKSHOP / f"export-{p['nonce']}.tmp").write_bytes(raw)
+                (WORKSHOP / f"export-{p['nonce']}.tmp").replace(WORKSHOP / f"export-{p['nonce']}.{kind}")
+                return {"ok": True}, 200
             if route == "/workshop/snapshot" and post:  # the 3D view as the owner has it turned, for a render
                 import re
                 p = self.payload(8_100_000)
@@ -321,7 +344,7 @@ def serve():
             previous = self.connection.gettimeout()
             try:
                 size = int(self.headers.get('Content-Length',0))
-                if self.command == 'POST' and 0 < size <= 8_200_000:
+                if self.command == 'POST' and 0 < size <= 90_100_000:
                     self.connection.settimeout(.25)
                     self.rfile.read(size)
             except (OSError, ValueError):

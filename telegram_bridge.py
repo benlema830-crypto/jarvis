@@ -221,6 +221,14 @@ class Bridge:
                 return "photo"
             except RuntimeError:
                 pass  # Telegram refuses some pictures as photos (very long or very large ones); a document always works
+        if path.suffix.lower() == ".mp4":
+            try:
+                with path.open("rb") as handle:
+                    call(self.token, "sendVideo", timeout=300, files={"video": (path.name, handle)}, chat_id=str(chat),
+                         **extra)
+                return "video"
+            except RuntimeError:
+                pass
         with path.open("rb") as handle:
             call(self.token, "sendDocument", timeout=300, files={"document": (path.name, handle)}, chat_id=str(chat),
                  **extra)
