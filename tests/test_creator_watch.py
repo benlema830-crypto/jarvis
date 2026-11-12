@@ -40,6 +40,7 @@ class CreatorWatchTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.vault = root / "vault"
+        self.real_transcript = watch.transcript
         self.feed = [video("a1", "My AI assistant Jarvis")]
         self.repos = [{"name": "holo-gestures", "pushed": "2026-09-01T00:00:00Z", "description": "", "url": "u"}]
         for name, fake in [("videos", lambda _: list(self.feed)), ("repos", lambda _: list(self.repos)),
@@ -103,6 +104,23 @@ class CreatorWatchTest(unittest.TestCase):
         news = watch.check(self.ask)  # captions are up now
         self.assertEqual(len(news), 1)
         self.assertEqual(len(self.asked), 1)
+
+    def test_youtube_refusing_the_transcript_means_try_later_even_for_old_videos(self):
+        watch.check(self.ask)
+        self.feed.insert(0, video("g7", "Jarvis offline"))
+        with mock.patch.object(watch, "transcript", side_effect=watch.NoCaptionsYet("g7")):
+            self.assertEqual(watch.check(self.ask), [])
+        self.assertEqual(self.notes(), [])
+        self.assertEqual(len(watch.check(self.ask)), 1)
+
+    def test_transcript_sorts_missing_captions_from_refusals(self):
+        import youtube_transcript_api as api
+        with mock.patch.object(watch, "transcript", self.real_transcript):
+            with mock.patch.object(api.YouTubeTranscriptApi, "fetch", side_effect=api.TranscriptsDisabled("x")):
+                self.assertIsNone(watch.transcript("x"))
+            with mock.patch.object(api.YouTubeTranscriptApi, "fetch", side_effect=api.IpBlocked("x")):
+                with self.assertRaises(watch.NoCaptionsYet):
+                    watch.transcript("x")
 
     def test_old_video_without_captions_is_still_noted(self):
         watch.check(self.ask)

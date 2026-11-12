@@ -2,7 +2,7 @@
 
 Researched 2026-11-11 by Claude Opus 5.5. **Nothing here is built yet.** The owner said: "research and figure out
 what he added and how he did it ... Dont make changes yet, fable 5.2 will handle that after you research."
-So this is the brief for the Fable 5.2 session that builds it. Ask the owner which parts they want before starting.
+So this is the brief for the Fable 5.2 session that builds it. The owner chose all five options below.
 
 - Video: https://www.youtube.com/watch?v=34J8xhaAn4U (posted 2026-11-10, 17:19, channel "Zubair Trabzada | AI Workshop")
 - Full transcript and Jarvis's own write-up: vault note `Research/Zubair watch/2026-11-11 Fable 5.2 Just Took My JARVIS to a Whole New Level.md`
@@ -81,26 +81,73 @@ The frames are clear enough to see how it was built:
 - **Real CAD:** the Fusion MCP (`mcp__fusion__*`) and the bedroom model (memory: bedroom-fusion-model) are a
   different strength his Jarvis doesn't show: Fusion makes real, measurable models; his workshop makes concept scenes.
 
-## Build options for Fable (biggest payoff first; the owner picks)
+## What to build: all five (owner, 2026-11-11: "can we do all 5 of those?")
 
-1. **Workshop overlay in the Jarvis page** (large). A new view next to the 3D model/Console switch: three.js from
-   `~/holo/vendor`, OrbitControls, grid floor, build panel. Generation runs through Claude Code with `fable`, which
-   returns a JSON-wrapped module `{title, parts:[{name, description, explode:[x,y,z]}], steps:[...], code}`
-   that runs in a sandboxed `new Function(THREE, scene, api)` so a bad output can't touch the rest of the page.
-   Tools: `workshop_build(request, picture?)`, `workshop_edit(request)`, `workshop_explode(on)`, plus part
-   questions answered from the stored part list. Save each scene in `data/workshop/` so it reopens.
-2. **Picture in** (medium, after 1): choose/drop/paste, and `look_at_screen` as "build what's on my screen".
-3. **Fable as a main-brain choice by voice** (small): add it to `claude_code_brain.MODELS` and the model words.
-4. **Narrated computer use** (small to medium): let `agent.py` say a short line per step when the owner is in
-   the room, and stop when the owner moves the mouse (his demo), not only on a corner fling.
-5. **Photoreal render** (medium; **costs money**): his uses the OpenAI image API. Our saved OpenAI key returned
-   `credit_balance_exhausted` on 2026-11-11, and the owner's rule is the API only when the job is impossible
-   without it, so ask before building this. Check first whether the Codex/ChatGPT subscription can make images.
+The owner's rule for everything from Zubair: "we only want to implement things we dont have already, otherwise its
+going backwards." So build each piece onto what Jarvis already has. Don't replace a part of ours that works.
 
-Not worth copying: the paid v8.2 skill, and Meta Ads specifically (the takeaway is narration and stopping, not the ads).
+1. **Workshop overlay in the Jarvis page** (large). A new view beside the existing 3D model/Console switch (keep
+   both). three.js from `~/holo/vendor` (MIT), OrbitControls, a grid floor, the build panel (live thinking, step
+   checklist, timer, tokens), a title and Close. Generation runs through Claude Code with `fable` on the Max plan
+   (`agent_models.py`), not API credits. Fable returns `{title, parts:[{name, description, explode:[x,y,z]}],
+   steps:[...], code}`, and `code` runs in `new Function(THREE, scene, api)`, so a bad answer only breaks the scene, not the
+   page. Tools for the brain: `workshop_build(request, picture?)`, `workshop_edit(request)`,
+   `workshop_explode(on)`, `workshop_render()`. Questions about parts are answered from the stored part list. Each
+   scene is saved under `data/workshop/` (code, parts, versions) so it reopens and an edit can be undone. Spoken lines
+   stay short and end with an offer, like his.
+2. **Picture in** (medium). "Choose a picture", drag-and-drop and paste on the bench; "build what's on my screen"
+   uses the existing `look_at_screen` capture. The picture goes to Fable with the request and is pinned top right.
+3. **Fable as a choice for Jarvis's talking brain** (small). See "What #3 means" below.
+4. **Narrated computer use** (small to medium). In `agent.py` (`do_on_computer`): one short spoken line per step
+   while the owner is in the room (`whereabouts.py`), and stop when the owner moves the mouse or presses a key,
+   not only when it's flung into a corner. Keep the stops and approvals it already has.
+5. **Realistic render** (medium). See "What #5 means" below. Use Codex image generation on the ChatGPT plan, not
+   the OpenAI API.
 
-## Open questions for the owner
+### What #3 means
 
-- Which of 1-5 do they want, and is the photoreal render worth paying for?
-- Should workshop builds run on Fable every time (slower, about 30-60 s per build in his video) or Opus for edits?
-- Do they want to join the free AI Workshop Lite to get the prompt pack? (Optional.)
+Jarvis has two kinds of model:
+- **The talking brain**: the model that answers when you speak to him. It's saved in `data/preferences.json`
+  (today Codex `gpt-6.1-terra`) and you change it by voice with `switch_model` or in the Brain's Model control.
+  On the Claude side that list is `claude_code_brain.MODELS` = Opus 5.5, Sonnet 5.5, Haiku 5.5. **Fable isn't in it.**
+- **The workers**: agents, away jobs and parallel jobs, which can already run on Fable (`model="fable"`).
+
+At 02:02 Zubair says "switch your brain to Fable 5.2" and from then on his talking brain is Fable. #3 does the same:
+add `claude-fable-5-2` to `claude_code_brain.MODELS` and the spoken names ("Fable", "Fable 5.2"), so "Jarvis, switch
+your brain to Fable" works. It runs on the Max plan through Claude Code, like Opus does today, so no API bill.
+It is a choice, not the new default. The workshop (#1) uses Fable for its builds whatever the talking brain is, so
+#3 isn't needed for the workshop. It's for when the owner wants Fable's judgment in conversation. Trade-off:
+Fable uses more of the Max plan's limits per reply than Opus, and its reply speed hasn't been measured on this PC.
+Measure the first-sentence time with `scripts/measure.py` after adding it (Opus is about 1.2 s).
+
+### What #5 means
+
+In his video "Render it" takes the plain 3D model (flat colours, simple shapes, like a toy) and makes a
+**realistic photo-style picture** of it as a tabletop miniature, with real-looking grass, water, wood and cars
+(frame `11-02-miniature-render.jpg`). He says it re-renders after each change. It's done by an AI **image
+generator**, not by the 3D scene.
+
+- **Why his costs money:** he uses GPT Image 2.6 through the **OpenAI API**. That is billed per use to an API
+  account, separately from a ChatGPT subscription: about $30 per million output image tokens, roughly
+  $0.03-$0.21 per image depending on size and quality (secondary sources, November 2026; check OpenAI's page
+  before relying on it). Rendering again after every voice edit adds up. Our saved OpenAI key had
+  `credit_balance_exhausted` on 2026-11-11.
+- **Ours doesn't have to cost anything extra:** Codex CLI 0.164 on this PC has `image_generation` (stable, on),
+  and it runs on the owner's **ChatGPT plan** (`codex login status`: "Logged in using ChatGPT"). Tested 2026-11-11:
+  - text to image, 37 s: `zubair-fable-5.2-frames/test-codex-image.jpg`
+  - **his 3D house screenshot to a realistic miniature, 56 s, keeping the layout:**
+    `zubair-fable-5.2-frames/test-codex-render-from-3d.jpg`. As good as his.
+  - Command used: `codex exec --skip-git-repo-check -s workspace-write --image scene.jpg -- "<prompt>; save it in the
+    current folder as miniature.png"`. Put `--` before the prompt, or `--image` swallows it.
+  It counts against the ChatGPT plan's usage. So: render only when asked ("render it"), not after every edit
+  like his. Offer to re-render after an edit instead. Run it in the background (about a minute), show it with
+  3D model / Miniature / Save picture buttons, and save to `data/workshop/<scene>/renders/`.
+
+## Order
+
+#3 first (small, separate), then #1, #2, #5 and #4. Run the full tests (`scripts/run_tests.py`), restart quietly
+(`scripts/restart_jarvis.py`), and try each by voice for real before saying it works.
+
+## Also from his older videos
+
+See `docs/plans/ZUBAIR-GAPS.md`: what his earlier Jarvis videos show that ours still lacks, checked against our code.
