@@ -74,7 +74,21 @@ CONFIRMED, SENT, WAITING, UNKNOWN, FAILED = "confirmed", "sent", "waiting", "unk
 _ADMITS = re.compile(r"\b(?:not|never|no luck|unable|fail\w*|unconfirmed|problem|error|refus\w*|declin\w*|"
                      r"timed out|still|but|however|though|\w+n['’]t)\b", re.I)
 
+# "The agent is building it now." "Now you can see the frame." Progress or a result on screen, said as fact.
+# 2026-11-11 the local brain said both for a workshop build it never started (it has no workshop tool).
+_PROGRESS = re.compile(
+    r"\b(?:the|your|my) (?:agent|workshop|builder)(?:'s|’s| is)\s+(?:now\s+|still\s+|already\s+)?"
+    r"(?:building|rendering|drafting|plotting|working|making|handling|modell?ing|printing)\b"
+    r"|\bnow you (?:can|should be able to) see\b"
+    r"|\b(?:it|the model) (?:is|should be) (?:now )?(?:up|showing|on (?:the|your) screen)\b", re.I)
+# "I'll open it in its own window." "I'll have the workshop draft it." A promise to act this very turn.
+_PROMISE = re.compile(
+    r"\bI(?:'ll|’ll| will|'m going to|’m going to| am going to) (?:now |just |also )?"
+    r"(?:have (?:the|an|my|your) (?:workshop|agent|builder)|open|click|center|centre|build|bring|pull|move|"
+    r"start|launch|show|draft|make|create|run|send|turn|switch|put|load|pop|display|render)\b", re.I)
+
 _lock = threading.Lock()
+_called = 0
 _succeeded = 0
 _tainted = False
 _receipts = []
@@ -82,9 +96,9 @@ on_receipt = None  # the interface listens here to show each action's proof next
 
 
 def begin_turn():
-    global _succeeded, _tainted
+    global _called, _succeeded, _tainted
     with _lock:
-        _succeeded, _tainted = 0, False
+        _called, _succeeded, _tainted = 0, 0, False
         del _receipts[:]
 
 
@@ -173,8 +187,9 @@ def unresolved():
 
 def note_tool(name, ok=True):
     """A tool finished. Called from tools.run_tool, and by the brains for their built-in web tools."""
-    global _succeeded, _tainted
+    global _called, _succeeded, _tainted
     with _lock:
+        _called += 1
         if ok:
             _succeeded += 1
         if name in UNTRUSTED_TOOLS:
@@ -198,11 +213,45 @@ def claims_action(sentence):
     return bool(match) and not _NOT_A_REPORT.search(sentence[:match.start()])
 
 
+def promises(spoken):
+    """The sentences that promise an action this turn ("I'll open it in its own window")."""
+    out = []
+    for sentence in spoken:
+        sentence = _QUOTED.sub("", sentence).strip()
+        if not sentence or sentence.endswith("?"):
+            continue
+        match = _PROMISE.search(sentence)
+        # "If you like, I'll open it" is an offer, not a promise.
+        if match and not re.search(r"\b(?:if|once|when|after|until|unless|whether|not|never)\b",
+                                   sentence[:match.start()], re.I):
+            out.append(sentence)
+    return out
+
+
+def unkept_promises(spoken):
+    """Promised actions from a turn in which no tool ran at all: what was promised never happened."""
+    with _lock:
+        called = _called
+    return [] if called else promises(spoken)
+
+
+def promise_correction(promised):
+    return ("[CLAIM CHECK - from your own systems, not the user] You said: \"" + " ".join(promised)[:600] + "\" "
+            "but you called no tool, so none of it happened. Do it now with the right tool. If none of your tools "
+            "can do it, tell the user plainly that you can't do that right now and why, in one or two sentences. "
+            "Don't say anything is building, showing or done.")
+
+
+UNKEPT_PROMISE_WORDS = "I should correct myself: I haven't actually done that. Nothing was started or opened."
+
+
 def claims_state(sentence):
     """The sentence says what state something is in ("the TV is on"). Hedged or negated ones don't count."""
     sentence = _QUOTED.sub("", sentence).strip()
     if not sentence or sentence.endswith("?"):
         return False
+    if _PROGRESS.search(sentence) and not _NOT_A_REPORT.search(sentence[:_PROGRESS.search(sentence).start()]):
+        return True
     match = _STATE.search(sentence)
     if not match:
         return False

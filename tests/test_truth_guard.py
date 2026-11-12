@@ -39,6 +39,39 @@ class ClaimDetectionTest(unittest.TestCase):
         self.assertFalse(tg.system_turn("turn off the fan"))
 
 
+class PromiseAndProgressTest(unittest.TestCase):
+    """2026-11-11: the local brain said a workshop model was building and on screen; it called no tool at all."""
+    def setUp(self):
+        tg.begin_turn()
+
+    def test_said_progress_needs_a_look_this_turn(self):
+        for sentence in ("The agent is building it now.",
+                         "The agent is still rendering the frame and grip.",
+                         "Now you can see the frame, grip and slide as they assemble.",
+                         "Now you can see the frame and grip without the clutter."):
+            self.assertTrue(tg.claims_state(sentence), sentence)
+            self.assertTrue(tg.unbacked(sentence), sentence)
+        tg.record("agent_session_status", {"name": "Workshop"}, True, "running")
+        self.assertEqual(tg.unbacked("The agent is still rendering the frame."), "")
+
+    def test_promises_with_no_tool_are_unkept(self):
+        said = ["I'll open the model in its own window.", "I'll click the window for you.",
+                "I'll have the workshop pull the handgun design into the foreground.",
+                "Shall I have the agent build it?", "Tell me what you think."]
+        self.assertEqual(tg.unkept_promises(said), said[:3])
+        tg.record("look_at_screen", {}, True, "a picture")
+        self.assertEqual(tg.unkept_promises(said), [])  # something was done; the gate judges the rest
+
+    def test_a_failed_call_still_counts_as_trying(self):
+        tg.record("open_app", {"app": "x"}, False, "not found")
+        self.assertEqual(tg.unkept_promises(["I'll open it."]), [])
+
+    def test_ordinary_future_talk_is_not_a_promise(self):
+        for sentence in ("I'll be here.", "I'll remember that.", "If you like, I'll open it.",
+                         "Once it's done I'll show you.", "Shall I open it?"):
+            self.assertEqual(tg.promises([sentence]), [], sentence)
+
+
 class ClaimGateTest(unittest.TestCase):
     def setUp(self):
         tg.begin_turn()
