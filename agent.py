@@ -6,7 +6,10 @@ the actions below are offered to it as ordinary tools, and each call comes back 
 
 Safety:
   - "Jarvis, stop", Ctrl+Alt+J, the HUD's STOP button, or flinging the mouse into a screen
-    corner stops it.
+    corner stops it. So does simply taking over: moving the mouse, clicking or pressing a key while it
+    works hands the PC straight back (preferences "agent_takeover": false turns that off).
+  - It says what it is doing as it goes, one short line per step, when the owner is there to hear it
+    (preferences "agent_narration": false turns that off).
   - It asks out loud before anything consequential (approvals.py); only your own spoken "yes" counts.
     PowerShell scripts follow cc_guard.py, like Claude's terminal tasks: only risky ones need that yes.
   - It never types passwords or payment details.
@@ -32,6 +35,7 @@ import win32api
 import approvals
 import cc_guard
 import hud
+import preferences
 import task_effort
 import worksafe
 
@@ -41,6 +45,11 @@ HIGHER = {"low": "medium", "medium": "high"}
 SETTLE_SECONDS = 0.4  # let the screen update before the after-action screenshot
 MAX_STEPS = 60
 MAX_MINUTES = 15
+TAKEOVER_PIXELS = 30    # the pointer moving this far between the agent's own actions means the owner took it
+TAKEOVER_GRACE = 0.6    # seconds after the agent's own input before the owner's is looked for again
+NARRATE_GAP = 3.0       # seconds between spoken lines, so he narrates without chattering
+# Keys that aren't "taking over": volume, media and browser keys (0xA6-0xB7), often pressed on a headset.
+WATCHED_KEYS = [k for k in range(1, 255) if not 0xA6 <= k <= 0xB7 and k not in (3, 7)]
 SHOT_LONG_EDGE = 1456  # screenshots are scaled to this; Claude's coordinates are in that space
 HOME = os.path.expanduser("~")
 NOT_EXECUTED = "Not executed: an earlier action in this call failed."
@@ -50,11 +59,12 @@ pyautogui.PAUSE = 0.05
 
 SYSTEM = """You are the hands of JARVIS, an AI assistant, operating the user's Windows 11 PC to complete one task.
 
-How to work - speed matters, the user is waiting and can't use the mouse meanwhile:
+How to work - speed matters, the user is waiting (if they touch the mouse or keyboard, the task ends and the PC is theirs again):
 - Call computer with a list of actions. After the list runs you automatically get a fresh screenshot, so don't ask for one separately (only as your very first call, to see the screen, or after a wait).
 - Put several actions in one call whenever you can predict the outcome, e.g. click a box, type, press enter. Look again only when the next step depends on what happens.
 - Prefer keyboard shortcuts and Windows search (press super, type the app's name, press enter) over hunting for icons.
 - For file, folder and settings chores, one PowerShell script via run_powershell is far faster than clicking.
+- Narrate: with every computer call that does something, give `saying`, a short first-person line JARVIS speaks while it runs ("Clicking Create to start a new campaign."). Say what and why, in under twelve words, never coordinates or key names.
 
 Rules:
 - Call ask_user and wait for the answer before only two things: paying for or buying anything, and sending or posting a message to other people. Everything else the task needs (deleting, installing, settings, closing windows) you do without asking. Phrase the question for speaking aloud, in one sentence.
@@ -77,7 +87,11 @@ TOOLS = [
         "description": "Use the mouse and keyboard and see the screen. Give a list of actions; they run in order and "
                        "stop at the first failure. You get a screenshot of the result afterwards. Coordinates are "
                        "[x, y] pixels in the screenshot you were last shown.",
-        "input_schema": {"type": "object", "properties": {"actions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+        "input_schema": {"type": "object", "properties": {
+            "saying": {"type": "string", "description": "One short sentence JARVIS says aloud while these actions run: what "
+                                                        "you are doing now and why, e.g. 'Naming the campaign for the signups.' "
+                                                        "Leave out for a bare screenshot, zoom or wait."},
+            "actions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
             "type": "object", "properties": {
                 "action": {"type": "string", "enum": ACTIONS},
                 "coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
@@ -160,6 +174,8 @@ class Agent:
         self.effort = EFFORT
         self.log: list[str] = []
         self.on_done = None  # called with {"task", "ok", "report", "steps"}
+        self.on_narrate = None  # called with a line to say; returns True when it was spoken
+        self._acting, self._acted_at, self._narrated_at, self._last_line, self._taken = False, 0.0, 0.0, "", ""
         self._configure_screen()
 
     def _configure_screen(self):
@@ -206,13 +222,16 @@ class Agent:
         started = time.time()
         report, ok = "", False
         self.effort, reason = task_effort.choose("screen", task, EFFORT, HIGHER.get(EFFORT, EFFORT))
-        self.escalated, self._stopped_why = False, ""
+        self.escalated, self._stopped_why, self._taken = False, "", ""
+        self._acting, self._acted_at, self._narrated_at, self._last_line = False, time.time(), 0.0, ""
         print(f"(Screen agent effort: {self.effort} - {reason})", flush=True)
         clock = threading.Timer(MAX_MINUTES * 60, self._give_up, args=("the task was taking too long",))
         clock.daemon = True
         clock.start()
         brain = self.brain = claude_code_brain.ClaudeCodeBrain()
         brain.max_turns, brain.effort, brain.web = MAX_STEPS, self.effort, False
+        if preferences.read().get("agent_takeover", True) is not False:
+            threading.Thread(target=self._watch_owner, args=(brain,), daemon=True, name="agent-takeover").start()
         try:
             import privacy
             system = SYSTEM.format(w=self.shot_size[0], h=self.shot_size[1],
@@ -241,7 +260,8 @@ class Agent:
             self.brain = None
             hud.emit("agent", running=False, task=task, kind="screen")
             task_effort.record("screen", task, self.effort, ok, time.time() - started, report, self.steps,
-                               self.escalated, stopped_by_user=self._cancel.is_set() and not self._stopped_why)
+                               self.escalated,
+                               stopped_by_user=self._cancel.is_set() and (not self._stopped_why or bool(self._taken)))
             if self.on_done:
                 self.on_done({"task": task, "ok": ok, "report": report, "steps": self.steps})
 
@@ -249,6 +269,54 @@ class Agent:
         """End the task from outside the model's turn (time limit, or the mouse flung into a corner)."""
         self._stopped_why = self._stopped_why or why
         self._cancel.set()
+
+    def _owner_input(self, base):
+        """"mouse" or "keyboard" when the owner is using one right now, else "". `base` is where the agent last
+        left the pointer. Only asked between the agent's own actions, so its own clicks and keys never count."""
+        x, y = win32api.GetCursorPos()
+        if abs(x - base[0]) + abs(y - base[1]) > TAKEOVER_PIXELS:
+            return "mouse"
+        for key in WATCHED_KEYS:
+            if win32api.GetAsyncKeyState(key) & 0x8000:
+                return "mouse" if key in (1, 2, 4, 5, 6) else "keyboard"
+        return ""
+
+    def _watch_owner(self, brain):
+        """Hand the PC back the moment the owner takes it: they moved the mouse, clicked or pressed a key while
+        the agent was between actions (which is most of the time: the model is reading the screen)."""
+        base = None
+        while self.brain is brain and not self._cancel.is_set():
+            time.sleep(0.05)
+            try:
+                if base is None or self._acting or time.time() - self._acted_at < TAKEOVER_GRACE:
+                    base = win32api.GetCursorPos()
+                    continue
+                taken = self._owner_input(base)
+            except Exception:  # a locked screen or a secure desktop: nothing to read, nothing to hand back
+                base = None
+                continue
+            if taken:
+                self._taken = taken
+                self._give_up(f"you took over the {taken}")
+                return
+
+    def _narrate(self, line):
+        """Say one short line about the step in hand, if there's someone to hear it; otherwise just show it."""
+        line = " ".join(str(line or "").split())[:140]
+        now = time.time()
+        if not line or line == self._last_line or now - self._narrated_at < NARRATE_GAP:
+            return
+        self._last_line = line
+        spoken = False
+        if self.on_narrate and preferences.read().get("agent_narration", True) is not False:
+            try:
+                spoken = bool(self.on_narrate(line))
+            except Exception:
+                spoken = False
+        if spoken:
+            self._narrated_at = now
+        else:
+            hud.emit("event", text="Computer: " + line)
 
     def _tool(self, block) -> dict:
         """One tool call from Claude Code: run it and hand back text and screenshots. Never raises."""
@@ -259,6 +327,7 @@ class Agent:
             if self._cancel.is_set():
                 raise RuntimeError("Stopped by the user.")
             if block.name == "computer":
+                self._narrate(inp.get("saying"))
                 content = self._actions(inp.get("actions"))
             elif block.name == "ask_user":
                 content = self._ask(str(inp["question"]))
@@ -277,6 +346,13 @@ class Agent:
         """Run a list of mouse and keyboard actions in order, stopping at the first failure, then show the screen."""
         if not isinstance(actions, list) or not actions or len(actions) > 12:
             raise ValueError("Give 1 to 12 actions.")
+        self._acting = True   # the mouse and keys are the agent's own until this returns (see _watch_owner)
+        try:
+            return self._run_actions(actions)
+        finally:
+            self._acted_at, self._acting = time.time(), False
+
+    def _run_actions(self, actions) -> list[dict]:
         content, last = [], ""
         for n, item in enumerate(actions, 1):
             if self._cancel.is_set():

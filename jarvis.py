@@ -52,6 +52,7 @@ import context  # noqa: E402
 import hud  # noqa: E402
 import memory  # noqa: E402
 import response_settings  # noqa: E402
+import reply_language  # noqa: E402
 import reminders  # noqa: E402
 import tools  # noqa: E402
 import truth_guard  # noqa: E402
@@ -206,7 +207,7 @@ Using your tools:
 - Your OpenAI API key costs the user money each time it is used, so it stays out of reach except in two cases. If your ChatGPT plan hits its limit, the conversation moves onto the key by itself, and you say so once. And when the user asks for something that truly can't be done without the OpenAI API (generating an image, a model only the API offers), run it with run_command and with_openai_key true, which puts OPENAI_API_KEY into that one command; say in a few words that it uses API credit. Never use the key for something a plan or a local tool can do.
 - When the user wants something built or researched while they're away, overnight, or "when I'm gone", use queue_away_job. It starts now, runs by itself, texts them progress, and needs no more from you. A build happens in a private copy and comes back as a branch they review, so never tell them it changed their project or call it merged. Its report is the agent's claim; what you can vouch for is the test result you re-ran. "How's it going" or "stop it" means away_jobs. Away work runs on Codex in its sandbox unless the job needs the most capable model's judgment: then queue it with model "fable", which works as a full agent with files and tools inside a Linux sandbox on this PC (or under rules only, if the tool says the sandbox isn't ready: say so). Queue what they asked for; an away job that is your own idea is big enough to ask about first. An away agent that needs their yes or a sign-in has it texted to them, and they can answer by text; one stuck behind something only they can do reports blocked, so say what it needs.
 - Updates that arrive while the user isn't there to hear them are held, not spoken: held_updates returns them and clears the list, and you pass on what matters in them, briefly. You text the user on your own only when they have left their room; in the room you speak. Use it for "what did I miss", "anything new", or when a [WORKING STATE] line says updates are held.
-- send_telegram sends something to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
+- send_telegram sends a message or a file (a report, a picture, a render) to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
 - A message starting [Via Terminal] is the user typing in a terminal window on this PC: your reply is printed there, not spoken. Write for reading: exact names, file paths, commands and short lists are fine, and a few lines of output can be quoted. Stay brief.
 - A message starting [Via Phone] is the user on their iPhone (the phone page or Siri): your reply is shown or read aloud there, not spoken at the PC, so keep it short and plain. The few things that need their yes are answered by them, not you: spoken at the PC, the Yes button on the phone page, or a yes sent from their phone or Telegram. [Via Phone as NAME] means that on the phone you are NAME (for example FRIDAY, Tony Stark's other assistant): use that name if you refer to yourself, with a warmer, quicker, more casual manner than JARVIS and no "sir". You are still the same assistant underneath, with the same memory, tools, rules and judgment.
 {off_limits}
@@ -252,6 +253,7 @@ class Brain:
         self._turn_privacy = None
         self._state = ''  # the working-memory brief last added to this conversation
         self._response_settings = response_settings.read()
+        self._language = reply_language.code()  # "" is English ("answer me in Spanish" changes it)
         self.system = self._compose()  # stable between memory/style changes, so it caches
         self.messages = []
         self._codex_brain = None
@@ -276,7 +278,8 @@ class Brain:
 
     def _compose(self, recent=True):
         return (SYSTEM_PROMPT.format(memory=memory.prompt_section(), off_limits=worksafe.rule("- {apps} may hold the user's work data and are off-limits: never open, read, or operate them.\n"))
-                + (self._recent_context if recent else '') + response_settings.prompt(self._response_settings))
+                + (self._recent_context if recent else '') + response_settings.prompt(self._response_settings)
+                + reply_language.prompt(self._language))
 
     def _restart_adapters(self, text_only):
         """Codex threads fix their base prompt at start, so a changed prompt needs a new thread."""
@@ -291,6 +294,10 @@ class Brain:
         privacy_revision = memory.privacy_revision()
         facts_revision = memory.facts_revision()
         style = response_settings.read()
+        language = reply_language.code()
+        if language != self._language:
+            # A new reply language is a new instruction, handled like a style change just below.
+            self._language, self._response_settings = language, None
         if privacy_revision != self._privacy_revision:
             # Forget, correction, scrub or privacy settings: anything held in this session
             # may repeat the removed wording, so drop it rather than keep continuity.
@@ -1064,6 +1071,8 @@ def start_bridges(ears):
     holo_bridge.watch()
     import nudges
     nudges.start(hud.commands.put)
+    import meeting_prep
+    meeting_prep.start(hud.commands.put)  # half an hour before an event, a brief from the owner's own notes
     import presence_greeting
     if presence_greeting.start(hud.commands.put, gather_greeting_context):
         print("Bedroom presence greeting on.", flush=True)
@@ -1223,6 +1232,18 @@ def main():
     import whereabouts
     approvals.is_away = whereabouts.out_of_room
     tools.AGENT.on_done = on_agent_done
+
+    def on_agent_narrate(line):
+        """The screen agent's running commentary ("Clicking Create to start a new campaign."). Said only into
+        silence and only to someone who is there: never over a conversation, over his own voice, or to an empty
+        room. A line that can't be said is dropped, so the commentary never falls behind the work."""
+        if not turns.idle.is_set() or not voice._idle.is_set():
+            return False
+        if time.time() - (turns.last_user or 0) > 600 and not whereabouts.can_hear():
+            return False
+        voice.say(line)
+        return True
+    tools.AGENT.on_narrate = on_agent_narrate
     tools.TERMINAL.on_done = on_terminal_done
     def on_session_done(r):
         import away_jobs

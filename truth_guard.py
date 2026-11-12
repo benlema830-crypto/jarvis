@@ -61,6 +61,7 @@ READ_TOOLS = frozenset({
     "performance_report", "list_reminders", "agent_status", "terminal_status",
     "list_app_windows", "agent_session_status", "list_agent_sessions", "search_knowledge", "read_knowledge_note",
     "read_file", "search_text", "list_mcp_tools", "list_tasks", "check_email", "read_email", "research_status",
+    "meeting_prep", "creator_watch",
     "watch_video", "web_search", "WebSearch", "WebFetch", "show_search_results"})
 # Tools whose normal return is itself the proof: they write a local record and read it back or fail loudly.
 PROVEN_BY_RETURN = frozenset({

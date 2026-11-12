@@ -15,3 +15,5 @@ voices/
 *.wav
 # Machine-specific voice identity and output settings
 voice-profile.json
+# REA (reverse-engineering toolkit) is installed by scripts/setup_rea.py, not kept in git
+vendor/rea/

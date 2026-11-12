@@ -28,9 +28,12 @@ def main():
         try:
             request = json.loads(line)
             start = time.perf_counter()
+            text, language = request['text'], 'English'
+            if text.startswith('\x1e') and text.count('\x1e') >= 2:   # a reply language sent by qwen_voice.py
+                _, language, text = text.split('\x1e', 2)
             with contextlib.redirect_stdout(sys.stderr):
                 audio, rate = model.generate_voice_clone(
-                    text=request['text'], language='English',
+                    text=text, language=language or 'English',
                     ref_audio=ROOT / 'reference/voice.wav', ref_text=transcript,
                     xvec_only=False, append_silence=False, non_streaming_mode=False,
                     max_new_tokens=1600)

@@ -171,3 +171,101 @@ class ToolShape(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NarrationAndTakingOver(unittest.TestCase):
+    def test_the_computer_tool_asks_for_a_spoken_line(self):
+        computer = next(t for t in agent.TOOLS if t["name"] == "computer")
+        self.assertIn("saying", computer["input_schema"]["properties"])
+        self.assertEqual(computer["input_schema"]["required"], ["actions"])   # a bare screenshot needs no line
+        self.assertIn("Narrate", agent.SYSTEM)
+
+    def narrating(self, prefs=None):
+        a = make_agent()
+        a.on_narrate = mock.Mock(return_value=True)
+        patches = [mock.patch.object(agent.preferences, "read", return_value=prefs or {}),
+                   mock.patch.object(agent.hud, "emit")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return a
+
+    def test_each_step_is_said_once_and_not_too_often(self):
+        a = self.narrating()
+        a._narrate("Clicking Create to start a new campaign.")
+        a._narrate("Clicking Create to start a new campaign.")   # the same line again
+        a._narrate("Naming the campaign.")                        # too soon after the last one
+        a.on_narrate.assert_called_once_with("Clicking Create to start a new campaign.")
+        a._narrated_at -= agent.NARRATE_GAP + 1
+        a._narrate("Naming the campaign.")
+        self.assertEqual(a.on_narrate.call_count, 2)
+        a._narrate("")
+        self.assertEqual(a.on_narrate.call_count, 2)
+
+    def test_a_line_nobody_can_hear_is_shown_instead(self):
+        a = self.narrating()
+        a.on_narrate.return_value = False   # he is talking, or the room is empty
+        a._narrate("Opening the settings page.")
+        agent.hud.emit.assert_called_once_with("event", text="Computer: Opening the settings page.")
+        a._narrate("Scrolling to the budget.")   # nothing was said, so the next line needn't wait
+        self.assertEqual(a.on_narrate.call_count, 2)
+
+    def test_narration_can_be_switched_off(self):
+        a = self.narrating({"agent_narration": False})
+        a._narrate("Opening the settings page.")
+        a.on_narrate.assert_not_called()
+
+    def test_the_line_is_said_before_the_actions_run(self):
+        a = self.narrating()
+        order = []
+        a.on_narrate.side_effect = lambda line: order.append("say") or True
+        with mock.patch.object(a, "_actions", side_effect=lambda actions: order.append("act") or []):
+            a._tool(SimpleNamespace(name="computer", id="1", input={"saying": "Clicking Save.", "actions": [{"action": "left_click"}]}))
+        self.assertEqual(order, ["say", "act"])
+
+    def test_owner_input_is_a_moved_pointer_a_click_or_a_key(self):
+        a = make_agent()
+        keys = set()
+        with mock.patch.object(agent.win32api, "GetCursorPos", return_value=(500, 500)), \
+                mock.patch.object(agent.win32api, "GetAsyncKeyState", side_effect=lambda k: 0x8000 if k in keys else 0):
+            self.assertEqual(a._owner_input((500, 500)), "")
+            self.assertEqual(a._owner_input((495, 510)), "")          # a nudge of the desk
+            self.assertEqual(a._owner_input((400, 500)), "mouse")
+            keys.add(0x41)
+            self.assertEqual(a._owner_input((500, 500)), "keyboard")
+            keys.clear(); keys.add(1)
+            self.assertEqual(a._owner_input((500, 500)), "mouse")     # a click
+            keys.clear(); keys.add(0xAF)
+            self.assertEqual(a._owner_input((500, 500)), "")          # volume up on the headset isn't taking over
+
+    def test_taking_over_ends_the_task_and_is_not_held_against_it(self):
+        a = make_agent()
+        a.brain = brain = object()
+        a._acted_at = 0
+        with mock.patch.object(agent.win32api, "GetCursorPos", return_value=(0, 0)), \
+                mock.patch.object(a, "_owner_input", side_effect=["", "", "keyboard"]) as asked:
+            a._watch_owner(brain)
+        self.assertEqual(asked.call_count, 3)
+        self.assertTrue(a._cancel.is_set())
+        self.assertEqual(a._stopped_why, "you took over the keyboard")
+        self.assertEqual(a._taken, "keyboard")
+
+    def test_the_agents_own_clicks_are_never_mistaken_for_the_owner(self):
+        a = make_agent()
+        a.brain = brain = object()
+        a._acted_at = 0
+        seen = []
+
+        def acting(actions):
+            seen.append(a._acting)
+            return []
+        with mock.patch.object(a, "_run_actions", side_effect=acting):
+            a._actions([{"action": "left_click"}])
+        self.assertEqual(seen, [True])
+        self.assertFalse(a._acting)
+        # Straight after its own input the pointer has "moved"; inside the grace period nobody is asked.
+        with mock.patch.object(agent.win32api, "GetCursorPos", return_value=(0, 0)), \
+                mock.patch.object(a, "_owner_input", return_value="mouse") as asked, \
+                mock.patch.object(agent.time, "sleep", side_effect=lambda s: a._cancel.set()):
+            a._watch_owner(brain)
+        asked.assert_not_called()

@@ -30,6 +30,7 @@ import sounddevice as sd
 from kokoro_onnx import Kokoro
 
 import hud
+import reply_language
 import voice_health
 import runtime_metrics
 
@@ -129,8 +130,14 @@ _REPLACEMENTS = [
 ]
 
 
-def clean_for_speech(text: str) -> str:
+_ENGLISH_WORDS = ("degrees", "percent")   # replacements that write an English word into the sentence
+
+
+def clean_for_speech(text: str, english: bool = True) -> str:
+    """`english` False (Jarvis is answering in another language) leaves signs like % and ° for the voice to read."""
     for pattern, repl in _REPLACEMENTS:
+        if not english and isinstance(repl, str) and any(word in repl for word in _ENGLISH_WORDS):
+            continue
         text = pattern.sub(repl, text)
     return text.strip()
 
@@ -159,7 +166,7 @@ class SentenceBuffer:
     Release short complete sentences promptly, including quick confirmations.
     """
 
-    _END = re.compile(r"[.!?…]+[\"')\]]*\s|\n+")
+    _END = re.compile(r"[.!?…।]+[\"')\]]*\s|[。！？]+|\n+")   # also the Hindi full stop and CJK ones, which take no space
     MIN_CHARS = 1
 
     def __init__(self):
@@ -338,8 +345,11 @@ def _alarm(rounds: int = 4) -> np.ndarray:
 
 
 class Voice:
+    language = ""   # the reply language's code; "" is English (set in __init__ and by the reply_language tool)
+
     def __init__(self, voice: str = "bm_george", speed: float = 1.0, engine: str = "kokoro"):
         engine, _, profile = engine.partition(":")  # "voicestudio:<profile id>" picks a VoiceStudio voice
+        self.language = reply_language.code()  # "" is English; the reply_language tool changes it
         self.kokoro = Kokoro(
             os.path.join(MODELS_DIR, "kokoro-v1.0.onnx"),
             os.path.join(MODELS_DIR, "voices-v1.0.bin"),
@@ -598,7 +608,7 @@ class Voice:
             from voicestudio_voice import VoiceStudioError
             try:
                 started = time.monotonic()
-                samples = studio.render(SOUND_TAGS.sub(' ', text).strip())
+                samples = studio.render(SOUND_TAGS.sub(' ', text).strip(), reply_language.voice_code(self.language))
                 print(f'(VoiceStudio generated {len(samples) / RATE:.1f}s audio in {time.monotonic() - started:.1f}s)', flush=True)
                 self._studio_failures = 0
                 if len(samples):
@@ -615,6 +625,7 @@ class Voice:
                     threading.Thread(target=self._reopen_studio, daemon=True).start()
         if self.local is not None:
             started = time.monotonic()
+            self.local.language = reply_language.QWEN.get(self.language, "")
             samples = self.local.render(SOUND_TAGS.sub(' ', text).strip())
             print(f'(Qwen generated {len(samples) / RATE:.1f}s audio in {time.monotonic() - started:.1f}s)', flush=True)
             if len(samples):
@@ -647,7 +658,7 @@ class Voice:
 
         Long text is queued sentence by sentence: voice engines drift and sound rough on very long passages,
         and stop() can then cut in between sentences."""
-        text = clean_for_speech(text)
+        text = clean_for_speech(text, english=not self.language)
         if not text:
             return
         runtime_metrics.mark('first_text')

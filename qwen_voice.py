@@ -18,6 +18,13 @@ def create():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     class FastQwen(module.LocalTTS):
+        language = ""   # a Qwen language name ("Spanish") when Jarvis is answering in one; "" is English
+
+        def render(self, text):
+            # The request the installed LocalTTS writes has only a text field, so the language rides in front of
+            # the text between record separators; qwen_fast_worker.py takes it off again.
+            return super().render(f"\x1e{self.language}\x1e{text}" if self.language else text)
+
         def _start(self):
             env = os.environ.copy()
             for key in list(env):

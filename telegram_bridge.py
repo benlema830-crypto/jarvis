@@ -26,6 +26,8 @@ STORE = ROOT / "data" / "telegram-token.dpapi"
 API = "https://api.telegram.org/bot{token}/{method}"
 FILE_API = "https://api.telegram.org/file/bot{token}/{path}"
 MAX_AGE = 15 * 60  # messages older than this (sent while JARVIS was off) get a short notice instead
+PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
+MAX_PHOTO, MAX_FILE = 10_000_000, 50_000_000  # the Bot API's own limits for a photo and for any file
 
 
 def save_token(token: str):
@@ -202,6 +204,28 @@ class Bridge:
         for start in range(0, len(text), 4000):
             call(self.token, "sendMessage", timeout=20, chat_id=chat, text=text[start:start + 4000])
 
+    def send_file(self, chat, path, caption: str = ""):
+        """Send a file from this PC: a picture small enough is shown as a photo, anything else as a document."""
+        path = Path(path)
+        size = path.stat().st_size
+        if size > MAX_FILE:
+            raise ValueError(f"{path.name} is {size / 1e6:.0f} MB; Telegram takes files up to 50 MB.")
+        if size == 0:
+            raise ValueError(f"{path.name} is empty.")
+        extra = {"caption": caption.strip()[:1000]} if caption.strip() else {}
+        if path.suffix.lower() in PHOTO_TYPES and size <= MAX_PHOTO:
+            try:
+                with path.open("rb") as handle:
+                    call(self.token, "sendPhoto", timeout=180, files={"photo": (path.name, handle)}, chat_id=str(chat),
+                         **extra)
+                return "photo"
+            except RuntimeError:
+                pass  # Telegram refuses some pictures as photos (very long or very large ones); a document always works
+        with path.open("rb") as handle:
+            call(self.token, "sendDocument", timeout=300, files={"document": (path.name, handle)}, chat_id=str(chat),
+                 **extra)
+        return "document"
+
     def send_voice(self, chat, samples: np.ndarray, rate: int):
         call(self.token, "sendVoice", timeout=60, files={"voice": ("jarvis.ogg", encode_voice(samples, rate), "audio/ogg")},
              chat_id=str(chat))
@@ -218,3 +242,14 @@ def send_to_owner(text: str) -> str:
     BRIDGE.token = BRIDGE.token or load_token()
     BRIDGE.send(chat, text)
     return "Sent to your Telegram."
+
+
+def send_file_to_owner(path, caption: str = "") -> str:
+    """Used by the send_telegram tool for a file: only ever the paired owner chat."""
+    chat = chat_id()
+    if chat is None or not STORE.is_file():
+        return "Telegram isn't set up. Run scripts\\setup_telegram.py once."
+    path = Path(path)
+    BRIDGE.token = BRIDGE.token or load_token()
+    kind = BRIDGE.send_file(chat, path, caption)
+    return f"Sent {path.name} ({path.stat().st_size / 1e6:.1f} MB) to your Telegram as a {kind}."

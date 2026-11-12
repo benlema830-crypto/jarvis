@@ -162,7 +162,7 @@ class VoiceStudioEngine:
         threading.Thread(target=_tuck_away, args=(focus,), daemon=True).start()
         return True
 
-    def render(self, text: str) -> np.ndarray:
+    def render(self, text: str, language: str | None = None) -> np.ndarray:
         # VoiceStudio's prompt preprocessing trims a long reference clip but keeps its whole transcript, and the
         # mismatch makes the clone start replies with stray syllables ("E, done."). Measured: ~10 stray words in
         # 16 short replies with it on, 1 with preprocessing and denoise off, at the same speed.
@@ -171,6 +171,8 @@ class VoiceStudioEngine:
                 "preprocess_prompt": False, "denoise": False}
         if self.seed is not None:
             body["seed"] = self.seed
+        if language:
+            body["language"] = language   # ISO 639-1; left out, the engine works the language out from the text
         try:
             r = self.session.post(self.url + "/v1/audio/speech", json=body, timeout=(2, 60))
         except requests.RequestException as e:
