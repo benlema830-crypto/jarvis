@@ -1421,6 +1421,63 @@ def workshop(action: str, request: str = "", picture: str = ""):
             "open, clear, close, status or cancel.")
 
 
+@beta_tool(eager_input_streaming=True)
+def blueprint(action: str, request: str = "", photos: str = ""):
+    """Blueprints: a REAL thing the user owns or will build, as an exact CAD model they can build from and change.
+    Use it, not workshop, when the result has to be built or fitted in the real world: "model my machine from
+    these photos", "I lost the CAD file", "turn my machine into an AI robot", "what parts do I need", "make me
+    a parts list / build plan". (workshop is for looking at things.) One project is current at a time. Reading
+    photos, measuring, correcting and checking run in the background for two to five minutes, an upgrade five to ten: say one
+    short line, and you will speak again by yourself when it is done. Never describe a result before then. Each
+    round builds a Fusion model (when Fusion is running), puts a preview on the Workshop tab (pull it apart and
+    measure it there with workshop), and writes the build packet, parts list and measuring sheet to
+    Documents\\Jarvis Blueprints\\<name>.
+
+    Args:
+        action: new (start a project from photos: `photos` says where they are, `request` what it is and anything
+            the user said about it, e.g. "the pick-and-place machine I built in college"),
+            measure (the user measured lettered sizes from the measuring sheet: `request` like "A is 24 1/2 in,
+            B 610 mm"; numbers without units are taken in the units the user uses),
+            correct (anything wrong in the model, in their words: "the arm is on the left", "there are two motors"),
+            upgrade (design a change: `request` is what it should become, e.g. "an AI robot that sees with a
+            camera and sorts parts", with every detail they gave; adds real parts, brackets to make, wiring,
+            power, software and build steps),
+            check (compare the Fusion model with the photos again and fix what disagrees),
+            rebuild (Fusion, preview and packet again from the spec as it is), undo (take back the last change),
+            status (what is in it: parts, sizes, what is still to measure, clashes, power, cost; for questions),
+            open (switch to another saved project named in `request`; empty opens the latest),
+            list (saved projects).
+        request: What it is, the measurements, the correction or the goal, as described above.
+        photos: For new: a folder or picture files (full paths, ; between them), image links, "bench" (the
+            picture on the workshop bench) or "screen" (what is on their screens now).
+    """
+    import blueprint as bp
+    action = action.strip().lower().replace(" ", "_")
+    if action in ("new", "start", "read"):
+        return bp.start(photos, request)
+    if action in ("measure", "measurements"):
+        return bp.measure(request)
+    if action in ("correct", "edit", "change", "revise"):
+        return bp.revise(request)
+    if action == "upgrade":
+        return bp.upgrade(request)
+    if action == "check":
+        return bp.check()
+    if action == "rebuild":
+        return bp.rebuild()
+    if action == "undo":
+        return bp.undo()
+    if action == "status":
+        return bp.status()
+    if action == "open":
+        return bp.open_project(request)
+    if action == "list":
+        found = bp.projects()
+        return "; ".join(f"{p['title']} ({datetime.datetime.fromtimestamp(p['updated']):%b %d})" for p in found) or "No blueprint projects yet."
+    return "Unknown blueprint action. Use new, measure, correct, upgrade, check, rebuild, undo, status, open or list."
+
+
+
 # ---------- Tasks, Telegram, model ----------
 
 @beta_tool(eager_input_streaming=True)
@@ -1810,7 +1867,7 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          run_command, read_file, search_text, edit_file, write_file,
          search_knowledge, read_knowledge_note, create_knowledge_note, update_knowledge_note,
-         brain_mode, holo, workshop, add_task, list_tasks, complete_task,
+         brain_mode, holo, workshop, blueprint, add_task, list_tasks, complete_task,
          send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, creator_watch, watch_video, reverse_engineer, queue_away_job, away_jobs, response_style, reply_language]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]

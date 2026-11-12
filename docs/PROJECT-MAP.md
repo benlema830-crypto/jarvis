@@ -411,3 +411,19 @@ claim gate) only read English, so they don't fire in another language; receipts 
 local scope for `data/teardowns`, so only an agent session started in that folder loads it. Jarvis's own MCP client
 is HTTP only and doesn't see it. `scripts/setup_rea.py --remove` disconnects it.
 
+
+**Blueprints** (`blueprint.py`, `fusion_link.py`, tool `blueprint`; added 2026-11-12): for real things the owner will
+build or fit, where the workshop is for looking. One `spec.json` per project (`data/blueprints/<id>/`, mm, Z up,
+origin at the centre of the footprint) is the single source of truth; every part is one physical piece with shape
+(box, cylinder, tube, sphere, cone, or none for hardware), position, rotation, holes, material, make/buy, product,
+cost, mass, volts/watts, where its sizes came from and how sure. Fable reads the photos into it (`SYSTEM_READ`:
+scale from things of known size, and four to ten lettered measurements drawn on the photos); "A is 24 1/2 in"
+records the real number and Fable reworks the spec around it; `upgrade` designs a change (new parts with datasheet
+sizes, brackets to make, wiring, power, software, steps, risks). Each round: Fusion builds it through its own MCP
+(`fusion_link.run_script`, port 27182; a direct-modelling design, a component per part inside a component per
+group, NEW/CHANGE prefixes and colours, four pictures, STEP and .f3d; it rebuilds into the same never-saved design
+and never touches one the owner saved), then a check pass sends Fusion's pictures back to Fable beside the photos,
+the bench preview is made from the spec with no model call, and the packet goes to `Documents\Jarvis Blueprints\
+<name>\` (build-packet HTML + PDF through headless Chrome, parts list CSV + XLSX, measuring photos, spec, STEP).
+`checks()` finds clashes, floating parts, estimates, power headroom (30 %), weight and cost without a model call.
+Fusion built a 10-part test machine in 3-5 s.
