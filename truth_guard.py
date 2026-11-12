@@ -80,12 +80,14 @@ _PROGRESS = re.compile(
     r"\b(?:the|your|my) (?:agent|workshop|builder)(?:'s|’s| is)\s+(?:now\s+|still\s+|already\s+)?"
     r"(?:building|rendering|drafting|plotting|working|making|handling|modell?ing|printing)\b"
     r"|\bnow you (?:can|should be able to) see\b"
+    r"|^(?:now |right,? )?(?:building|rendering|drafting|opening|starting|launching|snapping|moving) (?:the|it|your|a|that)\b"
     r"|\b(?:it|the model) (?:is|should be) (?:now )?(?:up|showing|on (?:the|your) screen)\b", re.I)
 # "I'll open it in its own window." "I'll have the workshop draft it." A promise to act this very turn.
 _PROMISE = re.compile(
     r"\bI(?:'ll|’ll| will|'m going to|’m going to| am going to) (?:now |just |also )?"
     r"(?:have (?:the|an|my|your) (?:workshop|agent|builder)|open|click|center|centre|build|bring|pull|move|"
-    r"start|launch|show|draft|make|create|run|send|turn|switch|put|load|pop|display|render)\b", re.I)
+    r"start|launch|show|draft|make|create|run|send|turn|switch|put|load|pop|display|render|snap|check|list|"
+    r"call (?:the|a|that) tool)\b", re.I)
 
 _lock = threading.Lock()
 _called = 0
@@ -242,7 +244,15 @@ def promise_correction(promised):
             "Don't say anything is building, showing or done.")
 
 
-UNKEPT_PROMISE_WORDS = "I should correct myself: I haven't actually done that. Nothing was started or opened."
+UNKEPT_PROMISE_WORDS = ("I should correct myself: none of that has actually happened. "
+                        "I didn't run anything that would do it or show it.")
+
+
+def still_unbacked(spoken):
+    """After a claim check, the retry still reports something nothing backs, or promises with no tool run."""
+    with _lock:
+        called = _called
+    return any(unbacked(s) for s in spoken) or (not called and bool(promises(spoken)))
 
 
 def claims_state(sentence):

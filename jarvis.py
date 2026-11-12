@@ -403,10 +403,16 @@ class Brain:
             if gate.held:  # he was about to report something nothing backs: do it, or say what's actually known
                 hud.emit("event", text="Checking a claim before saying it")
                 self.messages.append({"role": "user", "content": f"[{stamp}] {gate.correction()}"})
+                before = len(spoken)
                 self._run(deliver)
+                # The gate is open now, so a second false report would go out unchecked (the local brain's did).
+                if truth_guard.still_unbacked(spoken[before:]):
+                    deliver(truth_guard.UNKEPT_PROMISE_WORDS)
+                    if self.messages[-1]["role"] == "assistant" and isinstance(self.messages[-1].get("content"), str):
+                        self.messages[-1]["content"] += " " + truth_guard.UNKEPT_PROMISE_WORDS
             # "I'll open it in a new window" and then no tool at all: give the brain one chance to do it or own
             # up, and if it still does nothing, Jarvis says so himself (the local brain ignored the first chance).
-            if gate.enabled and (promised := truth_guard.unkept_promises(spoken)):
+            elif gate.enabled and (promised := truth_guard.unkept_promises(spoken)):
                 hud.emit("event", text="Checking a promise was kept")
                 truth_guard.ClaimGate._log("[promise, no tool] " + " ".join(promised))
                 self.messages.append({"role": "user", "content": f"[{stamp}] {truth_guard.promise_correction(promised)}"})

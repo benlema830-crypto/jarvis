@@ -48,7 +48,8 @@ class PromiseAndProgressTest(unittest.TestCase):
         for sentence in ("The agent is building it now.",
                          "The agent is still rendering the frame and grip.",
                          "Now you can see the frame, grip and slide as they assemble.",
-                         "Now you can see the frame and grip without the clutter."):
+                         "Now you can see the frame and grip without the clutter.",
+                         "Building the desk lamp."):
             self.assertTrue(tg.claims_state(sentence), sentence)
             self.assertTrue(tg.unbacked(sentence), sentence)
         tg.record("agent_session_status", {"name": "Workshop"}, True, "running")
@@ -65,6 +66,11 @@ class PromiseAndProgressTest(unittest.TestCase):
     def test_a_failed_call_still_counts_as_trying(self):
         tg.record("open_app", {"app": "x"}, False, "not found")
         self.assertEqual(tg.unkept_promises(["I'll open it."]), [])
+
+    def test_a_retry_that_still_claims_is_caught(self):
+        self.assertTrue(tg.still_unbacked(["Ah, right.", "Now you can see the base and shade taking shape."]))
+        self.assertTrue(tg.still_unbacked(["I'll call the tool to open the model."]))
+        self.assertFalse(tg.still_unbacked(["I can't build that on the local brain."]))
 
     def test_ordinary_future_talk_is_not_a_promise(self):
         for sentence in ("I'll be here.", "I'll remember that.", "If you like, I'll open it.",
