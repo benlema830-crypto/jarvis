@@ -201,16 +201,21 @@
   /* ---------- Switching views ---------- */
   let restoreStage = false;
   function setView(name, focus = true) {
-    const consoleOn = name === 'console';
-    if (consoleOn && J.view.jarvisMain) { restoreStage = true; J.setStage(false, false, false); }
+    const consoleOn = name === 'console', workshopOn = name === 'workshop' && !!el('workshop');
+    if ((consoleOn || workshopOn) && J.view.jarvisMain) { restoreStage = true; J.setStage(false, false, false); }
     document.body.classList.toggle('view-console', consoleOn);
+    document.body.classList.toggle('view-workshop', workshopOn);   // the 3D workshop (workshop.js)
     el('console').hidden = !consoleOn;
-    for (const [id, on] of [['viewConsole', consoleOn], ['viewModel', !consoleOn]]) { el(id).classList.toggle('on', on); el(id).setAttribute('aria-pressed', String(on)); }
-    if (!consoleOn && restoreStage) { restoreStage = false; J.setStage(true, false, false); }
-    store.set('view', consoleOn ? 'console' : 'model');
+    if (el('workshop')) el('workshop').hidden = !workshopOn;
+    for (const [id, on] of [['viewConsole', consoleOn], ['viewWorkshop', workshopOn], ['viewModel', !consoleOn && !workshopOn]]) {
+      if (!el(id)) continue;
+      el(id).classList.toggle('on', on); el(id).setAttribute('aria-pressed', String(on));
+    }
+    if (!consoleOn && !workshopOn && restoreStage) { restoreStage = false; J.setStage(true, false, false); }
+    if (!workshopOn) store.set('view', consoleOn ? 'console' : 'model');   // the workshop is opened on purpose, never by default
     dispatchEvent(new Event('resize'));
     if (consoleOn) { refreshWork(); refreshHome(); refreshToday(); stream.scrollTop = stream.scrollHeight; if (focus) el('prompt').focus(); }
-    J.emit('view', consoleOn ? 'console' : 'model');
+    J.emit('view', consoleOn ? 'console' : workshopOn ? 'workshop' : 'model');
   }
   J.setView = setView;
   el('viewConsole').onclick = () => setView('console');

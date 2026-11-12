@@ -260,7 +260,8 @@
   let modelData = null, modelBusy = false;
   // On the Claude plan there's no per-use cost; bigger models use up the plan's limits faster.
   const PLAN_LABELS = {
-    'claude-opus-5-5': 'Opus 5.5 · smartest · on your Claude plan',
+    'claude-opus-5-5': 'Opus 5.5 · the everyday brain · on your Claude plan',
+    'claude-fable-5-2': 'Fable 5.2 · most capable · slower, uses plan limits fastest',
     'claude-sonnet-5-5': 'Sonnet 5.5 · smart, lighter on plan limits',
     'claude-haiku-5-5': 'Haiku 5.5 · fastest, lightest on plan limits',
   };

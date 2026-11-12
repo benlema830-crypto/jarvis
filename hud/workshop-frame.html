@@ -1,0 +1,282 @@
+<!doctype html>
+<!-- The workshop's 3D stage. It runs inside a sandboxed frame (no access to the Jarvis page, its storage or its
+     requests), because the scene code it runs was written by a model. hud/workshop.js talks to it with messages. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#03070a;overflow:hidden;font:600 12.5px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:#eef6f3}
+canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline:0}
+canvas.dragging{cursor:grabbing}
+#labels{position:absolute;inset:0;pointer-events:none;opacity:0}
+#labels svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#labels line{stroke:#f4fbf9;stroke-width:1.2}
+#labels circle{fill:#fff}
+.label{position:absolute;transform:translateY(-50%);padding:3px 10px;border-radius:6px;background:rgba(5,12,14,.84);border:1px solid rgba(255,255,255,.16);white-space:nowrap}
+</style>
+</head>
+<body>
+<canvas id="stage" tabindex="-1"></canvas>
+<div id="labels"><svg id="lines" aria-hidden="true"></svg></div>
+<script type="module">
+import * as THREE from '/vendor/three.module.js';
+
+const canvas = document.getElementById('stage'), labelBox = document.getElementById('labels'), lines = document.getElementById('lines');
+const say = message => parent.postMessage(message, '*');
+const V = () => new THREE.Vector3();
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x03070a);
+const camera = new THREE.PerspectiveCamera(36, 1, .01, 5000);
+
+/* Reflections: a small made-up studio, so metal and glass have something to show. */
+{
+  const room = new THREE.Scene(), glow = (w, h, colour, strength, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(colour).multiplyScalar(strength), side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); room.add(m);
+  };
+  room.add(new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40), new THREE.MeshBasicMaterial({ color: 0x0b1316, side: THREE.BackSide })));
+  glow(14, 8, 0xffffff, 5, 0, 16, 4); glow(8, 12, 0xcfe9ff, 3, -16, 4, 6); glow(6, 10, 0x5eead4, 2.2, 16, 3, -8); glow(10, 4, 0xffe2b8, 2.5, 4, 2, 18);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(room, .05).texture; pmrem.dispose();
+}
+const hemi = new THREE.HemisphereLight(0xdcefff, 0x0a1412, .55);
+const key = new THREE.DirectionalLight(0xffffff, 2.3), fill = new THREE.DirectionalLight(0xbfe0ff, .5), rim = new THREE.DirectionalLight(0x5eead4, .9);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -.0003; key.shadow.normalBias = .03;
+scene.add(hemi, key, key.target, fill, rim);
+
+/* Floor: a glowing grid that fades out, and a plane that only shows shadows. */
+const floor = new THREE.Group();
+const grid = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, uniforms: { cells: { value: 44 } },
+  vertexShader: 'varying vec2 p; void main(){ p = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+  fragmentShader: `varying vec2 p; uniform float cells;
+    void main(){ vec2 q = p * cells * .5; vec2 g = abs(fract(q - .5) - .5) / fwidth(q); float line = 1. - min(min(g.x, g.y), 1.);
+      float r = length(p); float fade = smoothstep(1., .12, r); float ring = smoothstep(.006, 0., abs(r - .5)) * .7;
+      gl_FragColor = vec4(vec3(.82, 1., .96), (line * .5 + ring) * fade); }`,
+}));
+grid.rotation.x = -Math.PI / 2; grid.position.y = -.0015; grid.renderOrder = -1;
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShadowMaterial({ opacity: .42 }));
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = -.0005; shadow.receiveShadow = true;
+floor.add(grid, shadow); scene.add(floor);
+
+const root = new THREE.Group(); scene.add(root);
+let parts = [], extras = [], ticks = [], explodeTo = 0, explodeNow = 0, level = 0, levelTo = 0, radius = 1, firstFit = true;
+const orbit = { az: .62, el: .3, dist: 4, target: V(), azTo: .62, elTo: .3, distTo: 4, targetTo: V(), touched: false };
+function emptyBench() {   // nothing built yet: a wide floor seen from a little above
+  radius = 1; floor.scale.setScalar(9); orbit.targetTo.set(0, .7, 0); orbit.distTo = 5.2; if (!orbit.touched) orbit.elTo = .3;
+  key.position.set(2, 4, 3); camera.near = .01; camera.far = 500; camera.updateProjectionMatrix();
+}
+emptyBench(); orbit.target.copy(orbit.targetTo); orbit.dist = orbit.distTo;
+
+/* ---------- What scene code may call ---------- */
+function prepare(object) {
+  object.traverse(o => {
+    if (!o.isMesh) return;
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    o.castShadow = !(m && m.transparent && m.opacity < .6); o.receiveShadow = true;
+  });
+}
+function hold(object, quiet) {
+  const box = new THREE.Box3().setFromObject(object), holder = new THREE.Group();
+  prepare(object); holder.add(object); holder.userData.born = quiet ? -1e9 : performance.now();
+  root.add(holder);
+  return { holder, box, centre: box.isEmpty() ? V() : box.getCenter(V()) };
+}
+let quietRun = false;
+const api = {
+  part(name, description, object, explode) {
+    if (!object || !object.isObject3D) throw Error('api.part needs an Object3D for "' + name + '"');
+    const offset = (Array.isArray(explode) ? explode : [0, 0, 0]).slice(0, 3).map(n => Number.isFinite(+n) ? +n : 0);
+    while (offset.length < 3) offset.push(0);
+    parts.push({ name: String(name).slice(0, 80), description: String(description || '').slice(0, 400), explode: new THREE.Vector3(...offset), ...hold(object, quietRun) });
+    labelsDirty = true;
+  },
+  add(object) { if (!object || !object.isObject3D) throw Error('api.add needs an Object3D'); extras.push(hold(object, quietRun)); },
+  onTick(fn) { if (typeof fn === 'function' && ticks.length < 40) ticks.push(fn); },
+};
+
+function reset() {
+  for (const child of [...root.children]) {
+    root.remove(child);
+    child.traverse(o => { o.geometry?.dispose?.(); for (const m of [].concat(o.material || [])) m.dispose?.(); });
+  }
+  parts = []; extras = []; ticks = []; explodeTo = explodeNow = 0; labelsDirty = true; firstFit = !orbit.touched;
+  emptyBench();
+}
+function run(message) {
+  quietRun = !!message.quiet;
+  try { new Function('THREE', 'api', '"use strict";\n' + (message.setup || '') + '\n' + (message.code || ''))(THREE, api); }
+  catch (error) { say({ t: 'error', step: message.name, message: String(error && error.message || error).slice(0, 300) }); }
+  quietRun = false;
+  fit();
+  say({ t: 'parts', parts: parts.map(p => ({ name: p.name, description: p.description })) });
+}
+
+/* ---------- Camera ---------- */
+function bounds(k) {
+  const box = new THREE.Box3(), moved = new THREE.Box3();
+  for (const p of parts) if (!p.box.isEmpty()) box.union(moved.copy(p.box).translate(p.explode.clone().multiplyScalar(k)));
+  for (const e of extras) if (!e.box.isEmpty()) box.union(e.box);
+  return box;
+}
+function fit() {
+  const box = bounds(explodeTo);
+  if (box.isEmpty()) return;
+  const size = box.getSize(V()), sphere = box.getBoundingSphere(new THREE.Sphere());
+  radius = Math.max(sphere.radius, .01);
+  const width = canvas.clientWidth || 1, height = canvas.clientHeight || 1, tall = height + Math.abs(inset.bottom - inset.top);
+  const clearW = Math.max(width - inset.right, 200), clearH = Math.max(height - inset.bottom - inset.top, 200);
+  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));   // of the whole (padded) view height
+  const narrow = Math.atan(tan * Math.min(clearH, clearW) / tall);
+  orbit.targetTo.copy(sphere.center); orbit.distTo = radius / Math.sin(narrow) * 1.12;
+  if (firstFit && !orbit.touched) orbit.elTo = size.y < .4 * Math.max(size.x, size.z) ? .78 : .3;   // look down on flat things
+  const flat = bounds(0), ground = Math.max(flat.getSize(V()).x, flat.getSize(V()).z, radius);
+  floor.scale.setScalar(ground * 3.2);
+  grid.material.uniforms.cells.value = 44;
+  key.position.copy(sphere.center).add(V().set(.7, 1.5, .9).multiplyScalar(radius * 2.2)); key.target.position.copy(sphere.center);
+  const s = key.shadow.camera; s.left = s.bottom = -radius * 1.6; s.right = s.top = radius * 1.6; s.near = radius * .1; s.far = radius * 8; s.updateProjectionMatrix();
+  fill.position.set(-radius * 3, radius * 2, radius * 2); rim.position.set(-radius * 2, radius * 2.5, -radius * 4);
+  camera.near = radius / 200; camera.far = radius * 400; camera.updateProjectionMatrix();
+}
+const inset = { right: 0, bottom: 0, top: 0 };
+function applyInsets() {
+  const width = canvas.clientWidth, height = canvas.clientHeight, down = inset.bottom - inset.top;
+  if (!width || !height) return;
+  camera.setViewOffset(width + inset.right, height + Math.abs(down), inset.right, Math.max(down, 0), width, height);
+  camera.aspect = (width + inset.right) / (height + Math.abs(down)); camera.updateProjectionMatrix();
+}
+let drag = null;
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, pan: e.button !== 0 || e.shiftKey }; canvas.setPointerCapture(e.pointerId); canvas.classList.add('dragging'); });
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; orbit.touched = true;
+  if (drag.pan) {
+    const scale = orbit.dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 2 / canvas.clientHeight;
+    const right = V().setFromMatrixColumn(camera.matrixWorld, 0), up = V().setFromMatrixColumn(camera.matrixWorld, 1);
+    orbit.targetTo.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
+  } else { orbit.azTo -= dx * .006; orbit.elTo = THREE.MathUtils.clamp(orbit.elTo + dy * .005, -.15, 1.45); }
+});
+const release = () => { drag = null; canvas.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', release); canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.touched = true; orbit.distTo = THREE.MathUtils.clamp(orbit.distTo * Math.exp(e.deltaY * .0012), radius * .25, radius * 30); }, { passive: false });
+canvas.addEventListener('dblclick', () => { orbit.touched = false; firstFit = true; orbit.azTo = .62; fit(); });
+
+/* ---------- Labels for the pulled-apart view ---------- */
+let labelsDirty = true, labelNodes = [];
+const NS = 'http://www.w3.org/2000/svg';
+function buildLabels() {
+  labelsDirty = false; lines.replaceChildren(); for (const n of labelNodes) n.box.remove();
+  labelNodes = parts.map(p => {
+    const box = document.createElement('div'); box.className = 'label'; box.textContent = p.name; labelBox.append(box);
+    const line = document.createElementNS(NS, 'line'), dot = document.createElementNS(NS, 'circle'); dot.setAttribute('r', 3); lines.append(line, dot);
+    return { box, line, dot };
+  });
+}
+const projected = V();
+function placeLabels(width, height) {
+  if (labelsDirty) buildLabels();
+  const shown = THREE.MathUtils.clamp((explodeNow - .45) / .4, 0, 1);
+  labelBox.style.opacity = shown;
+  if (!shown || !parts.length) return;
+  const points = parts.map((p, i) => {
+    projected.copy(p.centre).add(p.holder.position).project(camera);
+    return { i, x: (projected.x + 1) / 2 * width, y: (1 - projected.y) / 2 * height, hidden: projected.z > 1 };
+  });
+  const xs = points.filter(p => !p.hidden).map(p => p.x), mid = (Math.min(...xs) + Math.max(...xs)) / 2;
+  for (const p of points) p.right = p.x > mid + width * .035;
+  for (const side of [false, true]) {
+    const group = points.filter(p => p.right === side && !p.hidden).sort((a, b) => a.y - b.y);
+    if (!group.length) continue;
+    const edge = side ? Math.min(width - inset.right - 150, Math.max(...group.map(p => p.x)) + 90) : Math.max(150, Math.min(...group.map(p => p.x)) - 90);
+    let last = -1e9;
+    for (const p of group) { p.ly = Math.max(p.y, last + 29); last = p.ly; }
+    // Pushing only downward drags a crowded column below its parts; slide it back so it sits around them.
+    const drift = group.reduce((sum, p) => sum + p.ly - p.y, 0) / group.length;
+    const shift = Math.max(Math.min(drift, group[0].ly - inset.top - 8), last - (height - inset.bottom - 14), 0);
+    for (const p of group) p.ly -= shift;
+    for (const p of group) {
+      const n = labelNodes[p.i]; n.box.style.display = '';
+      n.box.style.top = p.ly + 'px';
+      if (side) { n.box.style.left = edge + 'px'; n.box.style.right = ''; } else { n.box.style.right = (width - edge) + 'px'; n.box.style.left = ''; }
+      n.line.setAttribute('x1', edge + (side ? -5 : 5)); n.line.setAttribute('y1', p.ly); n.line.setAttribute('x2', p.x); n.line.setAttribute('y2', p.y);
+      n.dot.setAttribute('cx', p.x); n.dot.setAttribute('cy', p.y); n.line.style.display = n.dot.style.display = '';
+    }
+  }
+  for (const p of points) if (p.hidden) { const n = labelNodes[p.i]; n.box.style.display = n.line.style.display = n.dot.style.display = 'none'; }
+}
+
+/* ---------- Frame loop ---------- */
+let last = performance.now(), sizeKey = '';
+function syncSize() {   // false while the workshop is hidden and the canvas has no size
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (!width || !height) return false;
+  if (sizeKey !== width + 'x' + height) { sizeKey = width + 'x' + height; renderer.setSize(width, height, false); applyInsets(); fit(); }
+  return true;
+}
+function aim() {
+  const flat = Math.cos(orbit.el) * orbit.dist;
+  camera.position.set(orbit.target.x + Math.sin(orbit.az) * flat, orbit.target.y + Math.sin(orbit.el) * orbit.dist, orbit.target.z + Math.cos(orbit.az) * flat);
+  camera.lookAt(orbit.target);
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  if (!syncSize()) return;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  const ease = 1 - Math.exp(-dt * 6);
+  explodeNow += (explodeTo - explodeNow) * (1 - Math.exp(-dt * 4.5));
+  level += (levelTo - level) * (1 - Math.exp(-dt * 14)); levelTo *= Math.exp(-dt * 3);
+  for (const item of [...parts, ...extras]) {
+    const age = (now - item.holder.userData.born) / 520, t = age >= 1 ? 1 : 1 - Math.pow(1 - Math.max(age, 0), 3);
+    item.holder.position.set(0, 0, 0);
+    if (item.explode) item.holder.position.copy(item.explode).multiplyScalar(explodeNow);
+    item.holder.position.y += (1 - t) * radius * .22;
+    item.holder.scale.setScalar(.82 + .18 * t);
+    item.holder.visible = age >= 0;
+  }
+  for (const fn of [...ticks]) { try { fn(now / 1000, dt, level); } catch (error) { ticks.splice(ticks.indexOf(fn), 1); say({ t: 'error', step: 'animation', message: String(error && error.message || error).slice(0, 300) }); } }
+  orbit.az += (orbit.azTo - orbit.az) * ease; orbit.el += (orbit.elTo - orbit.el) * ease; orbit.dist += (orbit.distTo - orbit.dist) * ease; orbit.target.lerp(orbit.targetTo, ease);
+  aim();
+  renderer.render(scene, camera);
+  placeLabels(width, height);
+}
+requestAnimationFrame(frame);
+
+/* ---------- Messages from the Jarvis page ---------- */
+addEventListener('message', event => {
+  if (event.source !== parent || !event.data || typeof event.data !== 'object') return;
+  const m = event.data;
+  if (m.t === 'hello') say({ t: 'ready' });
+  else if (m.t === 'reset') reset();
+  else if (m.t === 'run') run(m);
+  else if (m.t === 'explode') { explodeTo = m.on ? 1 : 0; fit(); }
+  else if (m.t === 'insets') {
+    const before = orbit.touched && [orbit.distTo, orbit.targetTo.clone()];
+    Object.assign(inset, { right: +m.right || 0, bottom: +m.bottom || 0, top: +m.top || 0 }); applyInsets(); fit();
+    if (before) { orbit.distTo = before[0]; orbit.targetTo.copy(before[1]); }   // the owner's own zoom and pan stay
+  }
+  else if (m.t === 'level') levelTo = Math.max(levelTo, Math.min(1, +m.v || 0));
+  else if (m.t === 'fit') { orbit.touched = false; firstFit = true; fit(); }
+  else if (m.t === 'snapshot') {
+    let data = '';
+    if (syncSize() && parts.length) {
+      // The picture must show the model as framed, even if the view only just opened and the camera is still gliding.
+      orbit.dist = orbit.distTo; orbit.target.copy(orbit.targetTo); orbit.az = orbit.azTo; orbit.el = orbit.elTo; aim();
+      for (const item of [...parts, ...extras]) { item.holder.userData.born = -1e9; item.holder.scale.setScalar(1); item.holder.position.set(0, 0, 0); if (item.explode) item.holder.position.copy(item.explode).multiplyScalar(explodeNow); }
+      grid.visible = false; renderer.render(scene, camera);
+      try { data = canvas.toDataURL('image/jpeg', .9); } catch {}
+      grid.visible = true;
+    }
+    say({ t: 'snapshot', nonce: m.nonce, data });
+  }
+});
+say({ t: 'ready' });
+</script>
+</body>
+</html>

@@ -42,7 +42,8 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 INTEL_TTL = 600
 TRANSCRIPTS = os.path.join(HERE, "data", "transcripts")
 TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
-LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume", "visual-model"}  # not replayed to pages that connect later
+LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume", "visual-model",
+             "workshop"}  # not replayed to pages that connect later
 
 # Read by jarvis.py: typed commands (str) and background events (dict)
 commands: queue.Queue = response_routing.CommandQueue()
@@ -309,6 +310,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json({"jobs": away_jobs.board()})
             except Exception:
                 self._json({"jobs": [], "error": "Could not read the away-work queue."})
+        elif self.path == "/workshop":  # the 3D workshop as it is now (workshop.py), for a page that just opened
+            import workshop
+            self._json(workshop.snapshot())
         elif self.path == "/attention":
             import approvals
             import attention
@@ -397,6 +401,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(answer.get(timeout=ASK_TIMEOUT))
             except queue.Empty:
                 self._json({"error": f"Jarvis didn't answer within {ASK_TIMEOUT // 60} minutes. He may still be working."}, 504)
+            return
+        if self.path == "/workshop":  # the workshop page reporting a click or a step that failed (workshop.py)
+            import workshop
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4000:
+                    raise ValueError("Invalid request size.")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object.")
+                self._json(workshop.page_report(payload))
+            except (ValueError, OSError) as error:
+                self._json({"error": str(error)}, 400)
             return
         if self.path != "/command":
             self.send_error(404)

@@ -99,11 +99,51 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/experience.js": ("experience.js", "text/javascript"),
           "/console.js": ("console.js", "text/javascript"),
           "/cards.js": ("cards.js", "text/javascript"),
+          "/workshop.js": ("workshop.js", "text/javascript"),
+          "/workshop-frame.html": ("workshop-frame.html", "text/html"),
+          "/vendor/three.module.js": ("vendor/three.module.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
+# The workshop's 3D stage is a sandboxed frame, so its request for three.js arrives with no origin ("null").
+# That one file is a public library with nothing of the owner's in it, so any page may read it.
+PUBLIC = {"/vendor/three.module.js"}
+WORKSHOP = ROOT / "data" / "workshop"
+
+
+def _jpeg(data, limit=6_000_000):
+    """Base64 text from the page -> JPEG bytes, or ValueError. Only a real JPEG is ever written to disk."""
+    import base64
+    import binascii
+    if not isinstance(data, str) or len(data) > limit:
+        raise ValueError("That picture is too large.")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("That isn't a picture.") from None
+    if raw[:3] != b"\xff\xd8\xff":
+        raise ValueError("That isn't a JPEG picture.")
+    return raw
+
+
+def workshop_file(query):
+    """A picture or render kept by the workshop: (bytes, content type). Names are checked, never joined blindly."""
+    import re
+    from urllib.parse import parse_qs
+    asked = parse_qs(query)
+    scene, name = asked.get("scene", [""])[0], asked.get("name", [""])[0]
+    if not re.fullmatch(r"[a-z0-9-]{1,80}", scene) or not re.fullmatch(r"[\w-]{1,60}\.(?:png|jpg)", name):
+        raise ValueError("Unknown workshop file.")
+    folder = WORKSHOP if scene == "bench" else WORKSHOP / scene
+    path = folder / name
+    if not path.is_file():
+        path = folder / "renders" / name
+    if not path.is_file():
+        raise ValueError("Unknown workshop file.")
+    return path.read_bytes(), "image/png" if name.endswith(".png") else "image/jpeg"
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
 PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel",
-                 "/home", "/attention", "/jobs"},
-         "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control"}}
+                 "/home", "/attention", "/jobs", "/workshop"},
+         "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control",
+                  "/workshop"}}
 
 
 def serve():
@@ -117,10 +157,12 @@ def serve():
         def log_message(self, *args):
             pass
 
-        def reply(self, result, code=200, content_type="application/json"):
+        def reply(self, result, code=200, content_type="application/json", cors=False):
             body = result if isinstance(result, bytes) else json.dumps(result).encode()
             self.send_response(code)
             self.send_header("Content-Type", content_type)
+            if cors:
+                self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -208,6 +250,22 @@ def serve():
                 except Exception:
                     return {"error": "Could not access the local connection store. "
                                      "No credentials are included in this response."}, 500
+            if route == "/workshop/picture" and post:   # the picture the owner put on the bench
+                import workshop
+                raw = _jpeg(self.payload(8_100_000).get("data"))
+                WORKSHOP.mkdir(parents=True, exist_ok=True)
+                (WORKSHOP / workshop.BENCH).write_bytes(raw)
+                return {"ok": True}, 200
+            if route == "/workshop/snapshot" and post:  # the 3D view as the owner has it turned, for a render
+                import re
+                p = self.payload(8_100_000)
+                if not re.fullmatch(r"[a-f0-9]{12}", str(p.get("nonce", ""))):
+                    raise ValueError("Unknown snapshot.")
+                raw = _jpeg(p.get("data"))
+                WORKSHOP.mkdir(parents=True, exist_ok=True)
+                (WORKSHOP / f"snap-{p['nonce']}.tmp").write_bytes(raw)
+                (WORKSHOP / f"snap-{p['nonce']}.tmp").replace(WORKSHOP / f"snap-{p['nonce']}.jpg")
+                return {"ok": True}, 200
             if route == "/mcp/oauth" and post:
                 import mcp_oauth
                 return mcp_oauth.manage(self.payload(16000)), 200
@@ -219,12 +277,20 @@ def serve():
             if self.command == "POST" and self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                 return self.reject(400)
             origin = self.headers.get("Origin")
-            if origin and origin not in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}:
-                return self.reject(403)
             route = self.path.split("?")[0]
+            public = self.command == "GET" and route in PUBLIC
+            if origin and not public and origin not in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}:
+                return self.reject(403)
             if self.command == "GET" and route in ASSETS:
                 name, content_type = ASSETS[route]
-                return self.reply((ROOT / "hud" / name).read_bytes(), content_type=content_type + "; charset=utf-8")
+                return self.reply((ROOT / "hud" / name).read_bytes(), content_type=content_type + "; charset=utf-8",
+                                  cors=public)
+            if self.command == "GET" and route == "/workshop/file":
+                try:
+                    body, kind = workshop_file(self.path.partition("?")[2])
+                except ValueError:
+                    return self.send_error(404)
+                return self.reply(body, content_type=kind)
             try:
                 handled = self.local(route)
                 if handled:
@@ -242,7 +308,7 @@ def serve():
             previous = self.connection.gettimeout()
             try:
                 size = int(self.headers.get('Content-Length',0))
-                if self.command == 'POST' and 0 < size <= 310000:
+                if self.command == 'POST' and 0 < size <= 8_200_000:
                     self.connection.settimeout(.25)
                     self.rfile.read(size)
             except (OSError, ValueError):

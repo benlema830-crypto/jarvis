@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import privacy
 
 HERE = Path(__file__).resolve().parent
-MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+MODELS = ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"]
 SERVER = "jarvis"
 STALL_SECONDS = 240   # no message from Claude Code for this long ends the turn (a direct command can run 150 s)
 MAX_TURNS = 40        # model turns (tool rounds) per reply: direct terminal work takes more than a voice command

@@ -1295,6 +1295,58 @@ def holo(action: str = "open") -> str:
     return holo_bridge.describe()
 
 
+@beta_tool(eager_input_streaming=True)
+def workshop(action: str, request: str = "", picture: str = ""):
+    """The workshop on the Jarvis page: you build a thing in 3D in front of the user, piece by piece, and change
+    it by voice. Use it when they ask you to build, design, model or mock up something they can look at
+    ("build yourself a body", "make a 3D model of a desk lamp", "turn this floor plan into 3D"), and for
+    everything they then say about the model on the bench. Building, changing and rendering run in the
+    background and take from half a minute to two minutes: say one short line now, and you will speak again by
+    yourself when it is finished. Never describe a result before then.
+
+    Args:
+        action: build (make something new; `request` says what, with every detail they gave),
+            edit (any change to the model on the bench: "make the housing red", "remove the stairs", "add palm
+            trees by the pool"; `request` is the change in their words, including a correction of the last one),
+            explode ("pull it apart", "break it apart", "show me inside": every part spread out and labelled),
+            assemble ("put it back together"), render ("render it": a realistic picture of the model, about a
+            minute), show_model or show_render (which of the two is on screen), undo (take back the last change),
+            open (open the workshop: the empty bench, or a saved model named in `request`), clear (an empty
+            bench), close, status (what is on the bench and its parts, for answering questions about them),
+            cancel (end a build that is running).
+        request: What to build or change, or the saved model to open.
+        picture: For build only. "bench" when the user put, dropped or pasted a picture on the workshop bench;
+            "screen" to build what is on their screen right now ("build this", "build what I'm looking at");
+            otherwise leave empty.
+    """
+    import workshop as bench
+    action = action.strip().lower().replace(" ", "_")
+    if action == "build":
+        return bench.build(request, picture)
+    if action in ("edit", "change"):
+        return bench.edit(request)
+    if action in ("explode", "assemble"):
+        return bench.explode(action == "explode")
+    if action == "render":
+        return bench.render()
+    if action in ("show_model", "show_render"):
+        return bench.show(action[5:])
+    if action == "undo":
+        return bench.undo()
+    if action == "open":
+        return bench.open_bench(request)
+    if action == "clear":
+        return bench.clear()
+    if action == "close":
+        return bench.close()
+    if action == "cancel":
+        return bench.stop()
+    if action == "status":
+        return bench.describe()
+    return ("Unknown workshop action. Use build, edit, explode, assemble, render, show_model, show_render, undo, "
+            "open, clear, close, status or cancel.")
+
+
 # ---------- Tasks, Telegram, model ----------
 
 @beta_tool(eager_input_streaming=True)
@@ -1347,9 +1399,10 @@ def send_telegram(text: str) -> str:
 
 @beta_tool(eager_input_streaming=True)
 def switch_model(model: str) -> str:
-    """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to Sonnet" or
-    "use Codex". The choices are Claude models on the user's Claude plan and Codex models on their ChatGPT
-    plan; neither spends API credits. Validated with a short test and applied after this turn; tell the user that.
+    """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to Fable",
+    "go back to Opus" or "use Codex". The choices are Claude models on the user's Claude plan (Opus, Fable,
+    Sonnet, Haiku) and Codex models on their ChatGPT plan; neither spends API credits. Fable 5.2 is the most
+    capable and the slowest, and uses the plan's limits fastest. Validated with a short test and applied after this turn; tell the user that.
 
     Args:
         model: The model name as the user said it; matched against the available models.
@@ -1629,7 +1682,7 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          control_app_window, app_audio_control, manage_personal_files, list_mcp_tools, call_mcp_tool,
          run_command, read_file, search_text, edit_file, write_file,
          search_knowledge, read_knowledge_note, create_knowledge_note, update_knowledge_note,
-         brain_mode, holo, add_task, list_tasks, complete_task,
+         brain_mode, holo, workshop, add_task, list_tasks, complete_task,
          send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, creator_watch, watch_video, queue_away_job, away_jobs, response_style]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]

@@ -60,7 +60,7 @@
 
 <div class="toolbar" role="toolbar" aria-label="View">
   <div class="view-switch" role="group" aria-label="Main view">
-    <button id="viewModel" type="button" class="on" aria-pressed="true" title="The 3D model and knowledge graph (Ctrl+.)">Model</button><button id="viewConsole" type="button" aria-pressed="false" title="The Console: what you asked, what he did, and the proof (Ctrl+.)">Console</button>
+    <button id="viewModel" type="button" class="on" aria-pressed="true" title="The 3D model and knowledge graph (Ctrl+.)">Model</button><button id="viewWorkshop" type="button" aria-pressed="false" title="The workshop: he builds things in 3D and changes them by voice">Workshop</button><button id="viewConsole" type="button" aria-pressed="false" title="The Console: what you asked, what he did, and the proof (Ctrl+.)">Console</button>
   </div>
   <span class="toolbar-gap graph-only" aria-hidden="true"></span>
   <button id="fit" class="graph-only" type="button" title="Fit everything (F)">◎ Fit</button>
@@ -97,6 +97,9 @@
 </aside>
 <div class="mode-panel card" id="modePanel" hidden role="dialog" aria-label="Mode settings"></div>
 
+<main class="workshop" id="workshop" hidden aria-label="Workshop">
+  <iframe id="workshopFrame" src="/workshop-frame.html" sandbox="allow-scripts" title="3D stage"></iframe>
+</main>
 <section class="cards" id="cards" hidden aria-label="Things that want you" aria-live="polite"></section>
 <main class="console" id="console" hidden aria-label="Console">
   <div class="console-stream" id="consoleStream" role="log" aria-live="polite" tabindex="0"></div>
@@ -143,5 +146,6 @@
 <script src="/experience.js"></script>
 <script src="/console.js"></script>
 <script src="/cards.js"></script>
+<script src="/workshop.js"></script>
 </body>
 </html>
