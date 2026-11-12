@@ -122,5 +122,8 @@ pywebview==6.2.1
 # Reads YouTube watch history headlessly (youtube_history.py)
 playwright==1.64.1
 
+# Creator watch: YouTube captions for new Jarvis videos (creator_watch.py)
+youtube-transcript-api==1.2.5
+
 # Lint check, run by scripts/verify_project.py (settings in ruff.toml)
 ruff==0.17.3

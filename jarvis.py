@@ -1269,6 +1269,8 @@ def main():
         print("(held updates from an unfinished greeting are held again)", flush=True)
     parallel.GROUPS.announce = hud.commands.put
     heartbeat.start(hud.commands.put)
+    import creator_watch
+    creator_watch.start(hud.commands.put)  # Zubair Trabzada's Jarvis videos and GitHub, every few hours
     threading.Thread(target=start_local_embeddings, daemon=True).start()
     start_bridges(ears)
     import morning_wakeup

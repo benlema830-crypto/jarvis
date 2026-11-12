@@ -1485,6 +1485,24 @@ def research_status() -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def creator_watch(check_now: bool = False) -> str:
+    """What Zubair Trabzada (the YouTuber whose JARVIS ours follows) has added to his Jarvis lately. Jarvis
+    watches his YouTube channel and GitHub every few hours by himself and writes each new Jarvis video up in the
+    vault under Research/Zubair watch. Use this when the user asks what's new with Zubair or his Jarvis, or asks
+    you to check now. The write-ups are proposals: build from them only when the user says so.
+
+    Args:
+        check_now: True to look right away (in the background; anything new is announced when it's done).
+    """
+    import creator_watch as watch
+    if check_now:
+        watch.check_now(hud.commands.put)
+        return ("Checking his channel and GitHub now in the background; anything new will be announced. "
+                "Don't claim any findings yet.\n\n" + watch.describe())
+    return watch.describe()
+
+
+@beta_tool(eager_input_streaming=True)
 def queue_away_job(request: str, kind: str = "build", project: str = "", why: str = "", model: str = "") -> str:
     """Queue work the user asked for that should carry on without them: "build this while I'm away",
     "look into this overnight", "keep working on it when I'm gone". It starts right away and runs by itself,
@@ -1580,7 +1598,7 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          run_command, read_file, search_text, edit_file, write_file,
          search_knowledge, read_knowledge_note, create_knowledge_note, update_knowledge_note,
          brain_mode, holo, add_task, list_tasks, complete_task,
-         send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, queue_away_job, away_jobs, response_style]
+         send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, creator_watch, queue_away_job, away_jobs, response_style]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
 

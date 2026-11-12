@@ -55,6 +55,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
 | Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex), heartbeat.py (half-hourly plain checks and the owner's checklist), attention.py (say it now or hold it; five unprompted updates a day), presence_greeting.py, morning_wakeup.py |
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
+| Creator watch | creator_watch.py (Zubair Trabzada's YouTube feed and GitHub every 6 hours; new Jarvis videos written up by Codex -> Research/Zubair watch/ in the vault; `creator_watch` tool) |
 | Email | gmail.py (Gmail API: reads, and sends after the owner's yes; DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
@@ -275,3 +276,14 @@ minutes at a time, and goes back when the plan answers. Any other Codex failure 
 be given the key for one command (`with_openai_key`) when the owner asks for something the API alone can do; the
 key is cut out of the output. Not proven with a real request: on 2026-11-11 the key was valid but OpenAI
 reported its credit exhausted, and he says exactly that when it happens.
+
+## Creator watch (2026-11-11)
+
+The owner wants Jarvis to keep up with what Zubair Trabzada (the YouTuber whose Jarvis ours follows) adds to his.
+`creator_watch.py` checks his channel's public feed and his GitHub repos every 6 hours (`preferences
+"creator_watch": {"enabled", "hours"}`), with no AI and no cost. The first look only records what exists. A new video
+about Jarvis gets its transcript (`youtube-transcript-api`) written up by Codex: what's new, how he built it, what we
+have, what's worth adding. That goes in `Research/Zubair watch/` and is announced through attention.py. If captions aren't up yet
+it tries again for two days. Other videos and repo changes go in one plain "updates" note. Links to his paid community are
+dropped. The write-ups are proposals; nothing is built from them unless the owner asks. State: `data/creator_watch.json`.
+The first build brief from it: `docs/plans/ZUBAIR-FABLE-5.2-WORKSHOP.md`.
