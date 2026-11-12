@@ -57,6 +57,11 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
 | Watching videos | video_watch.py (`watch_video` tool: timed still frames plus captions of a YouTube link or a video file, shown to the brain as pictures), vendor/claude-video (the skill's scripts, unchanged) |
 | Creator watch | creator_watch.py (Zubair Trabzada's YouTube feed and GitHub every 6 hours; new Jarvis videos written up by Codex -> Research/Zubair watch/ in the vault; `creator_watch` tool) |
+| Workshop | workshop.py (`workshop` tool: Fable writes a 3D scene in steps; changes, pull-apart, undo, render), hud/workshop.js (the bench around the stage), hud/workshop-frame.html (the sandboxed three.js stage), hud/vendor/three.module.js, brain.py `/workshop/*` (picture, snapshot, files), hud.py `/workshop` (state) |
+| Screen pointer | screen_pointer.py (`point_at_screen`: a click-through ring and label over a control) |
+| Meeting prep | meeting_prep.py (`meeting_prep` tool, and a brief half an hour before an event when the vault, facts or tasks hold something on it -> Briefs/Meetings/ in the vault) |
+| Reply language | reply_language.py (`reply_language` tool; a line in the brain's instructions and the language given to the voice; preferences `reply_language`) |
+| Teardowns | teardown.py (`reverse_engineer` tool: an agent session with the REA toolkit -> Research/Teardowns/ in the vault), scripts/setup_rea.py (installs REA in vendor/rea and connects it for data/teardowns only) |
 | Email | gmail.py (Gmail API: reads, and sends after the owner's yes; DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
 | Performance | performance.py (data/turn_metrics.jsonl, scorecard), task_effort.py, scripts/benchmark_models.py |
@@ -311,3 +316,55 @@ a screenshot, so Codex or Claude sees them itself. It is stills and captions, ne
 - YouTube limits caption requests per address. After about a dozen in a row both caption sources are refused for
   some hours; frames still work and the tool says the captions are missing.
 - The creator watch gives Codex 30 frames with each new Jarvis video's transcript (`vault_log.codex_once(images=)`).
+
+## The workshop, and what else came from Zubair's videos (2026-11-11)
+
+Built from `docs/plans/ZUBAIR-FABLE-5.2-WORKSHOP.md` (five items) and `docs/plans/ZUBAIR-GAPS.md` (gaps 1-5).
+
+**Workshop** (`workshop.py`, third main view on the Jarvis page). "Build yourself a body", a picture dropped, pasted
+or chosen on the bench, or "build what's on my screen" goes to Claude Fable 5.2 through Claude Code on the Claude
+plan (never an API key; `preferences "workshop": {"model", "effort", "edit_effort"}`). Fable answers with a script:
+`TITLE`, a `SETUP` block of shared helpers, named `STEP` blocks and a `SPOKEN` line. Each step is sent to the page as
+soon as the next one starts, so the object appears piece by piece. The code runs in `hud/workshop-frame.html`, a frame
+sandboxed without same-origin access: it can't reach the Jarvis page, its storage or its requests, and brain.py refuses
+its origin for everything except the three.js file. Scene code gets `THREE` and `api.part(name, description, object,
+explode)`, `api.add`, `api.onTick`. A step that throws is reported back and sent to Fable once for repair.
+- A change sends the script back and gets only the changed steps (`=== STEP` to replace or add, `=== REMOVE`,
+  `=== NOTE` for the list on screen). Earlier versions are kept for `undo` (12).
+- "Pull it apart" moves each part by its `explode` offset and labels it. The part list goes into the note Jarvis
+  keeps of the build, so he can answer "what is the main logic board?".
+- "Render it" asks the page for a picture of the 3D view as the owner has it turned, and has Codex's image generation
+  (ChatGPT plan, `codex exec --image`) make a realistic picture from it, about a minute. Only when asked.
+- Scenes live in `data/workshop/<id>/` (script, picture, renders); `bench.json` remembers which one is on the bench
+  across a restart.
+- Measured: a product build about 90-120 s at low effort (half of it thinking), a change about 20 s, a floor plan
+  about 3.5 minutes, a render about a minute.
+
+**Fable as the talking brain**: `claude-fable-5-2` is in `claude_code_brain.MODELS`; "switch your brain to Fable".
+Measured 2026-11-11 on short questions with a short prompt and no tools (three runs each): first words after 0.4 s
+against 0.5 s for Opus. Not measured with Jarvis's full prompt and tools.
+
+**Screen agent** (`agent.py`): each `computer` call carries a `saying` line, spoken through `Agent.on_narrate` only into
+silence and only when the owner spoke in the last ten minutes or the room sensor shows someone; otherwise it is shown
+in the Console. A watcher thread ends the task when the pointer moves more than 30 px, a button is clicked or a key is
+down between the agent's own actions ("you took over the mouse"). `preferences "agent_narration"` and
+`"agent_takeover"` (both true unless set to false).
+
+**Pointer** (`screen_pointer.py`): `look_at_screen` records how its picture maps onto the desktop; `point_at_screen`
+turns a point in that picture into a real one and draws a ring and label there for a few seconds in a layered,
+click-through, never-focused window.
+
+**Telegram files**: `send_telegram(text, file)`; pictures up to 10 MB as photos, anything up to 50 MB as a document,
+only ever to the paired chat, never a credentials file.
+
+**Meeting prep** (`meeting_prep.py`): no AI call unless a vault note, saved fact or open task names the event's own
+words. Codex writes the brief; it never guesses attendees or agenda.
+
+**Reply language** (`reply_language.py`): the owner keeps speaking English. Checked with the VoiceStudio voice by
+transcribing its speech back: Spanish, German, French and Hindi. The wording-based honesty checks (`truth_guard`
+claim gate) only read English, so they don't fire in another language; receipts still do.
+
+**Teardowns** (`teardown.py`): REA 6.8.0 (228 tools) is a local stdio MCP server. It is registered with Claude Code at
+local scope for `data/teardowns`, so only an agent session started in that folder loads it. Jarvis's own MCP client
+is HTTP only and doesn't see it. `scripts/setup_rea.py --remove` disconnects it.
+

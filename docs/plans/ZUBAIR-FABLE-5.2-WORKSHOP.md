@@ -1,6 +1,10 @@
 # Zubair's "Fable 5.2 Just Took My JARVIS to a Whole New Level": research for the build
 
-Researched 2026-11-11 by Claude Opus 5.5. **Nothing here is built yet.** The owner said: "research and figure out
+**Built 2026-11-11 by Claude Fable 5.2: all five items, each tried live. How it works now is in
+`docs/PROJECT-MAP.md`, "The workshop, and what else came from Zubair's videos". What follows is the research it
+was built from.**
+
+Researched 2026-11-11 by Claude Opus 5.5. At that point nothing was built. The owner said: "research and figure out
 what he added and how he did it ... Dont make changes yet, fable 5.2 will handle that after you research."
 So this is the brief for the Fable 5.2 session that builds it. The owner chose all five options below.
 

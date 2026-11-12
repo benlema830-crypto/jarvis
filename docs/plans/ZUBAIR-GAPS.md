@@ -11,6 +11,9 @@ His Shorts were skipped: they're clips of the long videos.
 
 ## Real gaps (checked in our code)
 
+**G1 to G5 were built on 2026-11-11 by Claude Fable 5.2** (the owner: "do 1-5"), each tried live; see
+`docs/PROJECT-MAP.md`. G6 (offline talking brain) was left out on purpose and is still open.
+
 | # | Gap | Seen in | What we have now | Effort | Cost |
 |---|---|---|---|---|---|
 | G1 | **Point at things on screen**: Jarvis draws a marker over the button or field he means ("click here") | "Full Control of My Computer" | `look_at_screen` sees the screen and `do_on_computer` clicks, but nothing draws on screen for you to follow | medium | none (plan usage only) |

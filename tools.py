@@ -714,8 +714,9 @@ def do_on_computer(task: str) -> str:
     Use it for jobs that need the mouse, e.g. "make a Spotify playlist called Focus", "close my
     YouTube tab". Never use it just to play, find or control music: the Spotify tools (call_mcp_tool,
     spotify_search then spotify_play with the track, playlist or album URI) do that in the background. For files, folders, system checks, scripts or coding, use terminal_task instead;
-    When it starts, tell the user briefly that
-    you're on it and to keep their hands off the mouse until you're done.
+    When it starts, tell the user briefly that you're on it. You say what you're doing as you go, and if they
+    move the mouse, click or press a key you stop and the PC is theirs again, so there is no need to warn them
+    off the mouse; mention once that taking the mouse stops you.
 
     Args:
         task: Complete, specific instructions, including anything the user said that matters.
@@ -1455,7 +1456,7 @@ def switch_model(model: str) -> str:
     """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to Fable",
     "go back to Opus" or "use Codex". The choices are Claude models on the user's Claude plan (Opus, Fable,
     Sonnet, Haiku) and Codex models on their ChatGPT plan; neither spends API credits. Fable 5.2 is the most
-    capable and the slowest, and uses the plan's limits fastest. Validated with a short test and applied after this turn; tell the user that.
+    capable and uses the plan's limits fastest. Validated with a short test and applied after this turn; tell the user that.
 
     Args:
         model: The model name as the user said it; matched against the available models.
