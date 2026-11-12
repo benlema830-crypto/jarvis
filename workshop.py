@@ -192,6 +192,58 @@ def _remember(scene_id):
 
 _restored = False
 
+# ---------- Is anyone actually looking at it? ----------
+# The workshop is drawn by the Jarvis page. A page that was opened before the workshop existed, or no page at all,
+# shows nothing, and on 2026-11-11 Jarvis told the owner a model was "up" when it wasn't. So the page says every
+# few seconds that it is there and whether the workshop is the view on screen, and Jarvis reports from that.
+PAGE_URL = "http://127.0.0.1:7781/?workshop=1"
+PAGE_FRESH_SECONDS = 20
+PAGE_WAIT_SECONDS = 3
+PAGE_LOAD_SECONDS = 12
+NOT_SHOWN = ("NOT CONFIRMED: no Jarvis page is showing the workshop, so the user can't see it yet. Tell them that "
+             "plainly: the workshop is the Workshop tab on the Jarvis page (the browser tab called Jarvis CEO).")
+_page = {"at": 0.0, "visible": False, "opened": 0.0}
+
+
+def page_open(now=None):
+    """A Jarvis page that knows the workshop has been heard from just now."""
+    return (now or time.time()) - _page["at"] < PAGE_FRESH_SECONDS
+
+
+def page_showing(now=None):
+    return page_open(now) and _page["visible"]
+
+
+def open_page():
+    """Open the Jarvis page on the workshop in the browser. Replaced in tests. True when a browser was asked to."""
+    import testing_guard
+    if testing_guard.under_test():
+        return False
+    try:
+        import webbrowser
+        import chrome_browser  # noqa: F401 - Chrome rather than the Windows default
+        return bool(webbrowser.open(PAGE_URL))
+    except Exception as e:
+        print(f"(workshop: couldn't open the Jarvis page: {e!r})", flush=True)
+        return False
+
+
+def on_screen(wait=None):
+    """Make sure the owner can see the workshop, and say whether they can: "" when a page is showing it, otherwise
+    what was done about it. Opens the Jarvis page when none is there (at most once every half minute)."""
+    deadline = time.time() + (PAGE_WAIT_SECONDS if wait is None else wait)
+    opened = False
+    if not page_open() and time.time() - _page["opened"] > 30:
+        _page["opened"] = time.time()
+        opened = open_page()
+        if opened:
+            deadline = time.time() + PAGE_LOAD_SECONDS
+    while time.time() < deadline:
+        if page_showing():
+            return " The Jarvis page wasn't open, so it was opened in the browser on the workshop." if opened else ""
+        time.sleep(0.15)
+    return " " + NOT_SHOWN
+
 
 def _restore():
     """Once per run: put back the scene that was on the bench when Jarvis last stopped (within a day)."""
@@ -555,7 +607,9 @@ def _build(request, image, about, scene_id):
             STATE.update(scene=scene, tokens=tokens, seconds=seconds)
         _finish()
         _emit("done", seconds=seconds, tokens=tokens, title=scene["title"])
-        _announce(spoken or f"{scene['title']} is built, sir. Say pull it apart to see inside.",
+        unseen = on_screen(min(1, PAGE_WAIT_SECONDS))
+        _announce((spoken or f"{scene['title']} is built, sir. Say pull it apart to see inside.")
+                  + (" It's on the Workshop tab of the Jarvis page, which isn't showing it right now." if NOT_SHOWN in unseen else ""),
                   f"[WORKSHOP] You built \"{scene['title']}\" in the workshop ({len(scene['steps'])} steps, {seconds} s) "
                   f"and told the user so. Its parts, for answering questions: {part_lines(scene)}. "
                   "workshop(action=...) can edit it, explode it, assemble it, render it or undo a change.")
@@ -648,9 +702,9 @@ def build(request, picture=""):
     _begin("build")
     _emit("start", mode="build", picture=bool(image), model=STATE["model"], request=request[:300])
     _start(_build, request, image, about, _slug(request))
-    line = ("The workshop is open and the build has started; it appears piece by piece over the next minute or so, "
+    line = ("The build has started in the workshop; it appears piece by piece over the next minute or so, "
             "and you'll speak again by yourself when it's finished. Say one short line now (you're on it), "
-            "and don't describe the result yet.")
+            "and don't describe the result yet." + on_screen())
     if not image:
         return line
     preview = _thumbnail(image)
@@ -711,7 +765,7 @@ def explode(on):
         STATE.update(exploded=bool(on), open=True, view="model")
     _emit("explode", on=bool(on))
     names = ", ".join(name for name, _ in parts(STATE["scene"])[:30])
-    return (f"Pulled apart on screen, each part labelled: {names}." if on else "Put back together on screen.")
+    return (f"Pulled apart, each part labelled: {names}." if on else "Put back together.") + on_screen()
 
 
 def open_bench(words=""):
@@ -720,10 +774,13 @@ def open_bench(words=""):
     _restore()
     match = find(words) if words else None
     with _lock:
-        if STATE["busy"]:
+        busy = bool(STATE["busy"])
+        if busy:
             STATE["open"] = True
-            _emit("open")
-            return "The workshop is open; a build is still running in it."
+    if busy:
+        _emit("open")
+        return "A build is still running in the workshop." + on_screen()
+    with _lock:
         if match:
             STATE.update(open=True, scene=load(match["id"]), exploded=False, view="model", render="", error="",
                          done=[], notes=[], thinking="")
@@ -733,11 +790,15 @@ def open_bench(words=""):
             if words:
                 STATE.update(scene=None, render="")
     _emit("open", scene=bool(match))
+    shown = on_screen()
     if match:
-        return f"Opened \"{match['title']}\" in the workshop. Its parts: {part_lines(STATE['scene'])}."
+        return f"\"{match['title']}\" is on the workshop bench. Its parts: {part_lines(STATE['scene'])}.{shown}"
+    with _lock:
+        title = (STATE["scene"] or {}).get("title", "")
     saved = ", ".join(s["title"] for s in recent(5))
-    return ("The workshop is open with an empty bench. The user can drop, paste or choose a picture on it, share "
-            "what's on their screen, or just say what to build." + (f" Saved models: {saved}." if saved else ""))
+    return ((f"The workshop has \"{title}\" on the bench." if title else
+             "The workshop has an empty bench. The user can drop, paste or choose a picture on it, share what's on "
+             "their screen, or just say what to build.") + (f" Saved models: {saved}." if saved else "") + shown)
 
 
 def open_scene(scene_id):
@@ -811,6 +872,9 @@ def page_report(payload):
     """The page tells Jarvis something (POST /workshop): a step that threw, the view the owner chose, a scene
     they clicked to reopen, or closing the workshop."""
     action = payload.get("action")
+    if action == "seen":   # the page's "I'm here, and this is (or isn't) the view on screen"
+        _page.update(at=time.time(), visible=bool(payload.get("visible")))
+        return {"ok": True}
     if action == "error":
         with _lock:
             if len(STATE["errors"]) < 20:
@@ -943,4 +1007,5 @@ def show(view):
             raise ValueError("There's no render of this model yet.")
         STATE.update(view=view, open=True)
     _emit("view", view=view)
-    return "Showing the render." if view == "render" else "Showing the 3D model."
+    return ("The render is the view in the workshop." if view == "render"
+            else "The 3D model is the view in the workshop.") + on_screen()

@@ -226,11 +226,14 @@
   el('viewWorkshop').onclick = () => { enteredAt = Date.now(); J.setView('workshop'); };
   J.on('view', name => { if (name === 'workshop') sync(false); });
   J.menuItem('view', 'Workshop (build in 3D)', () => { enter(); sync(false); });
+  // Jarvis only says the workshop is on screen when a page tells him so (workshop.py, on_screen).
+  const seen = () => J.api('/workshop', { action: 'seen', visible: visible() && !document.hidden }).catch(() => {});
+  setInterval(seen, 6000); J.on('view', seen); document.addEventListener('visibilitychange', seen); seen();
   J.workshop = { sync, enter, leave };
   // The frame may have said it's ready before this script was listening; asking makes it say so again.
   stage.postMessage({ t: 'hello' }, '*'); frame.addEventListener('load', () => stage.postMessage({ t: 'hello' }, '*'));
   // If the stage never answers (its 3D library didn't load, say while Jarvis was restarting), load it again.
   let reloads = 0;
   setInterval(() => { if (!ready && visible() && reloads < 6) { reloads++; frame.src = '/workshop-frame.html?try=' + reloads; } }, 5000);
-  sync(null);
+  sync(new URLSearchParams(location.search).has('workshop') ? true : null);   // opened by Jarvis to show the workshop
 })();

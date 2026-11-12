@@ -995,6 +995,16 @@ J.on('event', ev => {
 });
 $('clearSources').onclick = () => { $('sourcesBox').hidden = true; $('sourcesList').replaceChildren(); clearSelection(); };
 
+/* A page left open across an update keeps running the old code, and can't draw what was added since (on
+   2026-11-11 that was the whole workshop). So it asks which version of itself is being served, and reloads
+   when that has changed and nobody is in the middle of typing. */
+let uiVersion = null;
+async function checkVersion() {
+  let now; try { now = (await J.api('/ui-version')).version; } catch { return; }
+  if (uiVersion === null) { uiVersion = now; return; }
+  if (now !== uiVersion && !$('prompt').value && !document.querySelector('dialog[open]')) location.reload();
+}
+checkVersion(); setInterval(checkVersion, 30000); J.on('hello', checkVersion);
 setInterval(pollHealth, 2000); setInterval(pollModel, 15000);
 pollHealth(); pollModel();
 load(false);

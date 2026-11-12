@@ -109,6 +109,17 @@ PUBLIC = {"/vendor/three.module.js"}
 WORKSHOP = ROOT / "data" / "workshop"
 
 
+def ui_version():
+    """Changes whenever a file the page is made of changes, so an open page can tell it is out of date."""
+    import hashlib
+    digest = hashlib.sha256()
+    for path in sorted((ROOT / "hud").glob("*.*")):
+        if path.suffix in (".js", ".css", ".html"):
+            stat = path.stat()
+            digest.update(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+    return digest.hexdigest()[:16]
+
+
 def _jpeg(data, limit=6_000_000):
     """Base64 text from the page -> JPEG bytes, or ValueError. Only a real JPEG is ever written to disk."""
     import base64
@@ -182,6 +193,8 @@ def serve():
             get, post = self.command == "GET", self.command == "POST"
             if route == "/brain-data" and get:
                 return snapshot(), 200
+            if route == "/ui-version" and get:
+                return {"version": ui_version()}, 200
             if route == '/response-settings' and (get or post):
                 import response_settings
                 return response_settings.read() if get else response_settings.update(self.payload(2000)),200

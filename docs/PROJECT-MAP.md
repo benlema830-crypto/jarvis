@@ -335,6 +335,12 @@ explode)`, `api.add`, `api.onTick`. A step that throws is reported back and sent
   keeps of the build, so he can answer "what is the main logic board?".
 - "Render it" asks the page for a picture of the 3D view as the owner has it turned, and has Codex's image generation
   (ChatGPT plan, `codex exec --image`) make a realistic picture from it, about a minute. Only when asked.
+- The page tells Jarvis every few seconds that it is there and whether the workshop is the view on screen
+  (`workshop.on_screen`). When none is, he opens the Jarvis page on the workshop, and if it still isn't showing his
+  tool result says NOT CONFIRMED so he tells the owner instead of claiming it is up. Added after 2026-11-11, when a
+  page left open from before the workshop existed showed nothing and he said the model was on screen.
+- An open page reloads itself when the files it is made of change (`/ui-version`, checked every 30 s and when
+  Jarvis comes back), unless something is typed in the prompt.
 - Scenes live in `data/workshop/<id>/` (script, picture, renders); `bench.json` remembers which one is on the bench
   across a restart.
 - Measured: a product build about 90-120 s at low effort (half of it thinking), a change about 20 s, a floor plan

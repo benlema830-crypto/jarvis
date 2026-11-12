@@ -98,6 +98,7 @@ class WorkshopFlowTest(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.store = Path(temp.name) / "workshop"
         self.events, self.said, self.replies = [], [], [SCRIPT]
+        self.opened, self.browser = [], False
         self.calls = []
         fresh = {"open": False, "busy": "", "scene": None, "exploded": False, "view": "model", "thinking": "",
                  "started": 0.0, "seconds": 0, "tokens": 0, "done": [], "notes": [], "error": "", "errors": [],
@@ -116,6 +117,9 @@ class WorkshopFlowTest(unittest.TestCase):
                 (workshop, "_restored", True), (workshop, "_work", threading.Lock()),
                 (workshop, "_emit", lambda phase, **data: self.events.append((phase, data))),
                 (workshop, "_announce", lambda text, note: self.said.append((text, note))),
+                (workshop, "_page", {"at": 0.0, "visible": False, "opened": 0.0}),
+                (workshop, "PAGE_WAIT_SECONDS", 0.2), (workshop, "PAGE_LOAD_SECONDS", 0.4),
+                (workshop, "open_page", lambda: self.opened.append(1) or self.browser),
                 (workshop.preferences, "read", lambda: {})]:
             patcher = mock.patch.object(target, name, value)
             patcher.start()
@@ -267,6 +271,46 @@ class WorkshopFlowTest(unittest.TestCase):
         self.assertEqual(workshop.STATE["scene"]["title"], "Desk Lamp")
         self.assertIn("Saved models: Desk Lamp", workshop.open_bench() if workshop.clear() else "")
 
+    def page(self, visible=True):
+        workshop.page_report({"action": "seen", "visible": visible})
+
+    def test_with_the_workshop_on_screen_nothing_extra_is_said_or_opened(self):
+        self.page()
+        reply = workshop.build("a desk lamp")
+        self.wait()
+        self.assertNotIn("NOT CONFIRMED", reply)
+        self.assertEqual(self.opened, [])
+        self.assertNotIn("isn't showing", self.said[0][0])
+        self.assertNotIn("NOT CONFIRMED", workshop.explode(True))
+
+    def test_no_page_means_one_is_opened_and_jarvis_is_told_the_truth(self):
+        reply = workshop.build("a desk lamp")           # no page has said it is there, and the browser won't open
+        self.wait()
+        self.assertEqual(self.opened, [1])
+        self.assertIn("NOT CONFIRMED", reply)
+        self.assertIn("Jarvis CEO", reply)
+        self.assertIn("isn't showing it right now", self.said[0][0])
+        self.assertIn("NOT CONFIRMED", workshop.show("model"))
+        self.assertEqual(self.opened, [1])              # not a new tab for every sentence
+
+    def test_a_page_opened_for_it_counts_once_it_reports_in(self):
+        self.browser = True
+        workshop.open_page = lambda: self.opened.append(1) or self.page() or True   # the new tab loads and says hello
+        reply = workshop.open_bench()
+        self.assertIn("was opened in the browser", reply)
+        self.assertNotIn("NOT CONFIRMED", reply)
+
+    def test_a_page_on_another_view_or_gone_quiet_is_not_showing_it(self):
+        self.page(visible=False)
+        self.assertTrue(workshop.page_open())
+        self.assertFalse(workshop.page_showing())
+        self.assertEqual(self.opened, [])
+        self.assertIn("NOT CONFIRMED", workshop.open_bench())    # a page is there, so no new tab; but say so
+        self.assertEqual(self.opened, [])
+        self.page()
+        workshop._page["at"] -= workshop.PAGE_FRESH_SECONDS + 1  # an old page that stopped reporting
+        self.assertFalse(workshop.page_open())
+
     def test_tool_routes_actions(self):
         import tools
         run = tools.TOOLS_BY_NAME["workshop"]
@@ -308,6 +352,21 @@ class WorkshopFilesTest(unittest.TestCase):
 
     def test_workshop_events_are_not_replayed_to_pages_that_open_later(self):
         self.assertIn("workshop", hud.LIVE_ONLY)
+
+    def test_ui_version_changes_when_a_page_file_changes(self):
+        import os
+        hud_folder = self.root / "hud"
+        hud_folder.mkdir()
+        (hud_folder / "brain.js").write_text("one")
+        (hud_folder / "notes.txt").write_text("ignored")
+        with mock.patch.object(brain, "ROOT", self.root):
+            first = brain.ui_version()
+            self.assertEqual(first, brain.ui_version())
+            (hud_folder / "notes.txt").write_text("still ignored")
+            self.assertEqual(first, brain.ui_version())
+            (hud_folder / "brain.js").write_text("two!")
+            os.utime(hud_folder / "brain.js", ns=(1, 1))
+            self.assertNotEqual(first, brain.ui_version())
 
 
 if __name__ == "__main__":
