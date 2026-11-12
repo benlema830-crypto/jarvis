@@ -41,18 +41,23 @@ class CreatorWatchTest(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.vault = root / "vault"
         self.real_transcript = watch.transcript
+        self.real_frames = watch.frames
         self.feed = [video("a1", "My AI assistant Jarvis")]
         self.repos = [{"name": "holo-gestures", "pushed": "2026-09-01T00:00:00Z", "description": "", "url": "u"}]
         for name, fake in [("videos", lambda _: list(self.feed)), ("repos", lambda _: list(self.repos)),
                            ("commits", lambda *_: ["Add exploded views"]),
-                           ("transcript", lambda _: "[00:01] Jarvis, open the workshop.")]:
+                           ("transcript", lambda _: "[00:01] Jarvis, open the workshop."),
+                           ("frames", lambda _: list(self.pictures))]:
             patcher = mock.patch.object(watch, name, side_effect=fake)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.asked = []
+        self.pictures = []   # no frames unless a test says so; the real ones download the video
+        self.images = []
 
-    def ask(self, system, text, label):
+    def ask(self, system, text, label, images=None):
         self.asked.append((system, text))
+        self.images.append(images)
         return REPORT
 
     def notes(self):
@@ -81,6 +86,35 @@ class CreatorWatchTest(unittest.TestCase):
         self.assertIn("[00:01] Jarvis, open the workshop.", text)
         self.assertIn("Transcript:", self.asked[0][1])
         self.assertEqual(watch.check(self.ask), [])  # not announced twice
+
+    def test_codex_also_looks_at_frames_of_the_video(self):
+        watch.check(self.ask)
+        self.assertEqual(self.images, [])
+        self.pictures = [{"time": "02:28", "at": 148, "jpeg": b"\xff\xd8one"}, {"time": "05:20", "at": 320, "jpeg": b"\xff\xd8two"}]
+        self.feed.insert(0, video("h8", "Jarvis workshop"))
+        news = watch.check(self.ask)
+        self.assertEqual(self.images, [[b"\xff\xd8one", b"\xff\xd8two"]])
+        self.assertIn("2 still frames", self.asked[0][1])
+        text = (self.vault / news[0]["notes"][0]).read_text(encoding="utf-8")
+        self.assertIn("source: Codex read the transcript and looked at 2 still frames", text)
+
+    def test_codex_refusing_the_frames_falls_back_to_the_transcript(self):
+        watch.check(self.ask)
+        self.pictures = [{"time": "02:28", "at": 148, "jpeg": b"\xff\xd8one"}]
+        self.feed.insert(0, video("i9", "Jarvis workshop"))
+        news = watch.check(lambda system, text, label, images=None: None if images else REPORT)
+        text = (self.vault / news[0]["notes"][0]).read_text(encoding="utf-8")
+        self.assertIn("source: Codex read the transcript;", text)
+        self.assertIn("3D workshop", news[0]["say"])
+
+    def test_frames_that_cant_be_had_are_just_left_out(self):
+        import video_watch
+        with mock.patch.object(video_watch, "watch", side_effect=video_watch.WatchError("blocked")):
+            self.assertEqual(self.real_frames("https://www.youtube.com/watch?v=x"), [])
+        seen = {"text": "", "frames": [{"time": "00:01", "at": 1, "jpeg": b"j"}]}
+        with mock.patch.object(video_watch, "watch", return_value=seen) as called:
+            self.assertEqual(self.real_frames("https://www.youtube.com/watch?v=x"), seen["frames"])
+        called.assert_called_once_with("https://www.youtube.com/watch?v=x", max_frames=watch.FRAMES, second_try=False)
 
     def test_other_videos_and_repo_changes_go_in_one_updates_note_without_ai(self):
         watch.check(self.ask)

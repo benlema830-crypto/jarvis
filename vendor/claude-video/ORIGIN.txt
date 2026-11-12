@@ -1,0 +1,8 @@
+Source: https://github.com/bradautomates/claude-video (the "watch" skill, version 0.3.2)
+Commit: 03ceb42f7fa2c4439aca01752118044baabffb8f
+License: MIT (included)
+Vendored without changes: skills/watch/SKILL.md and skills/watch/scripts/*.py. Standard library only.
+Run by video_watch.py as a separate process, always with the local engine and no speech fallback, so the
+Gemini, Groq, OpenAI and WhisperX paths in these scripts are never used. Needs yt-dlp, ffmpeg and Deno
+(winget: yt-dlp.yt-dlp, Gyan.FFmpeg, DenoLand.Deno). To update: copy the same files from a newer commit
+and run tests/test_video_watch.py plus one real video.

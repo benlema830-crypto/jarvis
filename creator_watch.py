@@ -8,7 +8,8 @@ Every few hours, with no AI and no cost, Jarvis reads:
   * the YouTube channel's public feed (newest 15 videos), and
   * the creator's public GitHub repos (new repos, and new commits on ones that changed).
 
-When a new video is about his JARVIS (title or description), Jarvis fetches the transcript and has Codex (the
+When a new video is about his JARVIS (title or description), Jarvis fetches the transcript and 30 still frames
+(video_watch.py, so what he shows on screen counts too) and has Codex (the
 ChatGPT subscription, never API credits) write a vault note under Research/Zubair watch: what's new, how he
 appears to have built it, what our Jarvis already has, and what would be worth adding. The note is a proposal,
 not a build: changes still wait for the owner (memory: research on his own is fine, builds only when asked).
@@ -39,6 +40,10 @@ FIRST_SECONDS = 1200        # after start-up, the briefing and warm-ups
 TIMEOUT = 20
 MAX_TRANSCRIPT = 40000      # characters; a 20-minute video is about 25,000
 MAX_MAP = 40000             # characters of tools + docs/PROJECT-MAP.md given as "what our Jarvis has"
+FRAMES = 30                 # still frames of the video Codex looks at with the transcript
+FRAMES_NOTE = ("\n\nAttached: {count} still frames from the video in time order, each stamped top-left with its "
+               "time. Use them for what he shows and doesn't say: the interface, labels, code, diagrams. They are "
+               "stills, so don't infer what happened between them, and mark what you only saw as \"(seen at mm:ss)\".")
 AGENT = {"User-Agent": "Jarvis-creator-watch/1.0"}
 CREATORS = [{
     "name": "Zubair Trabzada",
@@ -187,6 +192,17 @@ def transcript(video_id: str) -> str | None:
     return "\n".join(f"[{int(p.start) // 60:02d}:{int(p.start) % 60:02d}] {p.text}" for p in parts)
 
 
+def frames(url: str) -> list[dict]:
+    """Still frames of the video, each stamped with its time, so the write-up can use what he shows and not
+    only what he says (video_watch.py). [] when they can't be had; the write-up then rests on the transcript."""
+    try:
+        import video_watch
+        return video_watch.watch(url, max_frames=FRAMES, second_try=False)["frames"]
+    except Exception as e:
+        print(f"(creator watch: no frames for {url}: {type(e).__name__}: {str(e)[:200]})", flush=True)
+        return []
+
+
 def free_only(text: str, paid) -> str:
     return paid.sub("(paid community link removed)", text)
 
@@ -249,14 +265,20 @@ def analyze(creator: dict, video: dict, ask=None) -> dict:
         age = CAPTION_WAIT_DAYS
     if not text and age < CAPTION_WAIT_DAYS:
         raise NoCaptionsYet(video["id"])
-    report = None
+    report, looked = None, 0
     if text:
         request = (f"Title: {video['title']}\nPublished: {video['published']}\nLink: {video['url']}\n\n"
                    f"Description:\n{description}\n\nTranscript:\n{text[:MAX_TRANSCRIPT]}")
-        report = ask(PROMPT.format(name=creator["name"], jarvis=_jarvis_map()), request,
-                     f"creator watch: {video['title'][:40]}")
+        system, label = PROMPT.format(name=creator["name"], jarvis=_jarvis_map()), f"creator watch: {video['title'][:40]}"
+        pictures = frames(video["url"])
+        if pictures:
+            report = ask(system, request + FRAMES_NOTE.format(count=len(pictures)), label,
+                         [p["jpeg"] for p in pictures])
+            looked = len(pictures) if report else 0
+        report = report or ask(system, request, label)  # no frames, or Codex wouldn't take them
     if report:
-        source = "Codex read the transcript; what he built is from the video, the comparison is a proposal"
+        source = ("Codex read the transcript" + (f" and looked at {looked} still frames" if looked else "")
+                  + "; what he built is from the video, the comparison is a proposal")
     else:
         why = "Codex wasn't available" if text else "the video has no captions yet"
         report = (f"## Spoken summary\n{creator['name']} posted a new Jarvis video, {video['title']}. "

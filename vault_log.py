@@ -111,9 +111,9 @@ Bullets of things left unfinished or to follow up.
 Use only facts from the log. Speech recognition errors and test chatter can be ignored. No preamble."""
 
 
-def codex_once(system: str, text: str, label: str) -> str | None:
+def codex_once(system: str, text: str, label: str, images: list[bytes] | None = None) -> str | None:
     """One tool-free Codex answer on the ChatGPT subscription (whichever brain Jarvis talks with),
-    or None when Codex isn't available. Never spends API credits."""
+    or None when Codex isn't available. Never spends API credits. images: JPEGs for it to look at."""
     import codex_brain
     import preferences
     config = preferences.read().get("conversation_model") or {}
@@ -128,8 +128,10 @@ def codex_once(system: str, text: str, label: str) -> str | None:
         model = catalog[0]
     brain = codex_brain.CodexBrain()
     try:
+        import base64
+        pictures = ["data:image/jpeg;base64," + base64.standard_b64encode(i).decode() for i in images or []]
         answer = brain.ask(model, system, [{"role": "user", "content": text}], [],
-                           None, lambda _: None, threading.Event())
+                           None, lambda _: None, threading.Event(), **({"images": pictures} if pictures else {}))
         return answer.strip() or None
     except Exception as e:
         print(f"({label} failed: {type(e).__name__})", flush=True)

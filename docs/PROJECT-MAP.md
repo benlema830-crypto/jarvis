@@ -55,6 +55,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
 | Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex), heartbeat.py (half-hourly plain checks and the owner's checklist), attention.py (say it now or hold it; five unprompted updates a day), presence_greeting.py, morning_wakeup.py |
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
+| Watching videos | video_watch.py (`watch_video` tool: timed still frames plus captions of a YouTube link or a video file, shown to the brain as pictures), vendor/claude-video (the skill's scripts, unchanged) |
 | Creator watch | creator_watch.py (Zubair Trabzada's YouTube feed and GitHub every 6 hours; new Jarvis videos written up by Codex -> Research/Zubair watch/ in the vault; `creator_watch` tool) |
 | Email | gmail.py (Gmail API: reads, and sends after the owner's yes; DPAPI tokens in data/gmail.enc), scripts/setup_gmail.py, docs/GMAIL.md |
 | Memory and continuity | memory.py (core facts, history on update), working_memory.py (where things stand, every turn; project briefs for agents; data/project_log.jsonl), decision_log.py (the journal's decisions go to Decisions/Decision log.md; no approval queue), history.py (search past conversations; the readable copy of memory in the vault) |
@@ -282,8 +283,31 @@ reported its credit exhausted, and he says exactly that when it happens.
 The owner wants Jarvis to keep up with what Zubair Trabzada (the YouTuber whose Jarvis ours follows) adds to his.
 `creator_watch.py` checks his channel's public feed and his GitHub repos every 6 hours (`preferences
 "creator_watch": {"enabled", "hours"}`), with no AI and no cost. The first look only records what exists. A new video
-about Jarvis gets its transcript (`youtube-transcript-api`) written up by Codex: what's new, how he built it, what we
+about Jarvis gets its transcript (`youtube-transcript-api`) and 30 still frames (`video_watch.py`, below) written up by Codex: what's new, how he built it, what we
 have, what's worth adding. That goes in `Research/Zubair watch/` and is announced through attention.py. If captions aren't up yet
 it tries again for two days. Other videos and repo changes go in one plain "updates" note. Links to his paid community are
 dropped. The write-ups are proposals; nothing is built from them unless the owner asks. State: `data/creator_watch.json`.
 The first build brief from it: `docs/plans/ZUBAIR-FABLE-5.2-WORKSHOP.md`.
+
+## Watching videos (2026-11-11)
+
+The owner asked for the "watch" skill from github.com/bradautomates/claude-video inside Jarvis. Its scripts are
+vendored unchanged in `vendor/claude-video` (MIT, commit in ORIGIN.txt) and `video_watch.py` runs them as a separate
+process: yt-dlp fetches the video and captions, ffmpeg picks frames at scene changes. The `watch_video` tool hands
+the brain up to 40 stills, each stamped with its time, plus the captions, the same way `look_at_screen` hands it
+a screenshot, so Codex or Claude sees them itself. It is stills and captions, never motion or sound.
+
+- Nothing is uploaded: always the skill's local engine with no speech fallback, and keys are kept out of its process.
+  A video with no captions comes back as frames only.
+- `start`/`end` give a part of the video with denser frames. `timestamps` gives just those moments at 1024 px
+  wide, sharp enough to read small on-screen text (the usual 512 px is not).
+- Added to the skill, each from a real run: English captions asked for by name (it chose Bangla on an auto-dubbed
+  video); a quarter of the frames kept back to fill the widest gaps (scene changes left a five-minute hole in a
+  slow screen recording); `youtube-transcript-api` when YouTube refuses yt-dlp the captions.
+- The video is downloaded into `data/video_watch/` and deleted as soon as the frames are read. One video at a time.
+- Measured on this PC: 17-minute video, 40 frames, about 25 seconds; exact moments about 17 seconds.
+- Needs yt-dlp, ffmpeg and Deno on the PATH (`winget install yt-dlp.yt-dlp Gyan.FFmpeg DenoLand.Deno`). yt-dlp must be
+  kept current (`winget upgrade yt-dlp.yt-dlp`): YouTube breaks old versions.
+- YouTube limits caption requests per address. After about a dozen in a row both caption sources are refused for
+  some hours; frames still work and the tool says the captions are missing.
+- The creator watch gives Codex 30 frames with each new Jarvis video's transcript (`vault_log.codex_once(images=)`).

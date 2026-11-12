@@ -1503,6 +1503,38 @@ def creator_watch(check_now: bool = False) -> str:
 
 
 @beta_tool(eager_input_streaming=True)
+def watch_video(source: str, start: str = "", end: str = "", timestamps: str = "", look: bool = True):
+    """Watch a video so you can say what is shown in it as well as what is said: a YouTube link (or a link
+    from most video sites), or a video file on this PC. You get its captions with times, and still frames with
+    the time stamped on each, as pictures you look at yourself. Use it when the user asks you to watch, check
+    or summarize a video, or asks what happens or what is on screen in one. It is stills and captions, not
+    motion or sound, so say what you saw at which time and don't fill in what happened between frames. With
+    frames it takes about half a minute for a 20-minute video; captions alone take a few seconds. Nothing is
+    uploaded: the video is fetched to this PC and deleted afterwards.
+
+    Args:
+        source: The video's link, or the full path of a video file.
+        start: Optional: watch only from this time, like 4:30 or 1:02:03. A shorter stretch gets denser frames.
+        end: Optional: watch only up to this time.
+        timestamps: Optional: exact moments, separated by commas, like "4:32,7:10". You then get frames at
+            just those moments, larger, so small on-screen text is readable. Use it for a second, closer look
+            at something a first watch showed, or when the captions point at something ("look at this").
+        look: False for the captions alone, when the user only wants what was said.
+    """
+    import video_watch
+    try:
+        seen = video_watch.watch(source, start, end, timestamps, look)
+    except video_watch.WatchError as error:
+        return f"Not watched: {error}"
+    if not seen["frames"]:
+        return seen["text"]
+    return [{"type": "text", "text": seen["text"]}] + [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                     "data": base64.standard_b64encode(frame["jpeg"]).decode()}}
+        for frame in seen["frames"]]
+
+
+@beta_tool(eager_input_streaming=True)
 def queue_away_job(request: str, kind: str = "build", project: str = "", why: str = "", model: str = "") -> str:
     """Queue work the user asked for that should carry on without them: "build this while I'm away",
     "look into this overnight", "keep working on it when I'm gone". It starts right away and runs by itself,
@@ -1598,7 +1630,7 @@ TOOLS = [open_website, show_search_results, home_control, home_status, open_app,
          run_command, read_file, search_text, edit_file, write_file,
          search_knowledge, read_knowledge_note, create_knowledge_note, update_knowledge_note,
          brain_mode, holo, add_task, list_tasks, complete_task,
-         send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, creator_watch, queue_away_job, away_jobs, response_style]
+         send_telegram, switch_model, project_handoff, check_email, read_email, send_email, start_research, research_status, creator_watch, watch_video, queue_away_job, away_jobs, response_style]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 TOOL_DEFS = [t.to_dict() for t in TOOLS]
 

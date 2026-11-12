@@ -156,7 +156,8 @@ class CodexBrain:
             self.sources.extend(sources)
             hud.emit('sources', sources=self.sources[-12:])
 
-    def ask(self, model, system, messages, definitions, run_tool, delta, cancel):
+    def ask(self, model, system, messages, definitions, run_tool, delta, cancel, images=None):
+        """images: optional pictures to send with this turn, as data: or https URLs (vault_log.codex_once)."""
         system = privacy.redact(system)
         self.cancel, self.delta, self.run_tool = cancel, delta, run_tool
         self.complete, self.answer, self.turn_id, self.tool_count = None, [], None, 0
@@ -201,7 +202,7 @@ class CodexBrain:
             text = json.dumps(history, ensure_ascii=False)
             self.conn.call('turn/start', {'threadId': self.thread_id, 'model': model,
                 'approvalPolicy': 'untrusted', 'sandboxPolicy': {'type': 'readOnly'},
-                'input': [{'type': 'text', 'text': text}]})
+                'input': [{'type': 'text', 'text': text}] + [{'type': 'image', 'url': url} for url in images or []]})
             # A stall timeout, not a turn limit: tools (including waiting for a spoken
             # approval) run inside this loop, and a working turn must not be cut off.
             deadline = time.monotonic() + 180
