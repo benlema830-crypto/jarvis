@@ -312,6 +312,25 @@ class RestartKeepsTheLightsTest(unittest.TestCase):
         self.assertTrue(restart_jarvis._is_worker(worker))
 
 
+class StopScopeTest(unittest.TestCase):
+    def test_stop_everything_phrases(self):
+        for said in ("Stop everything.", "stop all", "Okay, stop all", "cancel all the agents", "stop all agents",
+                     "kill it all", "abort everything", "stop all of it", "Jarvis stop everything now"):
+            self.assertTrue(jarvis.is_stop_everything(said.removeprefix("Jarvis ")), said)
+
+    def test_a_plain_stop_is_not_everything(self):
+        for said in ("stop", "Never mind.", "enough", "stop talking", "cancel", "that's enough", "be quiet",
+                     "stop, that's all", "stop the research"):
+            self.assertFalse(jarvis.is_stop_everything(said), said)
+        self.assertFalse(jarvis.is_stop_everything("what's everything on my calendar"))
+
+    def test_a_stop_that_names_work_goes_to_the_brain(self):
+        for said in ("stop the Giant builder", "cancel the research", "stop the away job", "stop the agent"):
+            self.assertTrue(jarvis.names_work(said), said)
+        for said in ("stop", "never mind", "stop talking", "stop everything", "stop all the agents", "open the agent"):
+            self.assertFalse(jarvis.names_work(said), said)
+
+
 class GoodNightTest(unittest.TestCase):
     def test_good_night_no_longer_ends_the_program(self):
         self.assertNotIn("good night", jarvis.EXIT_PHRASES)

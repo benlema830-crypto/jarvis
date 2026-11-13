@@ -87,6 +87,31 @@ def is_stop(text: str) -> bool:
     return said in STOP_PHRASES or any(said == p or said.startswith(p + " ") for p in STOP_STARTS) or said == "stopped talking"
 
 
+def _plain(text):
+    return " ".join(re.sub(r"[,!?]+", " ", text.lower()).strip(" .").split())
+
+
+# A stop word on its own stops his speech and the screen agent (it has the mouse), never the background agents:
+# "never mind" after a wake word used to end a 25-minute parallel job or an away build too (owner's call,
+# 2026-11-13, from the 11-11 code review). These stop everything, as Ctrl+Alt+J and the page's stop button do.
+_EVERYTHING = re.compile(r"\b(?:everything|all of (?:it|them)|it all|them all|all (?:the )?(?:agents?|tasks?|jobs?|work|"
+                         r"builds?|sessions?))\b|^(?:ok(?:ay)? |alright )?(?:stop|cancel) all$")
+# "Stop the Giant builder" names one piece of work: the brain stops just that one with its own tools.
+_NAMES_WORK = re.compile(r"\b(?:agents?|tasks?|jobs?|sessions?|builders?|builds?|research|terminal|parallel|"
+                         r"workshop|render|teardown|away)\b")
+
+
+def is_stop_everything(text: str) -> bool:
+    """ "Stop everything", "cancel all the agents", "kill it all"."""
+    said = _plain(text)
+    return (is_stop(said) or re.match(r"(?:kill|abort|end|halt) ", said) is not None) and bool(_EVERYTHING.search(said))
+
+
+def names_work(text: str) -> bool:
+    """A stop that names particular work ("stop the research"), which is the brain's to carry out."""
+    return is_stop(text) and not is_stop_everything(text) and bool(_NAMES_WORK.search(_plain(text)))
+
+
 FILLERS = {"um", "umm", "uh", "uhh", "er", "erm", "hmm", "hm", "mm", "mhm", "ah", "oh", "so", "well", "wait",
            "hold on", "hang on", "one sec", "one second", "actually", "hey", "and", "but", "like"}
 
@@ -1240,20 +1265,25 @@ def main():
     tools.VOICE = voice
     brain = Brain()
 
-    def halt_tasks() -> bool:
-        """Stop any background computer task. Returns whether one was running."""
-        running = [w for w in (tools.AGENT, tools.TERMINAL, tools.SESSIONS) if w.running]
+    def halt_tasks(everything=True) -> bool:
+        """Stop the screen agent, and with `everything` every background agent too. Returns whether one was
+        running."""
+        workers = (tools.AGENT, tools.TERMINAL, tools.SESSIONS) if everything else (tools.AGENT,)
+        running = [w for w in workers if w.running]
         for worker in running:
             worker.cancel()
+        if running and everything:
+            hud.emit("event", text="Stopped every running agent")
         return bool(running)
 
-    def stop(cancel_tasks=True):
+    def stop(cancel_tasks=True, everything=True):
+        """Cut him off. `cancel_tasks` also stops the screen agent, and `everything` all the background agents."""
         if not turns.idle.is_set():
             hud.emit("event", text="Interrupted")  # also lands in the transcript
         brain.interrupt()
         voice.stop()
         if cancel_tasks:
-            halt_tasks()
+            halt_tasks(everything)
 
     def attention():
         """Wake word or hotkey: cut Jarvis off if he's busy, then listen."""
@@ -1278,15 +1308,17 @@ def main():
         print(f"(interrupted: {text})", flush=True)
         if command == "" or (is_filler(command) and not pending):
             attention()  # just "Jarvis", "wait" or "um": stop talking and listen
-        elif is_stop(command) and not pending:
+        elif is_stop_everything(command) and not pending:
             stop()
+        elif is_stop(command) and not names_work(command) and not pending:
+            stop(everything=False)  # speech and the screen agent; background agents carry on
         else:
             stop(cancel_tasks=False)
             # "Jarvis, actually what about tomorrow?" - answer that next. Without his name it may have been said
             # to someone else in the room, so the brain is told (heard_as).
             hud.commands.put(heard_as(command, text, False, preferences.listening_mode()))
 
-    hud.on_stop = stop
+    hud.on_stop = stop   # the page's stop button, labelled with Ctrl+Alt+J: everything
     hud.on_voice = tools.set_voice_engine
     if ears:
         ears.on_wake = attention
@@ -1536,10 +1568,23 @@ def main():
                     voice.wait()
                     hud.emit("state", state="offline")
                     break
-                if is_stop(said):  # "Hey Jarvis... never mind" - and stops any computer task
-                    if halt_tasks():
+                if is_stop_everything(said):  # "Stop everything": every agent, like Ctrl+Alt+J
+                    voice.say("Stopping everything, sir." if halt_tasks() else "Nothing was running, sir.")
+                    voice.wait()
+                    hud.emit("state", state="standby")
+                    turns.idle.set()
+                    continue
+                if is_stop(said) and not names_work(said):  # "Hey Jarvis... never mind": the screen agent only
+                    stopped = halt_tasks(everything=False)
+                    going = [w for w in tools.running_work() if w != "a task on the screen"]
+                    if going:  # said into silence while agents work: they may have meant those, so say how
+                        voice.say(("Stopped the screen task. " if stopped else "")
+                                  + f"{going[0][0].upper() + going[0][1:]}{' and more' if len(going) > 1 else ''} "
+                                  "carr" + ("y" if len(going) > 1 else "ies") + " on; say stop everything to end "
+                                  + ("them." if len(going) > 1 else "it."))
+                    elif stopped:
                         voice.say("Stopping, sir.")
-                        voice.wait()
+                    voice.wait()
                     hud.emit("state", state="standby")
                     turns.idle.set()
                     continue

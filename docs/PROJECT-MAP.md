@@ -473,4 +473,8 @@ Three days of transcripts (11-11 to 11-13) were read for what went wrong, and ea
   "Jarvis" (`ears.NEAR_MATCH`, `Ears._near_owner`). Other near misses are still ignored, and their words go to
   `data/ears.log` ("ignored a voice ... saying '...'"), so the next look at the threshold has evidence: in the ten
   days before, 80 phrases scored 0.50 to 0.62 and were dropped unseen, against 193 accepted.
+- **What "stop" stops** (the owner's decision from the 11-11 review). "Stop", "never mind", "enough": his speech
+  and the screen agent only; background agents carry on, and if one is running when the word is said into silence
+  he says so and how to end it. "Stop everything" / "cancel all the agents", Ctrl+Alt+J and the page's stop button:
+  every agent (`jarvis.is_stop_everything`). "Stop the Giant builder": the brain stops that one (`names_work`).
 - **The local brain is marked on the page.** The brain pill reads "Local · qwen3.5" in amber (`J.showModel`).

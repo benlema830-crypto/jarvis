@@ -868,7 +868,7 @@ class SessionManager:
         return worker.steer(message)
 
     def cancel(self, name=""):
-        """Stop one session, or every running one (the "stop" word and the emergency hotkey)."""
+        """Stop one session, or every running one ("stop everything", Ctrl+Alt+J, the page's stop button)."""
         key = name.strip().casefold()
         for found, worker in list(self.workers.items()):
             if not key or found == key:

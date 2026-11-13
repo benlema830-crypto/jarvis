@@ -54,7 +54,9 @@ and docs rather than guess how he works.
 
 These are not bugs with one right answer. Nothing was changed.
 
-1. **"Stop", "never mind", "cancel" and "enough" stop every running agent.** `halt_tasks` cancels the screen
+1. **Decided and built 2026-11-13: the suggestion below.** A stop word alone stops speech and the screen agent;
+   "stop everything", Ctrl+Alt+J and the page's stop button stop every agent; "stop the research" goes to the
+   brain, which stops that one. Was: **"Stop", "never mind", "cancel" and "enough" stop every running agent.** `halt_tasks` cancels the screen
    agent and all sessions. That made sense when the only background work was an agent moving your mouse. Now
    "never mind" after a wake word also cancels a 25-minute parallel job and an away build. Suggested: stop words
    stop speech and the screen agent; "stop everything" and Ctrl+Alt+J stop all agents.
