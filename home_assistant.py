@@ -211,6 +211,24 @@ def _without_group_members(matches):
     return [d for d in matches if d['id'] not in grouped] or matches
 
 
+def tiles(everything=None):
+    """The devices worth a tile on the page: a group once instead of each of its members, and none of the
+    option switches a light brings along (WLED adds "Sync send", "Sync receive" and "Nightlight" per strip,
+    which filled the Home panel with eight tiles for two monitor backlights)."""
+    everything = devices() if everything is None else everything
+    lights = [d['name'].lower() for d in everything if d['domain'] == 'light']
+
+    proper = {d['name'].lower() for d in everything if d['domain'] in ('fan', 'light', 'media_player', 'climate')}
+
+    def option(d):
+        name = d['name'].lower()
+        if d['domain'] != 'switch':
+            return False
+        # ...or the plain plug behind a fan or lamp that already has a tile under the same name.
+        return name in proper or any(name.startswith(light + ' ') for light in lights)
+    return [d for d in _without_group_members(everything) if not option(d)]
+
+
 def _service(device, action, value):
     domain, state = device['domain'], device['state']
     if state == 'unavailable':

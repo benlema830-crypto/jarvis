@@ -116,6 +116,27 @@ def screen_sync(action: str) -> str:
     return sync.control(action)
 
 
+@beta_tool(eager_input_streaming=True)
+def pc_lights(action: str, what: str = "all") -> str:
+    """Switch the lights around the desk and the screens themselves, without stopping anything on the PC. Use it
+    for "turn my computer lights off", "turn the monitors off", "lights out", "make it dark, I'm trying to sleep",
+    "kill the RGB" and for turning them back on. This is the right tool whenever the user wants darkness while
+    work keeps running: never use sleep_computer for that (sleep pauses agents), and never dim the room's ceiling
+    lights for it (those are home_control, and only when the user names them).
+
+    Args:
+        action: off, on or status.
+        what: all (the default: everything below), rgb (the keyboard, case and graphics card lights),
+            backlights (the LED strips behind the monitors), lights (rgb and backlights, screens stay on), or
+            screens (the two monitors: powered down, not the PC; they wake on mouse, keyboard or "on").
+
+    Say only what each line of the result reports: Confirmed, "sent", or NOT CONFIRMED / NOT DONE, which you must
+    pass on. When work is running, say in a few words that it carries on.
+    """
+    import pc_lights as lights
+    return lights.control(action, what, running_work())
+
+
 # ---------- Apps, files, clipboard, screen ----------
 
 @beta_tool(eager_input_streaming=True)
@@ -320,6 +341,11 @@ def sleep_computer(delay_seconds: int = 10) -> str:
     """Put this PC to sleep (not shut down or restart). It waits a few seconds first so your
     reply still reaches the user, including on the phone, which can wake the PC again.
 
+    Sleep stops everything on this PC until it wakes: agents, builds, research, away jobs and music all pause, and
+    you can't be reached by voice. When the user only wants the room dark or quiet while work carries on ("turn the
+    lights and monitors off, an agent is running"), use pc_lights instead. The result lists any work that sleep
+    will pause: pass that on in a few words, and never say work keeps running while the PC sleeps.
+
     Args:
         delay_seconds: Seconds to wait before sleeping, 5 to 300.
     """
@@ -327,7 +353,38 @@ def sleep_computer(delay_seconds: int = 10) -> str:
     timer = threading.Timer(delay, _suspend)
     timer.daemon = True
     timer.start()
-    return f"The computer will go to sleep in {delay} seconds."
+    working = running_work()
+    paused = (f" This PAUSES work that is running now: {'; '.join(working)}. It picks up again when the PC wakes. "
+              "Tell the user that in a few words." if working else "")
+    return f"The computer will go to sleep in {delay} seconds.{paused}"
+
+
+def running_work():
+    """Background work running right now, as short phrases. Each source is asked separately, so one that
+    can't answer doesn't hide the others."""
+    found = []
+    def look(check):
+        try:
+            found.extend(check() or [])
+        except Exception:
+            pass
+    look(lambda: ["a terminal task"] if TERMINAL.running else [])
+    look(lambda: [f"the {s['name']} agent" for s in SESSIONS.snapshot()["sessions"]
+                  if s.get("status") in ("running", "waiting", "pausing")])
+    look(lambda: ["a task on the screen"] if AGENT.running else [])
+    def researching():
+        import research
+        return [f"research on {r['topic'][:50]}" for r in research._load()["runs"] if r.get("status") == "running"]
+    look(researching)
+    def away():
+        import away_jobs as queue_module
+        return [f"the away job \"{row['what'][:50]}\"" for row in queue_module.board() if row["status"] == "running"]
+    look(away)
+    def bench():
+        import workshop as bench_module
+        return ["a workshop build"] if bench_module.STATE.get("busy") else []
+    look(bench)
+    return found
 
 
 def _suspend():
@@ -1889,7 +1946,7 @@ def response_style(settings: str = '{}') -> str:
     return json.dumps(response_settings.update(changes) if changes else response_settings.read())
 
 
-TOOLS = [open_website, show_search_results, home_control, home_status, screen_sync, open_app, list_apps, find_files, open_path, read_clipboard,
+TOOLS = [open_website, show_search_results, home_control, home_status, screen_sync, pc_lights, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, point_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, meeting_prep, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, search_history, held_updates, correct_memory, update_memory, forget,
          performance_report, set_reminder, list_reminders, cancel_reminder,
@@ -1910,6 +1967,24 @@ SHOWN_RESULTS = frozenset({"run_command", "search_text", "find_files", "edit_fil
                            "home_control", "home_status", "list_tasks", "get_schedule", "get_weather"})
 
 
+# Looking something up is harmless however old the request is; everything else is an action.
+READ_ONLY = re.compile(r"^(?:get_|list_|read_|search_|recall_|check_|find_)|_status$|^(?:self_check|look_at_screen|"
+                       r"held_updates|performance_report|system_status|recent_activity|watch_video)$")
+TURN_BEGAN = 0.0   # wall-clock start of the turn now running (set by jarvis.Brain.ask)
+
+
+def stale_request(name):
+    """Words for the brain when the PC slept through this turn and `name` would now act on an old request."""
+    import suspend_watch
+    if READ_ONLY.search(name) or not suspend_watch.stale(TURN_BEGAN):
+        return None
+    asleep = suspend_watch.describe(suspend_watch.slept_since(TURN_BEGAN))
+    return (f"NOT DONE. This request was made before the PC went to sleep, and it slept for {asleep} before you got "
+            "to it, so it is old and may no longer be wanted. Nothing was changed. Do not act on it now and call no "
+            "more tools. If you say anything, say in one short sentence that it wasn't done because the PC went to "
+            "sleep first.")
+
+
 def run_tool(block) -> dict:
     """Run one tool_use block and return its tool_result."""
     print(f"  (using {block.name})", flush=True)
@@ -1917,6 +1992,8 @@ def run_tool(block) -> dict:
     import runtime_metrics
     began = time.monotonic()
     try:
+        if refused := stale_request(block.name):
+            raise RuntimeError(refused)
         import preferences
         if preferences.read().get('subscription_only'):
             if block.name == 'switch_voice' and block.input.get('engine', '').lower().strip() == 'elevenlabs':

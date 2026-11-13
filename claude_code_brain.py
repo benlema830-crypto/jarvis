@@ -184,6 +184,12 @@ class ClaudeCodeBrain:
                     block = event.get("content_block") or {}
                     if block.get("name") in ("WebSearch", "WebFetch"):  # built in, so tools.run_tool never sees them
                         self._builtin_tool(block["name"])
+                    # A new stretch of text after a tool call: end the last one, or "done.Now" is glued together
+                    # and the sentence before the tool waits unsaid until the tool has finished.
+                    if answer and not answer[-1][-1:].isspace():
+                        answer.append("\n")
+                        if not cancel.is_set():
+                            delta("\n")
                 if event.get("type") == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
                     text = event["delta"].get("text", "")
                     answer.append(text)

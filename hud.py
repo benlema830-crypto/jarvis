@@ -168,7 +168,7 @@ def home() -> dict:
     try:
         import home_assistant
         found = [{"name": str(d["name"])[:60], "domain": d["domain"], "state": str(d["state"])[:24]}
-                 for d in home_assistant.devices()][:40]
+                 for d in home_assistant.tiles()][:40]
         result = {"devices": found, "error": "", "read_at": time.time()}
     except Exception as error:
         result = {"devices": [], "error": f"Home Assistant unavailable ({type(error).__name__}).", "read_at": time.time()}

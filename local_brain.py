@@ -8,7 +8,6 @@ A 9B model can't carry all of Jarvis's tools (86 of them, about 16k tokens), so 
 TOOLS. Its thinking is off, to keep spoken replies quick. Each turn starts from the recent conversation as plain
 text, so nothing here needs closing when the brain changes.
 """
-import base64
 import json
 import re
 import threading
@@ -36,7 +35,7 @@ TOOLS = (
     "home_control", "home_status", "run_command", "read_file", "search_knowledge",
     "add_task", "list_tasks", "switch_model", "self_check",
     "workshop", "do_on_computer", "terminal_task", "terminal_status", "list_app_windows", "control_app_window",
-    "audio_output", "sleep_computer", "list_mcp_tools", "call_mcp_tool",
+    "audio_output", "sleep_computer", "pc_lights", "list_mcp_tools", "call_mcp_tool",
 )
 NOTE = ("\n\nYou are running as the local model on this PC, not Claude or Codex. Only the tools you were given "
         "exist this session: there is no web_search and no research tool. 3D models go through workshop, clicking "

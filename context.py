@@ -139,16 +139,28 @@ def _describe(code: int) -> str:
     return "unsettled weather"
 
 
+def _feel(temperature, fahrenheit):
+    """A plain word for how cold or hot a temperature is, so "21 degrees" is never met with "a light jacket"
+    (the local brain's morning briefing, 2026-11-13). Empty for ordinary temperatures."""
+    f = temperature if fahrenheit else temperature * 9 / 5 + 32
+    for limit, word in ((0, "dangerously cold"), (20, "bitterly cold, well below freezing"), (32, "below freezing"),
+                        (45, "cold")):
+        if f <= limit:
+            return word
+    return "very hot" if f >= 95 else "hot" if f >= 85 else ""
+
+
 def weather() -> str:
     loc = _location()
     lat, lon = loc["loc"].split(",")
     fahrenheit = loc.get("country") in ("US", "LR", "MM")
     unit = "F" if fahrenheit else "C"
+    speed = "mph" if fahrenheit else "km/h"
     data = requests.get(
         "https://api.open-meteo.com/v1/forecast",
         params={
             "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 2,
-            "current": "temperature_2m,weather_code,wind_speed_10m",
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m",
             "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
             "temperature_unit": "fahrenheit" if fahrenheit else "celsius",
             "wind_speed_unit": "mph" if fahrenheit else "kmh",
@@ -156,12 +168,23 @@ def weather() -> str:
         timeout=6,
     ).json()
     cur, day = data["current"], data["daily"]
+    now, feels = cur["temperature_2m"], cur.get("apparent_temperature")
+    felt = f", feels like {feels:.0f}°{unit}" if feels is not None and abs(feels - now) >= 4 else ""
+    word = _feel(now, fahrenheit)
+    wind = cur.get("wind_speed_10m")
+    windy = f", wind {wind:.0f} {speed}" if wind is not None and wind >= (15 if fahrenheit else 24) else ""
+
+    def falling(code, chance):
+        kind = "snow" if code in range(71, 78) or code in (85, 86) else "rain"
+        return f"{chance}% chance of {kind}"
     return (
-        f"{loc.get('city', 'Your area')}: now {cur['temperature_2m']:.0f}°{unit}, {_describe(cur['weather_code'])}. "
-        f"Today high {day['temperature_2m_max'][0]:.0f}°{unit} / low {day['temperature_2m_min'][0]:.0f}°{unit}, "
-        f"{day['precipitation_probability_max'][0]}% chance of rain. "
+        f"{loc.get('city', 'Your area')}: now {now:.0f}°{unit}{' (' + word + ')' if word else ''}{felt}, "
+        f"{_describe(cur['weather_code'])}{windy}. "
+        f"Today {_describe(day['weather_code'][0])}, high {day['temperature_2m_max'][0]:.0f}°{unit} / "
+        f"low {day['temperature_2m_min'][0]:.0f}°{unit}, "
+        f"{falling(day['weather_code'][0], day['precipitation_probability_max'][0])}. "
         f"Tomorrow {_describe(day['weather_code'][1])}, high {day['temperature_2m_max'][1]:.0f}°{unit}, "
-        f"{day['precipitation_probability_max'][1]}% chance of rain."
+        f"{falling(day['weather_code'][1], day['precipitation_probability_max'][1])}."
     )
 
 

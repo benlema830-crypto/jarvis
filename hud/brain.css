@@ -527,7 +527,7 @@ body.view-workshop .reply{background:#060e11f2}
 .ws-steps li{position:relative;padding-left:22px;line-height:1.35}
 .ws-steps li::before{content:"✓";position:absolute;left:0;top:1px;width:14px;height:14px;border-radius:50%;background:var(--ok);color:#04201b;font:700 10px/14px var(--sans);text-align:center}
 .ws-steps li.bad::before{content:"!";background:var(--amber)}
-.ws-bench{position:absolute;left:calc(50% - var(--right-width) / 2);bottom:132px;transform:translateX(-50%);width:min(560px,calc(100vw - var(--right-width) - 80px));padding:18px 20px;background:#060e11ee}
+.ws-bench{position:absolute;left:calc(50% - var(--right-width) / 2);top:42%;transform:translate(-50%,-50%);max-height:60vh;overflow-y:auto;width:min(560px,calc(100vw - var(--right-width) - 80px));padding:18px 20px;background:#060e11ee}
 .ws-bench h3{margin:0 0 4px;font-size:18px}
 .ws-bench p{margin:0 0 12px;color:var(--muted);font-size:13.5px}
 .ws-bench-row{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted)}

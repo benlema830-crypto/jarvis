@@ -183,6 +183,10 @@ class Conversation:
                 self.turns.append(items[start:])
                 self.sent = len(messages) + 1  # the caller appends the assistant's answer
                 return "".join(answer)
+            if answer and not answer[-1][-1:].isspace():  # say what came before the tools now, and don't glue the
+                answer.append("\n")                       # next round's first sentence onto it ("done.Now")
+                if not cancel.is_set():
+                    delta("\n")
             attachments = []
             for call in calls[:32]:
                 if cancel.is_set():

@@ -199,6 +199,7 @@ def start(put, events=None, stop=None):
         events = lambda: context.event_list(1)
     stop = stop or threading.Event()
     done = set()
+    failing = [""]   # the error being logged about now: an outage is one line, not one per poll (129 in two days)
 
     def loop():
         while not stop.wait(POLL_SECONDS):
@@ -216,7 +217,13 @@ def start(put, events=None, stop=None):
                                      f"vault note {result['note'] or '(not saved)'} (read_knowledge_note). It was written "
                                      "from their own notes; nothing about the meeting itself is known."})
             except Exception as e:  # the calendar or Codex being unreachable must not stop later briefs
-                print(f"(meeting prep: {e!r})", flush=True)
+                if repr(e) != failing[0]:
+                    failing[0] = repr(e)
+                    print(f"(meeting prep: {e!r}; checking again every {POLL_SECONDS} seconds)", flush=True)
+            else:
+                if failing[0]:
+                    failing[0] = ""
+                    print("(meeting prep: the calendar is reachable again)", flush=True)
 
     threading.Thread(target=loop, daemon=True, name="meeting-prep").start()
     return stop

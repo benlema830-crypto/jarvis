@@ -53,6 +53,7 @@ CREATORS = [{
     "paid": re.compile(r"https?://(?:www\.)?skool\.com/aiworkshop(?!-lite)\S*", re.I),
 }]
 FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
+UPLOADS = "https://www.youtube.com/feeds/videos.xml?playlist_id={}"
 NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015",
       "media": "http://search.yahoo.com/mrss/"}
 CAPTION_WAIT_DAYS = 2       # captions can lag a new upload; a Jarvis video without them is retried this long
@@ -127,6 +128,10 @@ def settings():
 def videos(channel_id: str) -> list[dict]:
     """The channel's newest videos from its public feed, newest first."""
     response = requests.get(FEED.format(channel_id), headers=AGENT, timeout=TIMEOUT)
+    if response.status_code == 404 and channel_id.startswith("UC"):
+        # YouTube's channel feed answers 404 for hours at a time (seven checks in a row, 2026-11-11 to 11-13).
+        # The channel's uploads playlist is the same list under another address.
+        response = requests.get(UPLOADS.format("UU" + channel_id[2:]), headers=AGENT, timeout=TIMEOUT)
     response.raise_for_status()
     root = ET.fromstring(response.content)
     found = []

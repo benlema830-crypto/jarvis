@@ -188,7 +188,7 @@
     const box = el('railToday');
     try {
       const data = await J.api('/intel', undefined, { timeout: 8000 });
-      box.replaceChildren(make('p', clip(data.schedule || 'No calendar connected.', 260)), make('p', clip(data.weather || '', 160), 'muted'));
+      box.replaceChildren(make('p', clip(data.schedule || 'No calendar connected.', 260)), make('p', clip(data.weather || '', 260), 'muted'));
     } catch { box.replaceChildren(make('p', J.online ? 'Could not read today.' : 'Jarvis is offline.')); }
   }
   el('railHomeRefresh').onclick = refreshHome;
