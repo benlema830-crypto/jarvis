@@ -116,6 +116,7 @@ body[data-online=true] #online{color:#9ff5dd;border-color:#1f5a4d}
 body[data-online=true] #online i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .pill.model{color:color-mix(in srgb,var(--accent) 35%,#ffffff);border-color:color-mix(in srgb,var(--accent) 35%,#071012);max-width:210px}
 .pill.model b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
+.pill.model.local{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 55%,#071012)}
 .voice-pick select{background:transparent;border:0;padding:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:uppercase;max-width:180px;cursor:pointer;outline:none}
 .voice-pick:focus-within{border-color:#3ddc97}
 .voice-pick select option{background:#071012;color:#cfe;text-transform:none}

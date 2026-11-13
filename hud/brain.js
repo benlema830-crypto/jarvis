@@ -931,8 +931,16 @@ async function pollHealth() {
   catch { J.health = null; }
   renderStatus();
 }
+// The brain's name on the pill. The local model is marked: it is far weaker than the plan models, and it stayed
+// on by accident for two days in November because nothing on the page said so.
+J.showModel = (model, provider) => {
+  const local = provider === 'local';
+  $('modelName').textContent = !model ? '—' : local ? 'Local · ' + model.split('/').pop().split(':')[0].replace('-abliterated', '') : model;
+  $('modelPill').classList.toggle('local', local);
+  $('modelPill').title = local ? 'The local model on this PC: free and offline, but much weaker and with fewer tools. Click to change the brain.' : "Change JARVIS's brain";
+};
 async function pollModel() {
-  try { const s = await J.api('/status', undefined, { timeout: 5000 }); $('modelName').textContent = s.info?.model || '—'; J.online = true; uiState = s.state || uiState; }
+  try { const s = await J.api('/status', undefined, { timeout: 5000 }); J.showModel(s.info?.model, s.info?.provider); J.online = true; uiState = s.state || uiState; }
   catch { $('modelName').textContent = '—'; }
   renderStatus();
 }

@@ -329,8 +329,13 @@ addEventListener('load', async () => {
 
     stage('model'); $('modelPill').click(); await wait(() => $('modelDialog').textContent.includes('Active: codex'), 'model status');
     const provider = $('modelDialog').querySelector('select');
-    assert([...provider.options].map(o => o.value).join() === 'claude_code,codex', 'only the two plans are offered');
-    assert(!/API credits until|Anthropic|OpenAI API|Ollama/.test($('modelDialog').textContent), 'no paid or removed brains mentioned');
+    assert([...provider.options].map(o => o.value).join() === 'claude_code,codex,local', 'the two plans and the local model are offered');
+    assert(!/API credits until|Anthropic|OpenAI API/.test($('modelDialog').textContent), 'no paid or removed brains mentioned');
+    assert(!$('modelPill').classList.contains('local'), 'a plan brain is not marked local');
+    J.showModel('huihui_ai/qwen3.5-abliterated:9b', 'local');
+    assert($('modelName').textContent === 'Local · qwen3.5' && $('modelPill').classList.contains('local'), 'the local brain is marked on the pill');
+    J.showModel('gpt-6.1-terra', 'codex');
+    assert($('modelName').textContent === 'gpt-6.1-terra' && !$('modelPill').classList.contains('local'), 'and unmarked again');
     provider.value = 'claude_code'; provider.dispatchEvent(new Event('change'));
     assert($('modelDialog').querySelectorAll('select')[1].value === 'claude-opus-5-5', 'plan model listed');
     $('modelDialog').close();
@@ -435,7 +440,8 @@ addEventListener('load', async () => {
     emit({ type: 'event', text: 'Approval needed: Delete the old build folder?' });
     assert(last.querySelector('.note.wait').textContent.includes('Delete the old build folder?'), 'the question is noted in the stream');
     await wait(() => $('railHome').querySelectorAll('.home-tile').length === 3, 'home tiles');
-    assert($('railHome').querySelector('.home-tile.unknown b').textContent === 'unknown', 'an unavailable device reads unknown, never off');
+    assert($('railHome').querySelector('.home-tile.unknown b').textContent === 'offline', 'an unavailable device reads offline, never off');
+    assert([...$('railHome').querySelectorAll('.home-tile')].pop().classList.contains('unknown'), 'and it comes last');
     await wait(() => $('railWork').textContent.includes('Frontier') && !$('railWork').textContent.includes('Docs'), 'only running work is listed');
     await wait(() => $('railToday').textContent.includes('Dentist'), 'today');
     assert(!$('railWork').textContent.includes('Add the shop screen'), 'a finished job is a card, not a second entry under Working');

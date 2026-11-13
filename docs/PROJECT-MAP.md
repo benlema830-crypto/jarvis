@@ -469,3 +469,8 @@ Three days of transcripts (11-11 to 11-13) were read for what went wrong, and ea
 - **The page.** Home tiles show a light group once, without WLED's option switches or the bulbs of an unreachable
   group (`home_assistant.tiles`); the workshop's start card sits in the middle of the stage.
 - **Logs.** A calendar outage is one line; creator watch uses the uploads playlist when the channel feed is 404.
+- **The voice lock and his name.** A voice up to 0.10 under the lock's threshold is accepted when the phrase says
+  "Jarvis" (`ears.NEAR_MATCH`, `Ears._near_owner`). Other near misses are still ignored, and their words go to
+  `data/ears.log` ("ignored a voice ... saying '...'"), so the next look at the threshold has evidence: in the ten
+  days before, 80 phrases scored 0.50 to 0.62 and were dropped unseen, against 193 accepted.
+- **The local brain is marked on the page.** The brain pill reads "Local · qwen3.5" in amber (`J.showModel`).

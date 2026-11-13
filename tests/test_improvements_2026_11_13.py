@@ -256,6 +256,47 @@ class FillerTest(unittest.TestCase):
             self.assertFalse(jarvis.is_filler(said), said)
 
 
+class NearVoiceMatchTest(unittest.TestCase):
+    def listener(self, score, heard, woke=False):
+        import queue
+
+        import numpy as np
+
+        import ears
+        source = ears.Ears.__new__(ears.Ears)
+        source._phrases = queue.Queue()
+        source._phrases.put((np.zeros(16000, dtype=np.int16), woke, 0.0))
+        source.voiceprint = np.ones(2)
+        source.threshold = 0.62
+        source._owner_check = mock.Mock(return_value=score)
+        source.pool = mock.Mock()
+        source.pool.submit.return_value.result.return_value = heard
+        source.transcribe = mock.Mock()
+        source.logged = []
+        source._log = source.logged.append
+        return source
+
+    def test_a_near_match_that_says_his_name_is_heard(self):
+        source = self.listener(0.55, "Jarvis, I'm just gonna restart you.")
+        self.assertEqual(source.listen(timeout=0), ("Jarvis, I'm just gonna restart you.", False))
+        self.assertTrue(any("near match" in line for line in source.logged))
+
+    def test_a_near_match_without_his_name_is_ignored_and_its_words_logged(self):
+        source = self.listener(0.55, "Pull it apart.")
+        self.assertIsNone(source.listen(timeout=0))
+        self.assertTrue(any("ignored a voice" in line and "Pull it apart" in line for line in source.logged))
+
+    def test_a_poor_match_is_ignored_even_with_his_name(self):
+        source = self.listener(0.40, "Jarvis, open the door.")
+        self.assertIsNone(source.listen(timeout=0))
+        source.pool.submit.return_value.result.assert_not_called()   # its words are not even read
+        self.assertFalse(any("Jarvis" in line for line in source.logged))
+
+    def test_the_wake_word_counts_as_his_name(self):
+        source = self.listener(0.58, "Hey Travis, what time is it", woke=True)
+        self.assertEqual(source.listen(timeout=0), ("Hey Travis, what time is it", True))
+
+
 class GoodNightTest(unittest.TestCase):
     def test_good_night_no_longer_ends_the_program(self):
         self.assertNotIn("good night", jarvis.EXIT_PHRASES)

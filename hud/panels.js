@@ -277,7 +277,7 @@
     if (first) { provider.value = value.active.provider; choices(); choice.value = value.active.model; } else choices();
     const pending = value.pending ? ` Pending: ${value.pending.model}${value.validating ? ' (validating…)' : ' (after this turn)'}.` : '';
     modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code. If the plan limit is reached, Jarvis says so and stops; he never falls back to API credits.' : provider.value === 'local' ? ' Runs on this PC through Ollama: free, offline and uncensored, but slower and weaker, with no web search or agents.' : ' Uses your ChatGPT plan through Codex. If the plan limit is reached, Jarvis says so and stops.');
-    el('modelName').textContent = value.active.model;
+    if (J.showModel) J.showModel(value.active.model, value.active.provider); else el('modelName').textContent = value.active.model;
   }
   async function refreshModel(first) {
     try { renderModel(await J.api('/models', undefined, { timeout: 20000 }), first); }

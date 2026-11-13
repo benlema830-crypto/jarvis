@@ -48,6 +48,12 @@ WAKE_THRESHOLD = float(os.getenv("JARVIS_WAKE_THRESHOLD", "0.5"))
 STT_MODEL = os.getenv("JARVIS_STT_MODEL", "large-v3-turbo")
 HOTWORDS = os.getenv("JARVIS_STT_HOTWORDS", "Jarvis")
 WAKE_WORDS = ("jarvis", "jarvas", "jervis")
+# A voice this far under the voice-lock threshold still counts as the owner's when the phrase says "Jarvis".
+# In the ten days to 2026-11-12 the lock ignored 80 phrases scoring 0.50 to 0.62 against 193 it accepted, three of
+# them in a row just before "Jarvis, I'm just gonna restart you". Short or irritated speech scores lower than the
+# calm enrolment samples. Without his name a near match is still ignored, and its words are logged so the
+# threshold can be judged from what was actually said. VOICE_NEAR_MATCH=0 turns this off.
+NEAR_MATCH = float(os.getenv("VOICE_NEAR_MATCH", "0.10"))
 # Whisper sometimes "hears" these in noise or silence
 HALLUCINATIONS = {"you", "thanks for watching", "thank you for watching", "subtitles by the amara.org community", ""}
 
@@ -330,6 +336,17 @@ class Ears:
         emb = self.checker.embed(audio)
         return float(np.dot(emb, self.voiceprint)) if emb is not None else 0.0
 
+    def _near_owner(self, score, future, woke):
+        """(accepted, words) for a voice under the threshold: accepted when it is close and says his name."""
+        if score < self.threshold - NEAR_MATCH:
+            return False, ""
+        try:
+            text = future.result()
+        except Exception:
+            return False, ""
+        named = woke or any(word in text.lower() for word in WAKE_WORDS)
+        return bool(text) and named, text
+
     def _barge_in_worker(self):
         """Phrases spoken while Jarvis is busy: passed to on_barge_in(text, is_owner)."""
         while True:
@@ -348,9 +365,13 @@ class Ears:
         future = self.pool.submit(self.transcribe, audio)
         match = self._owner_check(audio)
         if match is not None and match < self.threshold:
-            voice_health.recognition("voice_not_matched")
-            self._log(f"busy: ignored a voice (match {match:.2f}, wake {wake_max:.2f})")
-            return
+            accepted, words = self._near_owner(match, future, wake_max >= WAKE_THRESHOLD)
+            if not accepted:
+                voice_health.recognition("voice_not_matched")
+                self._log(f"busy: ignored a voice (match {match:.2f}, wake {wake_max:.2f})"
+                          + (f" saying {words[:80]!r}" if words else ""))
+                return
+            self._log(f"busy: near match {match:.2f} accepted, his name was said")
         text = future.result()
         voice_health.recognition("recognized" if text else "no_speech")
         elapsed = time.perf_counter() - started
@@ -375,10 +396,14 @@ class Ears:
             future = self.pool.submit(self.transcribe, audio)
             score = self._owner_check(audio)
             if score < self.threshold:
-                voice_health.recognition("voice_not_matched")
-                print(f"(ignored a voice - match {score:.2f})", flush=True)
-                self._log(f"idle: ignored a voice (match {score:.2f}, wake {wake_max:.2f})")
-                return None
+                accepted, words = self._near_owner(score, future, woke)
+                if not accepted:
+                    voice_health.recognition("voice_not_matched")
+                    print(f"(ignored a voice - match {score:.2f})", flush=True)
+                    self._log(f"idle: ignored a voice (match {score:.2f}, wake {wake_max:.2f})"
+                              + (f" saying {words[:80]!r}" if words else ""))
+                    return None
+                self._log(f"idle: near match {score:.2f} accepted, his name was said")
             text = future.result()
         voice_health.recognition("recognized" if text else "no_speech")
         self._log(f"idle: heard {text!r} (wake {wake_max:.2f})")
