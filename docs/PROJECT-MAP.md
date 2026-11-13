@@ -427,3 +427,14 @@ the bench preview is made from the spec with no model call, and the packet goes 
 <name>\` (build-packet HTML + PDF through headless Chrome, parts list CSV + XLSX, measuring photos, spec, STEP).
 `checks()` finds clashes, floating parts, estimates, power headroom (30 %), weight and cost without a model call.
 Fusion built a 10-part test machine in 3-5 s.
+
+Motion (2026-11-13): the spec has `joints` (revolute or slider; the parts that move together, the part it is `on`,
+an axis through a real axle or pin, min/max from the pose modelled, the motor that drives it). A joint on a part of
+another joint rides on it. In Fusion each joint is a top-level "Moves - <name>" component with an "Axis" sketch line;
+after the bodies are made the design switches to parametric (as-built joints need history; a rebuild switches it
+back to direct first), the fixed groups are grounded in a rigid group, and each joint is an as-built joint made
+with `JointGeometry.createByCurve` on that line and `ZAxisJointDirection` (`createByPoint` with a custom direction
+turned about the wrong axis). The script then plays every joint through its range for 48 frames, framed on the
+whole sweep, and `_gif` makes `motion.gif` for the packet. `motion_checks()` sweeps each joint on its own and finds
+the first place a moving part's box runs into another (separating-axis test; a wheel spinning on its own axle is
+skipped).

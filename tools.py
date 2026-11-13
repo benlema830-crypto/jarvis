@@ -1444,11 +1444,14 @@ def blueprint(action: str, request: str = "", photos: str = ""):
     Use it, not workshop, when the result has to be built or fitted in the real world: "model my machine from
     these photos", "I lost the CAD file", "turn my machine into an AI robot", "what parts do I need", "make me
     a parts list / build plan". (workshop is for looking at things.) One project is current at a time. Reading
-    photos, measuring, correcting and checking run in the background for two to five minutes, an upgrade five to ten: say one
+    photos, measuring, correcting and checking run in the background for five to twenty minutes (more photos take
+    longer), an upgrade ten to twenty: say one
     short line, and you will speak again by yourself when it is done. Never describe a result before then. Each
-    round builds a Fusion model (when Fusion is running), puts a preview on the Workshop tab (pull it apart and
-    measure it there with workshop), and writes the build packet, parts list and measuring sheet to
-    Documents\\Jarvis Blueprints\\<name>.
+    round builds a Fusion model (when Fusion is running) whose moving parts are on real joints with their range
+    of travel (wheels, arms, grippers: drag them or animate them in Fusion; the packet has an animation and says
+    what a moving part runs into), puts a preview on the Workshop tab (pull it apart and measure it there with
+    workshop), and writes the build packet, parts list and measuring sheet to Documents\\Jarvis Blueprints\\<name>.
+    A correction can be about motion too: "the arm only lifts to 90 degrees", "the jaws open 40 degrees".
 
     Args:
         action: new (start a project from photos: `photos` says where they are, `request` what it is and anything

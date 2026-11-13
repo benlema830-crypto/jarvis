@@ -38,7 +38,7 @@ import preferences
 HERE = Path(__file__).resolve().parent
 STORE = HERE / "data" / "blueprints"
 OUTBOX = Path.home() / "Documents" / "Jarvis Blueprints"
-MAX_PHOTOS = 12
+MAX_PHOTOS = 20
 MAX_VERSIONS = 20
 PHOTO_SIDE = 1600
 SHAPES = ("box", "cylinder", "tube", "sphere", "cone", "none")
@@ -87,6 +87,19 @@ FORMAT = """{
    "confidence": 0 to 1 that the sizes are within 5 percent,
    "notes": "anything the builder needs: what changes on a CHANGE part, where it is fixed, what it connects to"}
  ],
+ "joints": [
+  {"id": "short-kebab-id", "name": "what it is: Left drive wheel, Arm pivot, Gripper jaw",
+   "type": "revolute" (turns about an axis) | "slider" (slides along it),
+   "parts": ["ids of the parts that move together on this joint, and only those (not what rides on a joint
+     further along: that has its own joint)"],
+   "on": "id of the part it turns or slides on or is carried by (a frame part, or a part of another joint)",
+   "origin": [x, y, z] a point on the axis in mm (the centre of the axle, pin or bearing),
+   "axis": [dx, dy, dz] the direction of the axis (or slide),
+   "min": degrees (mm for a slider) from the pose modelled, "max": the same; omit both for a wheel or anything
+     that turns all the way round,
+   "drive": "id of the motor or actuator that moves it" (omit when it is moved by hand or is free),
+   "notes": "how it moves: what drives it and through what (gearbox, worm, belt, linkage), what stops it"}
+ ],
  "measurements": [
   {"letter": "A", "what": "plain words: from where to where",
    "estimate_mm": number, "part": "a part id when the measurement is one size of one part",
@@ -121,6 +134,13 @@ M3/M5 screw heads 5.5/8.5 mm, a 12 V 30 A PSU 215 x 115 x 50 mm, a cordless dril
 door 2032 mm tall, outlet cover 70 x 115 mm, floor tiles, ceiling height, a workbench about 900 mm high), then
 people (a hand is about 85 mm across). Say in scale_basis which you used. Where two photos disagree, trust the
 one taken more square-on.
+
+Anything that moves gets a joint, so the model moves the way the machine does: every wheel, arm, pivot, lid,
+jaw, carriage and lead screw. Model the parts in the pose they are in (the photos' pose, or the pose it rests in),
+put the axis exactly through the axle, pin, shaft or bearing they turn on, and give min and max from that pose
+as far as it can really go before something stops it. A part that moves with something further along (a gripper
+on an arm) belongs to its own joint whose "on" is a part of the arm, so it rides along. Parts that don't move
+have no joint.
 
 Be honest about what you know. sizes_from and confidence say how each size was got. The measurements list is
 the four to ten that would fix the most uncertain sizes for the least work with a tape measure, most important
@@ -172,6 +192,7 @@ How to design it:
 - Everything new needs a way to be mounted: design the brackets, plates and spacers as "new" parts to 3D print,
   laser cut or cut from stock, with their mounting holes, sized to the parts they hold and the frame they bolt to.
 - It must fit: new parts must not pass through existing ones, cables need a route, moving parts need clearance.
+  Keep the existing joints, and give every new moving part its joint.
 - Power: every electrical part has volts and watts; supplies and batteries have supply_watts with at least 30
   percent spare. Motors need drivers rated for their current.
 - Safety: an emergency stop that cuts motor power, fuses, guards over pinch points, and a note on anything that
@@ -182,8 +203,8 @@ How to design it:
 SYSTEM_CHECK = """You compare a CAD model with photographs of the real machine it was made from. First come the
 owner's photographs, then pictures of the CAD model from the front, the right side, the top and an angle. The
 spec the model was built from follows. Where the model differs from the photographs (a part missing, the wrong
-size or proportion, in the wrong place, the wrong way round, floating, passing through another part), correct
-the spec. Return the complete corrected spec as JSON only, in the same form:
+size or proportion, in the wrong place, the wrong way round, floating, passing through another part, something
+that moves on the real machine with no joint, a joint's axis not through its axle or pin), correct the spec. Return the complete corrected spec as JSON only, in the same form:
 
 """ + FORMAT + """
 
@@ -433,6 +454,7 @@ def tidy(raw, keep=None):
             part["passes_through"] = [x for x in part["passes_through"] if x in ids and x != part["id"]]
             if not part["passes_through"]:
                 del part["passes_through"]
+    spec["joints"] = _tidy_joints(raw["joints"] if "joints" in raw else keep.get("joints"), parts)
     old = {m.get("letter"): m for m in keep.get("measurements", [])}
     measurements, letters = [], set()
     for item in raw.get("measurements") or []:
@@ -467,6 +489,69 @@ def tidy(raw, keep=None):
 
 
 AXES = {"x": 0, "y": 1, "z": 2}
+JOINT_TYPES = ("revolute", "slider")
+
+
+def _direction(value):
+    """A unit vector from [dx, dy, dz] or "x"/"y"/"z" (None when it has no length)."""
+    if isinstance(value, str) and value.lower().lstrip("+-") in AXES:
+        v = [0.0, 0.0, 0.0]
+        v[AXES[value.lower().lstrip("+-")]] = -1.0 if value.startswith("-") else 1.0
+        return v
+    v = _vec(value, (0, 0, 0))
+    length = math.sqrt(sum(c * c for c in v))
+    return [round(c / length, 6) for c in v] if length > 1e-9 else None
+
+
+def _tidy_joints(raw, parts):
+    """Joints that can be built: real parts, each part on one joint at most, an axis, and no loops."""
+    shaped = {p["id"]: p for p in parts if p["shape"] != "none"}
+    joints, seen, taken = [], set(), set()
+    for n, item in enumerate(raw or []):
+        if not isinstance(item, dict):
+            continue
+        axis = _direction(item.get("axis"))
+        moving = [x for x in item.get("parts") or [] if isinstance(x, str) and x in shaped and x not in taken]
+        if not axis or not moving:
+            continue
+        base = re.sub(r"[^a-z0-9-]+", "-", str(item.get("id") or item.get("name") or f"joint-{n + 1}").lower()).strip("-") or f"joint-{n + 1}"
+        jid, k = base[:60], 2
+        while jid in seen:
+            jid, k = f"{base[:56]}-{k}", k + 1
+        seen.add(jid)
+        taken.update(moving)
+        kind = str(item.get("type", "revolute")).lower()
+        joint = {"id": jid, "name": " ".join(str(item.get("name") or jid).split())[:80],
+                 "type": kind if kind in JOINT_TYPES else "revolute", "parts": moving,
+                 "origin": _vec(item.get("origin"), shaped[moving[0]]["at"]), "axis": axis}
+        on = item.get("on")
+        if isinstance(on, str) and on in shaped and on not in moving:
+            joint["on"] = on
+        low = _num(item.get("min"), -1e5, 1e5)
+        high = _num(item.get("max"), -1e5, 1e5)
+        if low is not None and high is not None and high > low:
+            joint["min"], joint["max"] = min(low, 0.0), max(high, 0.0)     # the pose modelled is inside the range
+        if item.get("drive") in shaped:
+            joint["drive"] = item["drive"]
+        if item.get("notes"):
+            joint["notes"] = str(item["notes"])[:400]
+        joints.append(joint)
+    owner = {pid: j["id"] for j in joints for pid in j["parts"]}
+    for joint in joints:                    # a joint carried by its own descendant would be a loop: drop the "on"
+        seen_ids, current = {joint["id"]}, owner.get(joint.get("on"))
+        while current:
+            if current in seen_ids:
+                joint.pop("on", None)
+                break
+            seen_ids.add(current)
+            current = owner.get(next((j.get("on") for j in joints if j["id"] == current), None))
+    return joints[:40]
+
+
+def joint_parent(spec, joint):
+    """The id of the joint this one rides on, or None when it is on the frame."""
+    on = joint.get("on")
+    return next((j["id"] for j in spec.get("joints", []) if on in j["parts"]), None)
 
 
 def _rotation(rotate):
@@ -541,6 +626,148 @@ def _active(spec):
     return [p for p in spec["parts"] if p["status"] != "remove"]
 
 
+# ---------- Motion: moving the joints and finding what a moving part hits ----------
+
+def _mat_vec(m, v):
+    return [sum(m[i][k] * v[k] for k in range(3)) for i in range(3)]
+
+
+def _mat_mul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def _axis_turn(axis, degrees):
+    """Rotation matrix about a unit axis (Rodrigues)."""
+    x, y, z = axis
+    a = math.radians(degrees)
+    c, s, t = math.cos(a), math.sin(a), 1 - math.cos(a)
+    return [[t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+            [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+            [t * x * z - s * y, t * y * z + s * x, t * z * z + c]]
+
+
+def _joint_move(joint, value):
+    """(R, t) taking a point at the modelled pose to where it is with the joint at value (degrees or mm)."""
+    if joint["type"] == "slider":
+        return [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [joint["axis"][k] * value for k in range(3)]
+    r = _axis_turn(joint["axis"], value)
+    o = joint["origin"]
+    ro = _mat_vec(r, o)
+    return r, [o[k] - ro[k] for k in range(3)]
+
+
+def _compose(outer, inner):
+    (ra, ta), (rb, tb) = outer, inner
+    rt = _mat_vec(ra, tb)
+    return _mat_mul(ra, rb), [rt[k] + ta[k] for k in range(3)]
+
+
+def pose(spec, values):
+    """{part id: (R, t)} for every part on a joint, with the joints at values {joint id: degrees or mm}."""
+    joints = {j["id"]: j for j in spec.get("joints", [])}
+    moves = {}
+
+    def move_of(jid, depth=0):
+        if jid in moves:
+            return moves[jid]
+        joint = joints[jid]
+        own = _joint_move(joint, values.get(jid, 0.0))
+        parent = joint_parent(spec, joint) if depth < 40 else None
+        moves[jid] = _compose(move_of(parent, depth + 1), own) if parent else own
+        return moves[jid]
+    return {pid: move_of(j["id"]) for j in joints.values() for pid in j["parts"]}
+
+
+def _obb(part, move=None, shrink=1.0):
+    """(centre, three unit axes, three half sizes) of the part's box, moved by (R, t)."""
+    turn = _rotation(part.get("rotate"))
+    centre = list(part["at"])
+    if move:
+        turn = _mat_mul(move[0], turn)
+        centre = [c + d for c, d in zip(_mat_vec(move[0], centre), move[1])]
+    axes = [[turn[i][k] for i in range(3)] for k in range(3)]
+    return centre, axes, [max(s / 2 - shrink, 0.05) for s in extent(part)]
+
+
+def _overlap(a, b):
+    """How far two boxes overlap along the axis that separates them best (<= 0 when they don't touch)."""
+    (ca, aa, ha), (cb, ab, hb) = a, b
+    d = [cb[k] - ca[k] for k in range(3)]
+    tests = list(aa) + list(ab)
+    for u in aa:
+        for v in ab:
+            cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+            size = math.sqrt(sum(c * c for c in cross))
+            if size > 1e-6:
+                tests.append([c / size for c in cross])
+    least = float("inf")
+    for axis in tests:
+        reach = (sum(h * abs(sum(x * y for x, y in zip(u, axis))) for h, u in zip(ha, aa))
+                 + sum(h * abs(sum(x * y for x, y in zip(v, axis))) for h, v in zip(hb, ab)))
+        gap = reach - abs(sum(x * y for x, y in zip(d, axis)))
+        if gap <= 0:
+            return gap
+        least = min(least, gap)
+    return least
+
+
+def _spins_in_place(part, joint):
+    """A round part turning about its own centre line (a wheel on its axle) looks the same at every angle."""
+    if joint["type"] != "revolute" or part["shape"] not in ("cylinder", "tube", "cone", "sphere"):
+        return False
+    rel = [part["at"][k] - joint["origin"][k] for k in range(3)]
+    along = sum(rel[k] * joint["axis"][k] for k in range(3))
+    off = math.sqrt(max(sum(r * r for r in rel) - along * along, 0.0))
+    if part["shape"] == "sphere":
+        return off < 0.5
+    own = _mat_vec(_rotation(part.get("rotate")), [1.0 if part["axis"] == a else 0.0 for a in "xyz"])
+    return off < 0.5 and abs(sum(own[k] * joint["axis"][k] for k in range(3))) > 0.999
+
+
+def sweep_values(joint, samples=12):
+    """The joint positions a sweep visits: its range, or a full turn for a joint without limits."""
+    if "min" in joint:
+        return [joint["min"] + (joint["max"] - joint["min"]) * i / (samples - 1) for i in range(samples)]
+    if joint["type"] == "revolute":
+        return [360.0 * i / samples for i in range(samples)]
+    return []
+
+
+def motion_checks(spec, samples=12):
+    """Each joint swept through its range on its own: the first place a moving part runs into something."""
+    parts = {p["id"]: p for p in _active(spec) if p["shape"] != "none"}
+    joints = spec.get("joints", [])
+    meant = {frozenset((p["id"], other)) for p in parts.values() for other in p.get("passes_through", [])}
+    rest = {pid: _obb(p) for pid, p in parts.items()}
+    hits = []
+    for joint in joints:
+        family, grew = {joint["id"]}, True
+        while grew:
+            grew = False
+            for j in joints:
+                if j["id"] not in family and joint_parent(spec, j) in family:
+                    family.add(j["id"])
+                    grew = True
+        moving = [pid for j in joints if j["id"] in family for pid in j["parts"] if pid in parts
+                  and not (j["id"] == joint["id"] and _spins_in_place(parts[pid], joint))]
+        others = [pid for pid in parts if pid not in {x for j in joints if j["id"] in family for x in j["parts"]}]
+        pairs = [(m, o) for m in moving for o in others
+                 if frozenset((m, o)) not in meant and _overlap(rest[m], rest[o]) <= 0]
+        found = {}
+        for value in sweep_values(joint, samples):
+            if not value or not pairs:
+                continue
+            moved = pose(spec, {joint["id"]: value})
+            for m, o in pairs:
+                if (m, o) not in found and _overlap(_obb(parts[m], moved.get(m)), rest[o]) > 2.0:
+                    found[(m, o)] = value
+        for (m, o), value in sorted(found.items(), key=lambda kv: abs(kv[1])):
+            hits.append({"joint": joint["id"], "joint_name": joint["name"], "a": parts[m]["name"],
+                         "b": parts[o]["name"], "a_id": m, "b_id": o, "at": round(value, 1),
+                         "unit": "mm" if joint["type"] == "slider" else "°"})
+    return hits[:30]
+
+
 def checks(spec):
     """What a builder would want to know before cutting anything: clashes, floating parts, guesses, power."""
     parts = [p for p in _active(spec) if p["shape"] != "none"]
@@ -556,7 +783,9 @@ def checks(spec):
             if all(d > 3.0 for d in depth) and frozenset((a["id"], b["id"])) not in meant:
                 small = min(volume_mm3(a), volume_mm3(b)) or 1
                 if depth[0] * depth[1] * depth[2] > 0.05 * small and not (a["shape"] == "tube" or b["shape"] == "tube"):
-                    clashes.append((a, b, min(depth)))
+                    true_depth = _overlap(_obb(a, shrink=0), _obb(b, shrink=0))   # tilted parts: their real boxes
+                    if true_depth > 3.0:
+                        clashes.append((a, b, min(true_depth, min(depth))))
         if not touching:
             for b in parts:
                 if b is a:
@@ -585,7 +814,8 @@ def checks(spec):
                       "ok": (supply >= draw * 1.3) if draw else None},
             "mass_kg": round(total_mass / 1000, 2), "mass_unknown": sum(1 for m in masses if m is None),
             "cost_usd": round(cost, 2), "open_measurements": [m["letter"] for m in open_measurements],
-            "overall_mm": [round(hi[k] - lo[k], 1) for k in range(3)]}
+            "overall_mm": [round(hi[k] - lo[k], 1) for k in range(3)],
+            "joints": len(spec.get("joints", [])), "motion": motion_checks(spec)}
 
 
 def bill(spec):
@@ -706,12 +936,20 @@ def settings():
             "model": "qwen" if saved.get("model") == "qwen" else "fable"}
 
 
+ASK_SECONDS = 1800      # a whole machine from twenty photos, joints and all, can take longer than a workshop build
+
+
 def ask(system, prompt, images):
     """Fable's answer as a spec. Replaced in tests."""
+    import asyncio
     import workshop
     text = []
-    workshop.generate(workshop.model_id(settings()["model"]), settings()["effort"], system, prompt, images or None,
-                      on_text=text.append)
+    model = workshop.model_id(settings()["model"])
+    if model == workshop.QWEN_MODEL:
+        workshop.generate(model, settings()["effort"], system, prompt, images or None, on_text=text.append)
+    else:
+        asyncio.run(asyncio.wait_for(workshop._stream(model, settings()["effort"], system, prompt, images or None,
+                                                      lambda t: None, text.append, threading.Event()), ASK_SECONDS))
     return extract_json("".join(text))
 
 
@@ -751,6 +989,8 @@ def run(_context):
             old.deleteMe()
         for old in [design.rootComponent.bRepBodies.item(i) for i in range(design.rootComponent.bRepBodies.count)]:
             old.deleteMe()
+        if design.designType != adsk.fusion.DesignTypes.DirectDesignType:
+            design.designType = adsk.fusion.DesignTypes.DirectDesignType      # bodies are added without history
     else:
         doc = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
         design = adsk.fusion.Design.cast(app.activeProduct)
@@ -824,16 +1064,33 @@ def run(_context):
         tbm.transform(body, turn)
         return body
 
-    groups, made, failed = {}, 0, []
+    owner = {pid: j["id"] for j in DATA["joints"] for pid in j["parts"]}
+    links, axes = {}, {}
+    for joint in DATA["joints"]:        # each moving assembly is one top-level component with its own axis line
+        occ = root.occurrences.addNewComponent(I)
+        occ.component.name = ("Moves - " + joint["name"])[:120]
+        sketch = occ.component.sketches.add(occ.component.xYConstructionPlane)
+        sketch.name = "Axis"
+        o, d = joint["origin"], joint["axis"]
+        axes[joint["id"]] = sketch.sketchCurves.sketchLines.addByTwoPoints(P(o), P([o[k] + d[k] * 20 for k in range(3)]))
+        occ.component.isSketchFolderLightBulbOn = False
+        links[joint["id"]] = occ
+
+    groups, tops, top_of, made, failed = {}, {}, {}, 0, []
     for part in DATA["parts"]:
         if part["shape"] == "none" or part["status"] == "remove":
             continue
-        group = part["group"]
-        if group not in groups:
-            occ = root.occurrences.addNewComponent(I)
-            occ.component.name = group
-            groups[group] = occ.component
-        occ = groups[group].occurrences.addNewComponent(I)
+        if part["id"] in owner:
+            holder = links[owner[part["id"]]]
+        else:
+            group = part["group"]
+            if group not in groups:
+                occ = root.occurrences.addNewComponent(I)
+                occ.component.name = group
+                groups[group], tops[group] = occ.component, occ
+            holder = tops[group]
+        top_of[part["id"]] = holder
+        occ = holder.component.occurrences.addNewComponent(I)
         prefix = {"new": "NEW - ", "change": "CHANGE - "}.get(part["status"], "")
         occ.component.name = (prefix + part["name"] + " [" + part["id"] + "]")[:120]
         try:
@@ -846,6 +1103,67 @@ def run(_context):
             made += 1
         except Exception as e:
             failed.append(part["id"] + ": " + str(e)[:120])
+
+    motions, joint_failed, notes = {}, [], []
+    if DATA["joints"]:
+        design.designType = adsk.fusion.DesignTypes.ParametricDesignType      # joints need a design with history
+        frame = adsk.core.ObjectCollection.create()
+        for occ in tops.values():
+            frame.add(occ)
+        try:
+            if frame.count:
+                root.rigidGroups.add(frame, True).name = "Frame"
+            for occ in tops.values():
+                occ.isGrounded = True
+        except Exception as e:
+            notes.append("frame: " + str(e)[:100])
+        for jid, occ in links.items():
+            try:
+                one = adsk.core.ObjectCollection.create()
+                one.add(occ)
+                root.rigidGroups.add(one, True)
+            except Exception as e:
+                notes.append(jid + " rigid: " + str(e)[:80])
+        D = adsk.fusion.JointDirections
+        for joint in DATA["joints"]:
+            jid = joint["id"]
+            try:
+                on = joint.get("on")
+                other = (links[owner[on]] if on in owner else top_of.get(on)) or next(iter(tops.values()), None)
+                if other is None:
+                    raise RuntimeError("nothing fixed to turn on")
+                line = axes[jid].createForAssemblyContext(links[jid])
+                geometry = adsk.fusion.JointGeometry.createByCurve(line, adsk.fusion.JointKeyPointTypes.StartKeyPoint)
+                given = root.asBuiltJoints.createInput(links[jid], other, geometry)
+                if joint["type"] == "slider":
+                    given.setAsSliderJointMotion(D.ZAxisJointDirection)
+                else:
+                    given.setAsRevoluteJointMotion(D.ZAxisJointDirection)
+                made_joint = root.asBuiltJoints.add(given)
+                made_joint.name = joint["name"][:100]
+                if joint["type"] == "slider":
+                    motion = adsk.fusion.SliderJointMotion.cast(made_joint.jointMotion)
+                    limits, scale = motion.slideLimits, 0.1
+                else:
+                    motion = adsk.fusion.RevoluteJointMotion.cast(made_joint.jointMotion)
+                    limits, scale = motion.rotationLimits, math.pi / 180
+                if "min" in joint:
+                    limits.isMinimumValueEnabled = True
+                    limits.minimumValue = joint["min"] * scale
+                    limits.isMaximumValueEnabled = True
+                    limits.maximumValue = joint["max"] * scale
+                motions[jid] = (motion, joint["type"], scale)
+            except Exception as e:
+                joint_failed.append(jid + ": " + str(e)[:120])
+        root.isJointsFolderLightBulbOn = False      # no joint glyphs in the pictures
+
+    def set_pose(values):
+        for jid, (motion, kind, scale) in motions.items():
+            value = values.get(jid, 0.0) * scale
+            if kind == "slider":
+                motion.slideValue = value
+            else:
+                motion.rotationValue = value
 
     out = DATA["out"]
     os.makedirs(out, exist_ok=True)
@@ -871,16 +1189,88 @@ def run(_context):
     em.execute(em.createSTEPExportOptions(step, root))
     archive = os.path.join(out, "model.f3d").replace("\\", "/")
     em.execute(em.createFusionArchiveExportOptions(archive, root))
+    frames = []
+    if motions and DATA["motion"]:
+        cam = vp.camera
+        cam.cameraType = adsk.core.CameraTypes.PerspectiveCameraType
+        cam.viewOrientation = adsk.core.ViewOrientations.IsoTopRightViewOrientation
+        cam.isSmoothTransition = False
+        vp.camera = cam
+        vp.fit()
+        cam = vp.camera            # keep the angle, aim at the whole sweep, back off until it all fits
+        look = cam.target.vectorTo(cam.eye)
+        look.normalize()
+        target = P(DATA["view"]["centre"])
+        half = max(cam.perspectiveAngle, 0.2) / 2
+        distance = DATA["view"]["radius"] / 10 / math.sin(half) * 1.08
+        cam.target = target
+        cam.eye = adsk.core.Point3D.create(target.x + look.x * distance, target.y + look.y * distance,
+                                           target.z + look.z * distance)
+        cam.isFitView = False
+        vp.camera = cam
+        for n, values in enumerate(DATA["motion"]):
+            set_pose(values)
+            adsk.doEvents()
+            path = os.path.join(out, "motion-%03d.png" % n).replace("\\", "/")
+            if vp.saveAsImageFile(path, 900, 675):
+                frames.append(path)
+        set_pose({})
     print(json.dumps({"made": made, "failed": failed, "views": views, "step": step, "f3d": archive,
-                      "document": doc.name}))
+                      "document": doc.name, "joints": len(motions), "joint_failed": joint_failed,
+                      "notes": notes, "frames": frames}))
 '''
 
 
+MOTION_FRAMES = 48
+
+
+def motion_path(spec, frames=MOTION_FRAMES):
+    """Joint values for each frame of the animation: every joint out to its max, back through to its min, home;
+    a joint with no limits turns once."""
+    path = []
+    for n in range(frames):
+        t = n / frames
+        values = {}
+        for joint in spec.get("joints", []):
+            if "min" in joint:
+                lo, hi = joint["min"], joint["max"]
+                values[joint["id"]] = (hi * t * 4 if t < 0.25 else hi + (lo - hi) * (t - 0.25) * 2 if t < 0.75
+                                       else lo * (1 - (t - 0.75) * 4))
+            elif joint["type"] == "revolute":
+                values[joint["id"]] = 360.0 * t
+            values[joint["id"]] = round(values.get(joint["id"], 0.0), 3)
+        path.append(values)
+    return path
+
+
+def _view_for(spec, path):
+    """The sphere (centre, radius in mm) that holds the machine through the whole animation, for the camera."""
+    parts = {p["id"]: p for p in _active(spec) if p["shape"] != "none"}
+    if not parts:
+        return {"centre": [0, 0, 0], "radius": 100}
+    lo, hi = [1e9] * 3, [-1e9] * 3
+    for values in (path[::2] or [{}]):
+        moved = pose(spec, values) if values else {}
+        for pid, part in parts.items():
+            centre, axes_, half = _obb(part, moved.get(pid), shrink=0)
+            for k in range(3):
+                reach = sum(h * abs(a[k]) for h, a in zip(half, axes_))
+                lo[k], hi[k] = min(lo[k], centre[k] - reach), max(hi[k], centre[k] + reach)
+    return {"centre": [round((lo[k] + hi[k]) / 2, 1) for k in range(3)],
+            "radius": round(max(math.sqrt(sum((hi[k] - lo[k]) ** 2 for k in range(3))) / 2, 10), 1)}
+
+
 def fusion_script(spec, out_dir):
+    active = {p["id"] for p in _active(spec) if p["shape"] != "none"}
+    joints = [dict(j, parts=[pid for pid in j["parts"] if pid in active]) for j in spec.get("joints", [])]
+    joints = [j for j in joints if j["parts"]]
+    trimmed = dict(spec, joints=joints)
+    path = motion_path(trimmed) if joints else []
     data = {"inches": spec.get("units_shown") == "inch", "out": str(out_dir).replace("\\", "/"), "project": spec["id"],
             "parts": [{k: p[k] for k in ("id", "name", "group", "status", "shape", "size", "diameter", "inner_diameter",
                                           "top_diameter", "length", "axis", "at", "rotate", "holes", "colour") if k in p}
-                      for p in spec["parts"]]}
+                      for p in spec["parts"]],
+            "joints": joints, "motion": path, "view": _view_for(trimmed, path)}
     for part in data["parts"]:
         if part["status"] in STATUS_COLOUR:
             part["colour"] = STATUS_COLOUR[part["status"]]
@@ -895,11 +1285,29 @@ def build_in_fusion(spec):
     if out.is_dir():
         shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
-    printed = fusion_link.run_script(fusion_script(spec, out), timeout=600)
+    printed = fusion_link.run_script(fusion_script(spec, out), timeout=900)
     result = extract_json(printed)
+    result["gif"] = _gif(out)
     spec["fusion"] = {"at": time.time(), "document": result.get("document"), "made": result.get("made"),
-                      "failed": result.get("failed", [])}
+                      "failed": result.get("failed", []), "joints": result.get("joints", 0),
+                      "joint_failed": result.get("joint_failed", [])}
     return result
+
+
+def _gif(folder):
+    """The motion frames Fusion saved, as one looping animation (motion.gif). Returns its path or None."""
+    frames = sorted(Path(folder).glob("motion-*.png"))
+    if not frames:
+        return None
+    from PIL import Image
+    images = [Image.open(f).convert("RGB").resize((720, 540)) for f in frames]
+    palette = images[len(images) // 2].quantize(colors=200)
+    path = Path(folder) / "motion.gif"
+    images = [im.quantize(palette=palette, dither=Image.Dither.NONE) for im in images]
+    images[0].save(path, save_all=True, append_images=images[1:], duration=90, loop=0, optimize=True)
+    for f in frames:
+        f.unlink(missing_ok=True)
+    return path
 
 
 # ---------- The bench preview (three.js on the Jarvis page) ----------
@@ -1064,7 +1472,7 @@ def _html_escape(text):
 
 def _img(path, alt):
     data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
-    kind = "png" if str(path).lower().endswith(".png") else "jpeg"
+    kind = {".png": "png", ".gif": "gif"}.get(Path(path).suffix.lower(), "jpeg")
     return f'<img src="data:image/{kind};base64,{data}" alt="{_html_escape(alt)}">'
 
 
@@ -1096,7 +1504,21 @@ def write_packet(spec, out_dir, sheets):
     wiring = "".join(f"<tr><td>{e(w.get('from', ''))}</td><td>{e(w.get('to', ''))}</td><td>{e(w.get('what', ''))}</td></tr>"
                      for w in plan.get("wiring") or [] if isinstance(w, dict))
     problems = ([f"{x['a']} and {x['b']} occupy the same space ({x['depth_mm']} mm)" for x in c["clashes"]]
-                + [f"{x['name']} isn't touching anything" for x in c["floating"]])
+                + [f"{x['name']} isn't touching anything" for x in c["floating"]]
+                + [f"Moving {x['joint_name']}: {x['a']} runs into {x['b']} at {x['at']}{x['unit']}" for x in c["motion"]])
+    names = {p["id"]: p["name"] for p in spec["parts"]}
+
+    def travel(j):
+        unit = "mm" if j["type"] == "slider" else "°"
+        if "min" in j:
+            return f"{j['min']:g}{unit} to {j['max']:g}{unit}"
+        return "turns all the way round" if j["type"] == "revolute" else "free"
+    joint_rows = "".join(
+        f"<tr><td><b>{e(j['name'])}</b></td><td>{'turns' if j['type'] == 'revolute' else 'slides'}</td>"
+        f"<td>{e(travel(j))}</td><td>{e(', '.join(names.get(p, p) for p in j['parts']))}</td>"
+        f"<td>{e(names.get(j.get('on'), 'the frame'))}</td><td>{e(names.get(j.get('drive'), j.get('drive') or 'by hand / free'))}</td>"
+        f"<td>{e(j.get('notes', ''))}</td></tr>" for j in spec.get("joints", []))
+    motion_gif = out_dir / "motion.gif"
     power = c["power"]
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(spec['title'])} - build packet</title>
@@ -1120,6 +1542,7 @@ Cyan rows and parts are new, orange ones change.</div>
 {('<h2>Plan: ' + e(plan.get('goal', '')) + '</h2><p>' + e(plan.get('summary', '')) + '</p>') if plan else ''}
 {('<h3>What changes and why</h3><ul>' + changes + '</ul>') if changes else ''}
 <h2>The model</h2><div class="grid">{''.join(_img(p, n) for n, p in views if p.is_file()) or '<p>Build it in Fusion to get the pictures.</p>'}</div>
+{('<h2>How it moves</h2><p>Each of these is a joint in the Fusion model: drag the part, or right-click the joint and Animate. ' + ('Every joint is moved through its range in the animation, all at once.</p><div class="grid">' + _img(motion_gif, 'motion') + '</div>' if motion_gif.is_file() else '</p>') + '<table><tr><th>Joint</th><th></th><th>Travel from the pose shown</th><th>Moving parts</th><th>On</th><th>Driven by</th><th>Notes</th></tr>' + joint_rows + '</table>') if joint_rows else ''}
 <h2>Measurements</h2><p>Measure these on the real machine and tell Jarvis ("A is 24 and a half inches"); the model is rebuilt around them.</p>
 <table><tr><th></th><th>From where to where</th><th>Estimate</th><th>Measured</th><th>Why it matters</th></tr>{measure_rows}</table>
 <div class="grid">{''.join(_img(p, 'measuring photo') for p in sheets)}</div>
@@ -1171,8 +1594,10 @@ def packet(spec):
     for name in ("iso", "front", "right", "top"):
         if (fusion / f"{name}.png").is_file():
             shutil.copyfile(fusion / f"{name}.png", out / f"view-{name}.png")
-    for name in ("model.step", "model.f3d"):
-        if (fusion / name).is_file():
+    for name in ("model.step", "model.f3d", "motion.gif"):
+        if not (fusion / name).is_file():
+            (out / name).unlink(missing_ok=True)       # an old one would no longer match the model
+        else:
             shutil.copyfile(fusion / name, out / name)
     sheets = measuring_sheet(spec, out)
     write_parts_list(spec, out)
@@ -1201,6 +1626,10 @@ def _status_line(spec):
         bits.append(f"{len(c['clashes'])} clashes (" + "; ".join(f"{x['a']} / {x['b']}" for x in c["clashes"][:4]) + ")")
     if c["floating"]:
         bits.append(f"{len(c['floating'])} floating parts")
+    if c["joints"]:
+        bits.append(f"{c['joints']} joints" + (f", and moving them: " + "; ".join(
+            f"{x['a']} hits {x['b']} at {x['at']}{x['unit']} on {x['joint_name']}" for x in c["motion"][:4])
+            if c["motion"] else ", all moving clear"))
     if c["power"]["draw_w"]:
         bits.append(f"power {c['power']['draw_w']} W of {c['power']['supply_w']} W" if c["power"]["supply_w"]
                     else f"power {c['power']['draw_w']} W drawn, no supply with a known rating")
@@ -1215,7 +1644,16 @@ def _run(kind, job):
     with _lock:
         STATE.update(busy=kind, started=time.time(), error="")
 
+    def awake(on):
+        """Keep the PC from sleeping by itself while this thread works (a deliberate sleep still wins)."""
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 if on else 0x80000000)
+        except (AttributeError, OSError):
+            pass
+
     def go():
+        awake(True)
         try:
             spoken, note = job()
             _announce(spoken, note)
@@ -1227,6 +1665,7 @@ def _run(kind, job):
             _announce(f"The blueprint {kind} didn't finish, sir: {reason[:200]}",
                       f"[BLUEPRINT] {kind} failed: {reason[:600]}. Nothing was changed.")
         finally:
+            awake(False)
             with _lock:
                 STATE["busy"] = ""
             _work.release()
@@ -1241,13 +1680,17 @@ def _finish_round(spec, label, check_after=False):
     if fusion_link.available():
         try:
             result = build_in_fusion(spec)
-            fusion_note = f" Built in Fusion as a new design ({result.get('made')} bodies)."
-            if result.get("failed"):
-                fusion_note += f" {len(result['failed'])} parts couldn't be made: {'; '.join(result['failed'][:3])}."
             if check_after:
                 spec = _visual_check(spec)
                 result = build_in_fusion(spec)
-                fusion_note += " Then checked against the photos and rebuilt."
+            fusion_note = f" Built in Fusion as a new design ({result.get('made')} bodies"
+            fusion_note += f", {result['joints']} working joints)." if result.get("joints") else ")."
+            if check_after:
+                fusion_note += " Checked against the photos and rebuilt."
+            if result.get("failed"):
+                fusion_note += f" {len(result['failed'])} parts couldn't be made: {'; '.join(result['failed'][:3])}."
+            if result.get("joint_failed"):
+                fusion_note += f" {len(result['joint_failed'])} joints couldn't be made: {'; '.join(result['joint_failed'][:3])}."
             save(spec)
         except Exception as e:
             fusion_note = f" Fusion couldn't build it: {str(e)[:300]}."
@@ -1304,8 +1747,9 @@ def start(source, about=""):
                 f"[BLUEPRINT] Read the photos into a spec. {_status_line(spec)}{fusion_note}{shown} Packet: {folder_out}. "
                 f"The owner gives measurements with blueprint(action=measure, request='A is 24 in, B 610 mm').")
     _run("read", job)
-    return (f"Reading {len(images)} photo{'s' if len(images) != 1 else ''} into a blueprint. That takes a few minutes "
-            "(read, build in Fusion, check against the photos); I'll say when it's ready.")
+    how_long = "a few minutes" if len(images) <= 4 else "ten to twenty minutes with this many photos"
+    return (f"Reading {len(images)} photo{'s' if len(images) != 1 else ''} into a blueprint. That takes {how_long} "
+            "(read, build in Fusion with its joints, check against the photos); I'll say when it's ready.")
 
 
 def measure(text):
@@ -1366,7 +1810,7 @@ def upgrade(goal):
                 f"[BLUEPRINT] Designed the upgrade ({goal[:200]}). {(new['plan'] or {}).get('summary', '')[:600]} "
                 f"{_status_line(new)}{fusion_note}{shown} Packet: {folder_out}.")
     _run("upgrade", job)
-    return "Designing the upgrade. It takes five to ten minutes; I'll say when the plan and model are ready."
+    return "Designing the upgrade. It takes ten to twenty minutes; I'll say when the plan and model are ready."
 
 
 def rebuild():

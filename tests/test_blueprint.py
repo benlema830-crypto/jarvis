@@ -187,6 +187,100 @@ class OutputTests(Base):
         self.assertIn("Mount it", page)
 
 
+ARM = {
+    "title": "Arm Rig", "units_shown": "mm",
+    "parts": [
+        {"id": "base", "name": "Base", "group": "Frame", "shape": "box", "size": [300, 300, 10], "at": [0, 0, 50]},
+        {"id": "post", "name": "Post", "group": "Frame", "shape": "box", "size": [20, 20, 200], "at": [0, 0, 155]},
+        {"id": "wheel", "name": "Wheel", "group": "Drive", "shape": "cylinder", "diameter": 100, "length": 20,
+         "axis": "x", "at": [-170, 0, 50]},
+        {"id": "arm", "name": "Arm", "group": "Arm", "shape": "box", "size": [10, 300, 10], "at": [15, -150, 250]},
+        {"id": "jaw", "name": "Jaw", "group": "Arm", "shape": "box", "size": [10, 10, 30], "at": [15, -295, 230]},
+    ],
+    "joints": [
+        {"id": "wheel", "name": "Wheel", "parts": ["wheel"], "on": "base", "origin": [-170, 0, 50], "axis": "x"},
+        {"id": "arm", "name": "Arm pivot", "parts": ["arm", "ghost"], "on": "post", "origin": [15, 0, 250],
+         "axis": [2, 0, 0], "min": 10, "max": 120},
+        {"id": "jaw", "name": "Jaw", "parts": ["jaw", "arm"], "on": "arm", "origin": [15, -295, 245], "axis": "x",
+         "min": -30, "max": 30},
+        {"id": "loop", "name": "Loop", "parts": ["post"], "on": "jaw", "axis": "z"},
+        {"id": "empty", "name": "Nothing", "parts": ["ghost"], "axis": "x"},
+        {"id": "flat", "name": "No axis", "parts": ["base"], "axis": [0, 0, 0]},
+    ],
+}
+
+
+class MotionTests(Base):
+    def test_joints_are_tidied_into_something_buildable(self):
+        spec = bp.tidy(copy.deepcopy(ARM), keep={"id": "arm"})
+        joints = {j["id"]: j for j in spec["joints"]}
+        self.assertEqual(sorted(joints), ["arm", "jaw", "loop", "wheel"])
+        self.assertEqual(joints["arm"]["parts"], ["arm"])               # the missing part is dropped
+        self.assertEqual(joints["arm"]["axis"], [1.0, 0.0, 0.0])        # normalised
+        self.assertEqual((joints["arm"]["min"], joints["arm"]["max"]), (0.0, 120.0))   # the pose shown is in range
+        self.assertEqual(joints["jaw"]["parts"], ["jaw"])               # a part is on one joint only
+        self.assertEqual(bp.joint_parent(spec, joints["jaw"]), "arm")
+        self.assertNotIn("min", joints["wheel"])                        # a wheel turns all the way round
+        self.assertEqual(joints["loop"].get("on"), "jaw")
+        self.assertEqual(bp.joint_parent(spec, joints["loop"]), "jaw")
+        self.assertNotIn("on", joints["arm"])        # arm on post, post on jaw, jaw on arm: the loop is broken
+        self.assertIsNone(bp.joint_parent(spec, joints["arm"]))
+
+    def test_a_joint_rides_on_its_parent(self):
+        raw = copy.deepcopy(ARM)
+        raw["joints"] = raw["joints"][:3]
+        spec = bp.tidy(raw, keep={"id": "arm"})
+        moved = bp.pose(spec, {"arm": -90, "jaw": 0})
+        r, t = moved["jaw"]
+        jaw = [sum(r[i][k] * [15, -295, 230][k] for k in range(3)) + t[i] for i in range(3)]
+        self.assertAlmostEqual(jaw[1], -20, places=3)         # swung straight up about the pivot at y 0, z 250
+        self.assertAlmostEqual(jaw[2], 545, places=3)
+        self.assertNotIn("base", moved)
+
+    def test_a_swing_into_the_frame_is_found_and_a_spinning_wheel_is_not(self):
+        raw = copy.deepcopy(ARM)
+        raw["joints"] = raw["joints"][:2]
+        raw["joints"][1]["parts"] = ["arm", "jaw"]
+        spec = bp.tidy(raw, keep={"id": "arm"})
+        hits = bp.motion_checks(spec)
+        self.assertTrue(hits)
+        self.assertEqual({h["joint"] for h in hits}, {"arm"})
+        self.assertIn("Base", {h["b"] for h in hits})
+        self.assertGreater(hits[0]["at"], 30)            # pointing down far enough to reach the base
+        clear = copy.deepcopy(raw)
+        clear["joints"][1]["max"] = 20
+        self.assertEqual(bp.motion_checks(bp.tidy(clear, keep={"id": "arm"})), [])
+        self.assertIn("joints", bp._status_line(spec))
+
+    def test_the_fusion_script_and_packet_carry_the_motion(self):
+        spec = bp.tidy(copy.deepcopy(ARM), keep={"id": "arm"})
+        script = bp.fusion_script(spec, "C:/out")
+        compile(script, "fusion", "exec")
+        import base64
+        data = json.loads(base64.b64decode(script.split('b64decode("')[1].split('"')[0]))
+        self.assertEqual(len(data["joints"]), 4)
+        self.assertEqual(len(data["motion"]), bp.MOTION_FRAMES)
+        arm = [frame["arm"] for frame in data["motion"]]
+        self.assertEqual((min(arm), max(arm)), (0.0, 120.0))
+        self.assertEqual(max(frame["wheel"] for frame in data["motion"]), 352.5)
+        self.assertGreater(data["view"]["radius"], 150)
+        folder = bp.STORE / "arm" / "photos"
+        folder.mkdir(parents=True, exist_ok=True)
+        bp.save(spec)
+        from PIL import Image
+        fusion = bp.STORE / "arm" / "fusion"
+        fusion.mkdir(parents=True, exist_ok=True)
+        for n in range(3):
+            Image.new("RGB", (90, 60), (n * 80, 10, 10)).save(fusion / f"motion-{n:03d}.png")
+        self.assertTrue(bp._gif(fusion).is_file())
+        self.assertFalse(list(fusion.glob("motion-*.png")))
+        page = (bp.packet(spec) / "build-packet.html").read_text(encoding="utf-8")
+        self.assertIn("How it moves", page)
+        self.assertIn("data:image/gif", page)
+        self.assertIn("0° to 120°", page)
+        self.assertIn("turns all the way round", page)
+
+
 class FlowTests(Base):
     def setUp(self):
         super().setUp()
