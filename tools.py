@@ -99,6 +99,23 @@ def home_status(device: str = "") -> str:
     return home_assistant.status(device)
 
 
+@beta_tool(eager_input_streaming=True)
+def screen_sync(action: str) -> str:
+    """Screen sync for the monitor backlights: the LED strips behind both monitors follow the colours on the
+    screens. Use it for "turn on screen sync", "make the monitor lights follow the screen", "stop the lights
+    following the screen" or "is screen sync on?". To switch the monitor lights on or off, dim them or set a
+    fixed colour, use home_control with "monitor lights" instead; a fixed colour only holds while screen sync is off.
+
+    Args:
+        action: on, off or status.
+
+    The controllers are read back afterwards. Say only what the result reports: "Confirmed" means it happened,
+    NOT CONFIRMED means tell the user it doesn't appear to have worked.
+    """
+    import screen_sync as sync
+    return sync.control(action)
+
+
 # ---------- Apps, files, clipboard, screen ----------
 
 @beta_tool(eager_input_streaming=True)
@@ -1857,7 +1874,7 @@ def response_style(settings: str = '{}') -> str:
     return json.dumps(response_settings.update(changes) if changes else response_settings.read())
 
 
-TOOLS = [open_website, show_search_results, home_control, home_status, open_app, list_apps, find_files, open_path, read_clipboard,
+TOOLS = [open_website, show_search_results, home_control, home_status, screen_sync, open_app, list_apps, find_files, open_path, read_clipboard,
          look_at_screen, point_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, meeting_prep, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, search_history, held_updates, correct_memory, update_memory, forget,
          performance_report, set_reminder, list_reminders, cancel_reminder,

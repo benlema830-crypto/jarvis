@@ -68,7 +68,7 @@ PROVEN_BY_RETURN = frozenset({
     "remember", "update_memory", "correct_memory", "forget", "set_reminder", "cancel_reminder", "add_task",
     "complete_task", "create_knowledge_note", "edit_file", "write_file"})
 # A failure of one of these is always worth telling the owner, even if the brain's reply glosses over it.
-MUST_REPORT_FAILURE = frozenset({"home_control", "send_telegram", "send_email", "set_reminder", "add_task", "remember",
+MUST_REPORT_FAILURE = frozenset({"home_control", "screen_sync", "send_telegram", "send_email", "set_reminder", "add_task", "remember",
                                  "queue_away_job", "send_agent_task", "terminal_task"})
 CONFIRMED, SENT, WAITING, UNKNOWN, FAILED = "confirmed", "sent", "waiting", "unknown", "failed"
 _ADMITS = re.compile(r"\b(?:not|never|no luck|unable|fail\w*|unconfirmed|problem|error|refus\w*|declin\w*|"
@@ -130,6 +130,10 @@ def classify(name, ok, content):
         code = re.match(r"Exit code (-?\d+)", text)
         return CONFIRMED if code and code.group(1) == "0" else FAILED
     if name == "home_control":
+        return CONFIRMED if ("Confirmed:" in text or "was already" in text) else SENT
+    if name == "screen_sync":
+        if text.startswith("Status:"):
+            return None  # a look-up: nothing was done
         return CONFIRMED if ("Confirmed:" in text or "was already" in text) else SENT
     if name in PROVEN_BY_RETURN or "checked on disk" in text:
         return CONFIRMED
