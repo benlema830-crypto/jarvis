@@ -153,11 +153,21 @@ def _own_lineage():
     return pids
 
 
+KEPT_SCRIPTS = ("rgb_flow.py",)   # the keyboard and PC lights: Jarvis starts it again after "lights on" (pc_lights.py),
+                                  # so it is his child, but it must outlive him or a restart freezes the lights
+
+
 def _is_worker(proc):
     try:
-        return proc.name().casefold() in WORKERS
+        if proc.name().casefold() not in WORKERS:
+            return False
     except (psutil.Error, OSError):
         return False
+    try:
+        arguments = list(proc.cmdline())[1:]
+    except (psutil.Error, OSError, TypeError):
+        arguments = []   # can't be read: an ordinary worker
+    return not any(Path(str(arg)).name.casefold() in KEPT_SCRIPTS for arg in arguments)
 
 
 def _name(proc):

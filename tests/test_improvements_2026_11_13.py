@@ -297,6 +297,21 @@ class NearVoiceMatchTest(unittest.TestCase):
         self.assertEqual(source.listen(timeout=0), ("Hey Travis, what time is it", True))
 
 
+class RestartKeepsTheLightsTest(unittest.TestCase):
+    def test_the_colour_flow_is_not_one_of_jarvis_own_workers(self):
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        import restart_jarvis
+
+        def process(*cmdline):
+            return mock.Mock(name=mock.Mock(return_value="pythonw.exe"), cmdline=mock.Mock(return_value=list(cmdline)))
+        flow, worker = process("pythonw.exe", "C:/Users/x/Jarvis/scripts/rgb_flow.py"), process("pythonw.exe", "-c", "work")
+        flow.name.return_value = worker.name.return_value = "pythonw.exe"
+        self.assertFalse(restart_jarvis._is_worker(flow))
+        self.assertTrue(restart_jarvis._is_worker(worker))
+
+
 class GoodNightTest(unittest.TestCase):
     def test_good_night_no_longer_ends_the_program(self):
         self.assertNotIn("good night", jarvis.EXIT_PHRASES)
