@@ -87,6 +87,20 @@ def is_stop(text: str) -> bool:
     return said in STOP_PHRASES or any(said == p or said.startswith(p + " ") for p in STOP_STARTS) or said == "stopped talking"
 
 
+FILLERS = {"um", "umm", "uh", "uhh", "er", "erm", "hmm", "hm", "mm", "mhm", "ah", "oh", "so", "well", "wait",
+           "hold on", "hang on", "one sec", "one second", "actually", "hey", "and", "but", "like"}
+
+
+def is_filler(text: str) -> bool:
+    """Nothing to act on yet: "Um...", "wait", "hold on". Said over Jarvis it means stop and listen; said into
+    silence it means nothing. Not "yes", "no" or "okay", which answer him."""
+    said = " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
+    if not said:
+        return True
+    words = said.split()
+    return said in FILLERS or (len(words) <= 3 and all(w in FILLERS for w in words))
+
+
 def interruption_command(text, is_owner, mode, approval_pending=False):
     command = split_wake_word(text)
     if command is not None:
@@ -1067,6 +1081,10 @@ def listen_loop(ears, voice: Voice, turns: Turns):
                     voice.chime()
                 turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
                 continue
+            if is_filler(command) and not approvals.waiting():  # "Um..." is the start of a thought, not a request
+                voice_health.recognition("filler_ignored")
+                turns.followup_until = time.time() + conversation_settings.read()['followup_seconds']
+                continue
             turns.idle.clear()
             voice_health.recognition("accepted")
             runtime_metrics.begin_turn(getattr(ears, 'last_utterance_end', None), source='voice')
@@ -1258,13 +1276,15 @@ def main():
             return
         voice_health.recognition("accepted")
         print(f"(interrupted: {text})", flush=True)
-        if command == "":
-            attention()  # just "Jarvis" - stop and listen
+        if command == "" or (is_filler(command) and not pending):
+            attention()  # just "Jarvis", "wait" or "um": stop talking and listen
         elif is_stop(command) and not pending:
             stop()
         else:
             stop(cancel_tasks=False)
-            hud.commands.put(command)  # "Jarvis, actually what about tomorrow?" - answer that next
+            # "Jarvis, actually what about tomorrow?" - answer that next. Without his name it may have been said
+            # to someone else in the room, so the brain is told (heard_as).
+            hud.commands.put(heard_as(command, text, False, preferences.listening_mode()))
 
     hud.on_stop = stop
     hud.on_voice = tools.set_voice_engine

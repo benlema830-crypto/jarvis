@@ -245,6 +245,17 @@ class WeatherWordsTest(unittest.TestCase):
         self.assertIn("10% chance of rain", said)
 
 
+class FillerTest(unittest.TestCase):
+    def test_the_start_of_a_thought_is_not_a_request(self):
+        for said in ("Um...", "uh", "Hmm.", "Wait.", "hold on", "So, um...", "Actually...", "wait wait wait", ""):
+            self.assertTrue(jarvis.is_filler(said), said)
+
+    def test_answers_and_requests_are_not_fillers(self):
+        for said in ("Yes.", "No", "Okay", "Yeah", "Wait, what did you say?", "So what's next", "Southwick",
+                     "hold on to that file", "pull it apart", "actually do the other one"):
+            self.assertFalse(jarvis.is_filler(said), said)
+
+
 class GoodNightTest(unittest.TestCase):
     def test_good_night_no_longer_ends_the_program(self):
         self.assertNotIn("good night", jarvis.EXIT_PHRASES)
@@ -294,6 +305,18 @@ class HomeTilesTest(unittest.TestCase):
         self.assertEqual([d["name"] for d in home_assistant.tiles(everything)],
                          ["Desk lights", "Bedroom Fan", "Air purifier"])
         self.assertEqual([d["domain"] for d in home_assistant.tiles(everything)], ["light", "fan", "switch"])
+
+    def test_numbered_bulbs_of_an_unreachable_group_show_once(self):
+        import home_assistant
+
+        def light(name, state):
+            return {"id": "light." + name.lower().replace(" ", "_"), "domain": "light", "name": name, "state": state,
+                    "attributes": {}}
+        everything = [light("Ceiling Light", "unavailable"), light("Ceiling Light 1", "unavailable"),
+                      light("Ceiling Light 2", "unavailable"), light("Lamp 2", "on")]
+        self.assertEqual([d["name"] for d in home_assistant.tiles(everything)], ["Ceiling Light", "Lamp 2"])
+        everything[1]["state"] = "on"   # a bulb that differs from the group is worth its own tile
+        self.assertIn("Ceiling Light 1", [d["name"] for d in home_assistant.tiles(everything)])
 
 
 if __name__ == "__main__":

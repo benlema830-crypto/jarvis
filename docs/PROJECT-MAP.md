@@ -41,7 +41,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Area | Files |
 | --- | --- |
 | Main loop, prompt, turn handling | jarvis.py |
-| Conversation brains | claude_code_brain.py (Claude on the owner's Claude plan, the default), codex_brain.py (Codex on the ChatGPT plan), model_provider.py (which one talks). There is no paid API path: the API, local chat and router code was removed on 2026-11-10 |
+| Conversation brains | claude_code_brain.py (Claude on the owner's Claude plan, the default), codex_brain.py (Codex on the ChatGPT plan), local_brain.py (a local model on this PC through Jarvis's own Ollama, added 2026-11-11: free and offline, the everyday tools only, much weaker), model_provider.py (which one talks). The only paid path is openai_api.py, below |
 | Tools the AI can call | tools.py (registry), plus tasks.py, dictation.py, direct_files.py, app_audio.py, window_control.py, desktop.py |
 | Voice and hearing | voice.py, voicestudio_voice.py, qwen_voice.py, qwen_fast_worker.py, ears.py, voice_health.py, enroll_voice.py |
 | Knowledge vault | knowledge.py, knowledge_events.py, semantic_search.py (local embeddings) |
@@ -53,6 +53,8 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
 | Smart home | home_assistant.py (HA_URL + HA_TOKEN in .env; no locks/alarms/covers), tools.py home_control / home_status |
+| Desk lights and screens | pc_lights.py (`pc_lights` tool: the keyboard, case and graphics card lights through OpenRGB, the monitor backlights through Home Assistant, and the screens' power; off for sleeping while work carries on), scripts/rgb_flow.py (the colour flow it stops and starts), screen_sync.py (`screen_sync`: the backlights following the screens) |
+| Sleep and stale requests | suspend_watch.py (notices the PC was asleep; a turn that slept five minutes or more is not spoken and its actions are refused, tools.stale_request) |
 | Proactive | reminders.py, nudges.py, activity.py, daily_review.py (Briefs/ in the vault, once a day on Codex), heartbeat.py (half-hourly plain checks and the owner's checklist), attention.py (say it now or hold it; five unprompted updates a day), presence_greeting.py, morning_wakeup.py |
 | Research | research.py (start_research: background Codex web research -> Research/ in the vault) |
 | Watching videos | video_watch.py (`watch_video` tool: timed still frames plus captions of a YouTube link or a video file, shown to the brain as pictures), vendor/claude-video (the skill's scripts, unchanged) |
@@ -438,3 +440,32 @@ turned about the wrong axis). The script then plays every joint through its rang
 whole sweep, and `_gif` makes `motion.gif` for the packet. `motion_checks()` sweeps each joint on its own and finds
 the first place a moving part's box runs into another (separating-axis test; a wheel spinning on its own axle is
 skipped).
+
+## Fixes from reading real conversations (2026-11-13)
+
+Three days of transcripts (11-11 to 11-13) were read for what went wrong, and each fix has a test in
+`tests/test_improvements_2026_11_13.py`.
+
+- **A request that slept is dropped.** "Pause everything, I'm going to bed" was still waiting on the local model
+  when the PC slept. Six hours later the turn finished, spoke to a sleeping room and put the PC back to sleep five
+  minutes before the alarm. `suspend_watch` sees the clock jump; `Brain.ask` then says nothing and `run_tool`
+  refuses every tool except look-ups. A Telegram conversation still gets its late answer.
+- **Sleep tells the truth.** `sleep_computer` lists the work it will pause (`tools.running_work`).
+- **Lights out without sleeping** is `pc_lights`.
+- **Side conversations.** In continuous listening, words with no "Jarvis" in them reach the brain ending in
+  `[no name said]` (`jarvis.Overheard`, `heard_as`). The prompt lets it answer `(quiet)` when they were plainly for
+  someone else, and the main loop then says nothing. Tried on thirteen real lines: Claude Opus and Codex Terra 13
+  right each, the local model 11 (it went quiet on "pull it apart"), so the local brain is not given the note.
+- **Fillers.** "Um...", "wait" or "hold on" said over him stops him and listens; said into silence it is ignored
+  (`jarvis.is_filler`). They used to be sent to the brain as requests.
+- **"Good night" and "go to sleep" are speech, not exit.** They used to end the program, and with it the alarm.
+  "Shut down", "power down", "exit", "quit" and "goodbye" still do.
+- **Advice** has its own paragraph in the prompt: the pick first, the reasons that decide it, built on what he
+  knows about the owner, in a few spoken sentences.
+- **Weather** gives feels-like, wind, snow or rain, and a plain word for cold ("below freezing"), after a morning
+  briefing suggested a light jacket at 21 degrees.
+- **Sentences.** No split after "Mr." or an initial; text either side of a tool call is separated on every brain,
+  which also means the sentence before a tool is spoken before the tool runs.
+- **The page.** Home tiles show a light group once, without WLED's option switches or the bulbs of an unreachable
+  group (`home_assistant.tiles`); the workshop's start card sits in the middle of the stage.
+- **Logs.** A calendar outage is one line; creator watch uses the uploads playlist when the channel feed is 404.

@@ -226,7 +226,15 @@ def tiles(everything=None):
             return False
         # ...or the plain plug behind a fan or lamp that already has a tile under the same name.
         return name in proper or any(name.startswith(light + ' ') for light in lights)
-    return [d for d in _without_group_members(everything) if not option(d)]
+    by_name = {d['name'].lower(): d for d in everything}
+
+    def numbered_copy(d):
+        # "Ceiling Light 2" beside "Ceiling Light" in the same state: a group that is unreachable no longer
+        # lists its bulbs, so they can't be told apart as members and each got its own "unknown" tile.
+        base, _, number = d['name'].lower().rpartition(' ')
+        whole = by_name.get(base)
+        return bool(number.isdigit() and whole and whole['domain'] == d['domain'] and whole['state'] == d['state'])
+    return [d for d in _without_group_members(everything) if not option(d) and not numbered_copy(d)]
 
 
 def _service(device, action, value):

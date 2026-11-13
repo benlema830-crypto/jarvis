@@ -115,7 +115,9 @@ Time: {now.strftime('%A %I:%M %p').replace(' 0', ' ')}
 {where}
 Tone for this one: {style}
 Length: {length}
-Your last greetings (don't reuse their wording or opening):
+Your last greetings (don't reuse their wording or opening, and don't bring up again an item one of them already
+mentioned unless something about it has changed since: three days of "the Giant's save still needs checking" is
+nagging, not help):
 {said}"""
     if briefing:
         prompt += f"\n\nWhat's going on:\n{briefing}"

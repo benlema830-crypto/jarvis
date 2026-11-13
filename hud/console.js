@@ -170,13 +170,13 @@
       box.replaceChildren();
       if (data.error) { box.append(make('p', data.error, 'rail-note')); return; }
       // Whatever is on comes first, so a full house never hides the thing that's running.
-      const live = d => ['on', 'playing'].includes(d.state) ? 0 : 1;
+      const live = d => ['on', 'playing'].includes(d.state) ? 0 : d.state === 'unavailable' ? 2 : 1;
       const shown = (data.devices || []).filter(d => ['light', 'switch', 'fan', 'media_player', 'climate'].includes(d.domain))
         .sort((a, b) => live(a) - live(b)).slice(0, 12);
       for (const d of shown) {
         const known = ['on', 'off', 'playing', 'paused', 'idle', 'standby', 'heat', 'cool'].includes(d.state);
         const tile = make('button', null, 'home-tile' + (['on', 'playing'].includes(d.state) ? ' on' : '') + (known ? '' : ' unknown')); tile.type = 'button';
-        tile.append(make('b', known ? d.state : 'unknown'), make('span', d.name));
+        tile.append(make('b', known ? d.state : d.state === 'unavailable' ? 'offline' : 'unknown'), make('span', d.name));
         tile.title = 'Read from Home Assistant ' + ago(Date.now() / 1000 - (data.read_at || 0)) + ' ago. Click to prepare a command.';
         tile.onclick = () => J.prepare(`Turn ${d.state === 'on' || d.state === 'playing' ? 'off' : 'on'} the ${d.name}`);
         box.append(tile);
