@@ -254,7 +254,7 @@
   const model = dialog('modelDialog', "JARVIS's brain", 'Pick the conversation model. Claude runs on your Claude plan and Codex on your ChatGPT plan; neither uses an API key or credits. Changes are validated with a short test and apply after the current turn. You can also say "Jarvis, switch your brain to …".', true);
   const modelStatus = make('p', '', 'muted'), provider = make('select'), choice = make('select'), apply = make('button', 'Validate and apply', 'primary');
   modelStatus.setAttribute('role', 'status'); apply.type = 'button';
-  for (const [id, label] of [['claude_code', 'Claude / your Claude plan'], ['codex', 'Codex / your ChatGPT plan']]) { const o = make('option', label); o.value = id; provider.append(o); }
+  for (const [id, label] of [['claude_code', 'Claude / your Claude plan'], ['codex', 'Codex / your ChatGPT plan'], ['local', 'Local / uncensored, on this PC']]) { const o = make('option', label); o.value = id; provider.append(o); }
   const modelForm = make('div', null, 'form'); modelForm.append(make('label', 'Provider'), provider, make('label', 'Model'), choice, apply, modelStatus);
   model.body.append(modelForm);
   let modelData = null, modelBusy = false;
@@ -276,7 +276,7 @@
     modelData = value;
     if (first) { provider.value = value.active.provider; choices(); choice.value = value.active.model; } else choices();
     const pending = value.pending ? ` Pending: ${value.pending.model}${value.validating ? ' (validating…)' : ' (after this turn)'}.` : '';
-    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code. If the plan limit is reached, Jarvis says so and stops; he never falls back to API credits.' : ' Uses your ChatGPT plan through Codex. If the plan limit is reached, Jarvis says so and stops.');
+    modelStatus.textContent = `Active: ${value.active.provider} / ${value.active.model}.${pending} ${value.error || ''}` + (provider.value === 'claude_code' ? ' Uses your Claude plan through Claude Code. If the plan limit is reached, Jarvis says so and stops; he never falls back to API credits.' : provider.value === 'local' ? ' Runs on this PC through Ollama: free, offline and uncensored, but slower and weaker, with no web search or agents.' : ' Uses your ChatGPT plan through Codex. If the plan limit is reached, Jarvis says so and stops.');
     el('modelName').textContent = value.active.model;
   }
   async function refreshModel(first) {

@@ -1394,7 +1394,8 @@ def workshop(action: str, request: str = "", picture: str = ""):
             minute), show_model or show_render (which of the two is on screen), undo (take back the last change),
             open (open the workshop: the empty bench, or a saved model named in `request`), clear (an empty
             bench), close, status (what is on the bench and its parts, for answering questions about them),
-            cancel (end a build that is running).
+            cancel (end a build that is running),
+            model (choose the workshop engine; `request` is "qwen" for local Qwen3.5 or "fable" for Fable 5.2).
         request: What to build or change, or the saved model to open.
         picture: "bench" when the user put, dropped or pasted a picture on the workshop bench; "screen" to
             build what is on their screen right now ("build this", "build what I'm looking at", "the one on the
@@ -1405,6 +1406,8 @@ def workshop(action: str, request: str = "", picture: str = ""):
     """
     import workshop as bench
     action = action.strip().lower().replace(" ", "_")
+    if action == "model":
+        return bench.select_model(request)
     if action == "build":
         return bench.build(request, picture)
     if action in ("edit", "change"):
@@ -1435,7 +1438,7 @@ def workshop(action: str, request: str = "", picture: str = ""):
         return bench.describe()
     return ("Unknown workshop action. Use build, edit, detail, explode, assemble, focus, move, measure, cut, "
             "variants, choose, export, video, render, show_model, show_render, undo, "
-            "open, clear, close, status or cancel.")
+            "open, clear, close, status, model or cancel.")
 
 
 @beta_tool(eager_input_streaming=True)
@@ -1495,7 +1498,6 @@ def blueprint(action: str, request: str = "", photos: str = ""):
         found = bp.projects()
         return "; ".join(f"{p['title']} ({datetime.datetime.fromtimestamp(p['updated']):%b %d})" for p in found) or "No blueprint projects yet."
     return "Unknown blueprint action. Use new, measure, correct, upgrade, check, rebuild, undo, status, open or list."
-
 
 
 # ---------- Tasks, Telegram, model ----------
@@ -1563,9 +1565,10 @@ def send_telegram(text: str = "", file: str = "") -> str:
 @beta_tool(eager_input_streaming=True)
 def switch_model(model: str) -> str:
     """Switch your conversation model ("brain") when the user asks, e.g. "switch your brain to Fable",
-    "go back to Opus" or "use Codex". The choices are Claude models on the user's Claude plan (Opus, Fable,
-    Sonnet, Haiku) and Codex models on their ChatGPT plan; neither spends API credits. Fable 5.2 is the most
-    capable and uses the plan's limits fastest. Validated with a short test and applied after this turn; tell the user that.
+    "go back to Opus", "use Codex" or "go local". The choices are Claude models on the user's Claude plan (Opus,
+    Fable, Sonnet, Haiku), Codex models on their ChatGPT plan, and the local uncensored model on this PC (free,
+    offline, weaker, fewer tools); none spends API credits. Fable 5.2 is the most capable and uses the plan's
+    limits fastest. Validated with a short test and applied after this turn; tell the user that.
 
     Args:
         model: The model name as the user said it; matched against the available models.
@@ -1578,6 +1581,15 @@ def switch_model(model: str) -> str:
     hint = ["codex"] if re.search(r"\b(codex|gpt|chatgpt|openai)\b", said) else ["claude_code"] if "claude" in said else []
     rank = {p: i for i, p in enumerate(dict.fromkeys([*hint, provider, *model_provider.PROVIDERS]))}
     flat = sorted(((p, m) for p, ms in snapshot["models"].items() for m in ms), key=lambda pm: rank.get(pm[0], 99))
+    if re.search(r"\b(local|offline|uncensored|unfiltered|ollama|abliterated)\b", said):
+        local = snapshot["models"].get("local") or []  # listed with the uncensored default first
+        if not local:
+            return "No local model is available: the local model service isn't running or has no model installed."
+        try:
+            model_provider.SELECTION.request({"provider": "local", "model": local[0]})
+        except ValueError as error:
+            return str(error)
+        return f"Switching to the local model {local[0]} once this turn finishes, after a quick validation."
     said = re.sub(r"\b(on|via|with|using|my|the|claude code|subscription|plan|brain|model)\b", " ", said)
     want = "-".join(said.split())
     names = [m.lower() for _, m in flat]

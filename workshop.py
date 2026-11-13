@@ -1,7 +1,7 @@
 """The workshop: Jarvis builds a thing in 3D in front of the owner, and changes it by voice.
 
-"Build yourself a body", a sketch, a product photo or a floor plan goes to Claude Fable 5.2 (the owner's Claude
-plan through Claude Code, never API credits), which writes the scene as three.js code in named steps. The
+"Build yourself a body", a sketch, a product photo or a floor plan goes to Fable 5.2 (the owner's Claude
+plan through Claude Code) or local Qwen3.5, which writes the scene as three.js code in named steps. The
 Jarvis page runs each step as it arrives, so the object comes together piece by piece (hud/workshop.js; the
 code runs in a sandboxed frame that can't reach the rest of the page or Jarvis). Each part carries a name, a
 one-line description and where it goes when the model is pulled apart, so "pull it apart" shows a labelled
@@ -12,7 +12,8 @@ steps in return. "Render it" turns a picture of the 3D view into a realistic ima
 generation on the owner's ChatGPT plan (about a minute; never the OpenAI API), only when asked.
 
 Scenes are kept in data/workshop/<id>/ (script, earlier versions for undo, the picture, renders).
-preferences "workshop": {"model": "fable", "effort": "low", "edit_effort": "low"} changes the model. Measured
+The workshop selector or workshop(action="model", request="qwen" or "fable") saves the engine choice in
+preferences "workshop": {"model": "fable", "effort": "low", "edit_effort": "low"}. Measured
 2026-11-11 on a robot body: low effort 93 s (45 s of it thinking), medium 122 s, with no visible gain from medium.
 """
 import asyncio
@@ -45,6 +46,13 @@ SCOUT_WAIT = 150        # seconds a finished build waits for the photo scout bef
 EXPORT_WAIT = 25
 VIDEO_SECONDS = 6
 OUTBOX = Path.home() / "Documents" / "Jarvis Workshop"   # exported models and videos, where the owner can find them
+MODELS = {"fable": "Claude Fable 5.2", "qwen": "Qwen3.5 (local)"}
+QWEN_MODEL = "huihui_ai/qwen3.5-abliterated:9b"
+
+
+def model_id(choice):
+    import agent_models
+    return QWEN_MODEL if choice == "qwen" else agent_models.CLAUDE[choice]
 
 FORMAT = """TITLE: <a name for the thing, two to four words>
 === SETUP
@@ -189,10 +197,27 @@ def settings():
     import agent_models
     model = str(value.get("model", "fable")).lower()
     pick = lambda key, default: value[key] if value.get(key) in agent_models.EFFORTS else default
-    return {"model": model if model in agent_models.CLAUDE else "fable",
+    return {"model": model if model in MODELS else "fable",
             "effort": pick("effort", "low"), "edit_effort": pick("edit_effort", "low"),
             "check": value.get("check", True) is not False,            # compare with photos and improve after a build
             "references": value.get("references", True) is not False}  # look real things up on the web first
+
+
+def select_model(model):
+    choice = str(model).strip().lower()
+    choice = {"local": "qwen", "qwen3.5": "qwen", QWEN_MODEL: "qwen", "fable 5.2": "fable"}.get(choice, choice)
+    if choice not in MODELS:
+        raise ValueError("Choose Fable 5.2 or Qwen3.5 for the workshop.")
+    # Hold the job lock through saving, so a build cannot start between the check and the write.
+    if not _work.acquire(blocking=False):
+        raise ValueError("Wait for the workshop job to finish before changing its model.")
+    try:
+        value = preferences.read().get("workshop")
+        preferences.update(workshop={**(value if isinstance(value, dict) else {}), "model": choice})
+        _emit("settings", model=choice)
+    finally:
+        _work.release()
+    return f"The workshop will use {MODELS[choice]} for its next build or change."
 
 
 def _slug(text):
@@ -525,10 +550,55 @@ async def _stream(model, effort, system, prompt, image, on_thinking, on_text, ca
 
 def generate(model, effort, system, prompt, image=None, on_thinking=lambda t: None, on_text=lambda t: None,
              cancel=None):
-    """One answer from the model, streamed. Returns the usage Claude Code reported. Replaced in tests."""
+    """One streamed answer from Claude Code or the installed local Qwen. Replaced in flow tests."""
+    if model == QWEN_MODEL:
+        return _generate_local(model, system, prompt, image, on_thinking, on_text, cancel or threading.Event())
     return asyncio.run(asyncio.wait_for(
         _stream(model, effort, system, prompt, image, on_thinking, on_text, cancel or threading.Event()),
         BUILD_SECONDS))
+
+
+def _generate_local(model, system, prompt, image, on_thinking, on_text, cancel):
+    import local_brain
+    from types import SimpleNamespace
+    system += """\n\nJavaScript correctness checklist:
+Geometry is not an Object3D. Always create a Mesh before setting position, rotation, scale or adding children.
+Correct: const mesh = new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.1), material);
+mesh.position.y=.05; api.part('Body','The casing',mesh,[0,.2,0]);
+api.print returns a Texture, not geometry. Its width and height are pixels, e.g. 512,256.
+Use that texture as new THREE.MeshStandardMaterial({map:texture}) on a PlaneGeometry or other mesh.
+Every step must work with SETUP alone; never refer to variables from other steps.
+For an edit, return the actual changed SETUP or STEP code, not the original unchanged script.
+Check these rules before returning your script."""
+    pictures = [image] if isinstance(image, (bytes, bytearray)) else list(image or [])
+    user = {"role": "user", "content": prompt}
+    if pictures:
+        user["images"] = [base64.standard_b64encode(one).decode() for one in pictures]
+    deadline = time.monotonic() + BUILD_SECONDS
+    stopped = SimpleNamespace(is_set=lambda: cancel.is_set() or time.monotonic() >= deadline)
+    usage, complete = {}, False
+    for event in local_brain.chat({"model": model, "messages": [{"role": "system", "content": system}, user],
+                                  "think": True, "keep_alive": local_brain.KEEP_ALIVE,
+                                  "options": {"num_ctx": 32768, "num_predict": 16000}}, stopped):
+        if stopped.is_set():
+            break
+        message = event.get("message") or {}
+        if message.get("thinking"):
+            on_thinking(message["thinking"])
+        if message.get("content"):
+            on_text(message["content"])
+        if event.get("done"):
+            if event.get("done_reason") == "length":
+                raise RuntimeError("Qwen reached its output limit before finishing the scene.")
+            complete = True
+            usage = {"output_tokens": event.get("eval_count", 0), "input_tokens": event.get("prompt_eval_count", 0)}
+    if cancel.is_set():
+        raise InterruptedError()
+    if time.monotonic() >= deadline:
+        raise TimeoutError("Qwen took too long to finish the workshop job.")
+    if not complete:
+        raise RuntimeError("Qwen disconnected before finishing the scene.")
+    return usage
 
 
 # ---------- Building and changing ----------
@@ -665,7 +735,7 @@ def _build(request, image, about, scene_id, views=None):
             # starts from the very page they are looking at.
             scouting = _Scout(request, folder, shots)
         prompt = "Build this: " + request + ("\n\n" + about if about else "")
-        usage = generate(agent_models.CLAUDE[config["model"]], config["effort"], SYSTEM, prompt, views or image,
+        usage = generate(model_id(config["model"]), config["effort"], SYSTEM, prompt, views or image,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
         feed.add("", final=True)
         spoken = parse(feed.text)["spoken"]
@@ -721,7 +791,7 @@ def _next():
         queued = STATE.pop("queued", None)
     if queued:
         try:
-            edit(queued["request"], queued.get("picture", ""))
+            (build if queued.get("kind") == "build" else edit)(queued["request"], queued.get("picture", ""))
         except Exception as e:
             print(f"(workshop: the queued change couldn't start: {e!r})", flush=True)
 
@@ -753,7 +823,7 @@ def _edit(request, repair=False, views=None):
                 "page or in the viewer there; ignore the JARVIS interface and other programs)"
         looking = f"\n\nYou are shown, in order: {shown}. Go by them where the owner refers to them." if images else ""
         prompt = (EDIT + "\n\nThe owner says: " + request + pointed + looking + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
-        usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, images or None,
+        usage = generate(model_id(config["model"]), config["edit_effort"], SYSTEM, prompt, images or None,
                          progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
         feed.add("", final=True)
         patch = parse(feed.text)
@@ -813,7 +883,12 @@ def build(request, picture=""):
         raise ValueError("Say what to build, or put a picture on the bench.")
     request = request or "what the picture shows"
     if not _work.acquire(blocking=False):
-        return _busy_line()
+        # 2026-11-12 this was refused with "it will be a moment", and the brain promised a birdhouse that never
+        # came. Now it waits its turn like a change; a newer request replaces whatever was waiting.
+        with _lock:
+            STATE["queued"] = {"kind": "build", "request": request, "picture": picture}
+        return ("The workshop is still finishing its last job, so this new build is queued: it starts by itself the "
+                "moment that job ends, and you'll speak again when it's built. Tell the user it's queued, in one line.")
     _begin("build")
     _emit("start", mode="build", picture=bool(image), model=STATE["model"], request=request[:300])
     _start(_build, request, image, about, _slug(request), views)
@@ -845,6 +920,10 @@ def edit(request, picture=""):
         raise ValueError("Say what to change.")
     if not _work.acquire(blocking=False):   # mid-build there may be nothing finished yet; the change waits for it
         with _lock:
+            waiting = STATE.get("queued") or {}
+            if waiting.get("kind") == "build":   # don't drop the build they asked for; this change is for it
+                return (f"A new build of \"{waiting['request'][:80]}\" is waiting for the current job, so this change "
+                        "was NOT queued. Tell the user to ask for it again once that build is in.")
             STATE["queued"] = {"request": request, "picture": picture}
         return ("The workshop is still finishing its last job, so this change is queued: it starts by itself the "
                 "moment that job ends, and you'll speak again when it's in. Tell the user it's queued, in one line.")
@@ -1032,6 +1111,7 @@ def snapshot():
                 "tokens": STATE["tokens"],
                 "done": list(STATE["done"]), "notes": list(STATE["notes"]), "error": STATE["error"],
                 "render": STATE["render"], "model": STATE["model"], "now": time.time(),
+                "models": dict(MODELS), "selected_model": settings()["model"],
                 "selected": list(STATE.get("selected", [])), "isolate": bool(STATE.get("isolate")),
                 "measuring": bool(STATE.get("measuring")), "cut": STATE.get("cut"),
                 "moving": list(STATE.get("moving", [])), "motions": motions(scene) if scene else [],
@@ -1048,6 +1128,9 @@ def page_report(payload):
     """The page tells Jarvis something (POST /workshop): a step that threw, the view the owner chose, a scene
     they clicked to reopen, or closing the workshop."""
     action = payload.get("action")
+    if action == "model":
+        select_model(payload.get("model", ""))
+        return {"ok": True}
     if action == "seen":   # the page's "I'm here, and this is (or isn't) the view on screen"
         _page.update(at=time.time(), visible=bool(payload.get("visible")))
         return {"ok": True}
@@ -1365,7 +1448,7 @@ def _revise(scene, prompt, images, label, effort):
             _emit("note", value=value)
 
     feed = Feed(on)
-    usage = generate(agent_models.CLAUDE[config["model"]], effort, SYSTEM, prompt[:MAX_SCRIPT], images or None,
+    usage = generate(model_id(config["model"]), effort, SYSTEM, prompt[:MAX_SCRIPT], images or None,
                      progress.thinking, lambda t: (progress.text(t), feed.add(t)), _cancel)
     feed.add("", final=True)
     patch = parse(feed.text)
@@ -1737,7 +1820,7 @@ def _variants(request):
             scene = STATE["scene"]
         text = []
         prompt = (VARIANTS.format(request=request) + "\n\nCurrent script:\n" + script(scene))[:MAX_SCRIPT]
-        usage = generate(agent_models.CLAUDE[config["model"]], config["edit_effort"], SYSTEM, prompt, None,
+        usage = generate(model_id(config["model"]), config["edit_effort"], SYSTEM, prompt, None,
                          progress.thinking, lambda t: (progress.text(t), text.append(t)), _cancel)
         pieces = VARIANT.split("".join(text))
         made, spoken = [], ""

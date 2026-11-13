@@ -86,7 +86,7 @@ class ModelTest(unittest.TestCase):
         s.validate.assert_not_called()
         with self.assertRaises(mp.ProviderError):
             mp.Selection()._validate({'provider': 'anthropic', 'model': 'claude-opus-5-5'})
-        self.assertEqual(mp.PROVIDERS, ('claude_code', 'codex'))
+        self.assertEqual(mp.PROVIDERS, ('claude_code', 'codex', 'local'))  # local: this PC's Ollama, never billed
         self.assertFalse(hasattr(mp, 'Responses'))
 
     def test_busy_and_validating_cannot_overlap_turns(self):

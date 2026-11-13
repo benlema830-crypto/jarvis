@@ -178,5 +178,34 @@ class ThroughTest(unittest.TestCase):
         self.assertEqual(v.calls, [('refresh',)])
 
 
+class SetOutputTest(unittest.TestCase):
+    def fake_voice(self):
+        import threading
+        import voice
+        v = voice.Voice.__new__(voice.Voice)
+        v.output = ''
+        v.refreshed = 0
+        v._player = mock.Mock(close=lambda: [])
+        v._player_lock = threading.Lock()
+        return voice, v
+
+    def test_rescans_for_a_speaker_that_connected_after_startup(self):
+        voice, v = self.fake_voice()
+        found = [None, 5]  # missing from the stale list, there after the rescan
+        v.refresh_outputs = lambda: setattr(v, 'refreshed', v.refreshed + 1)
+        with mock.patch.object(voice, 'find_output', side_effect=lambda name: found.pop(0)), \
+                mock.patch.object(voice, '_Player'), \
+                mock.patch.object(voice, 'output_devices', return_value=[(5, 'Speakers (Bose Micro SoundLink)')]):
+            self.assertEqual(v.set_output('bose'), 'Speakers (Bose Micro SoundLink)')
+        self.assertEqual(v.refreshed, 1)
+
+    def test_still_missing_after_the_rescan_raises(self):
+        voice, v = self.fake_voice()
+        v.refresh_outputs = lambda: None
+        with mock.patch.object(voice, 'find_output', return_value=None):
+            with self.assertRaises(ValueError):
+                v.set_output('bose')
+
+
 if __name__ == '__main__':
     unittest.main()

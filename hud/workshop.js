@@ -6,7 +6,7 @@
 (() => {
   const el = id => document.getElementById(id);
   const box = el('workshop'), frame = el('workshopFrame'), stage = frame.contentWindow;
-  const MODELS = { fable: 'Claude Fable 5.2', opus: 'Claude Opus 5.5', sonnet: 'Claude Sonnet 5.5', haiku: 'Claude Haiku 5.5' };
+  const MODELS = { fable: 'Claude Fable 5.2', qwen: 'Qwen3.5 (local)' };
   const visible = () => document.body.classList.contains('view-workshop');
   let ready = false, queue = [], scene = null, setup = '', busy = '', startedAt = 0, clock = 0, tokens = 0, exploded = false;
   let errors = 0, renderUrl = '', view = 'model', before = 'model', benchStamp = 0;
@@ -20,6 +20,17 @@
   function button(label, title, action, cls) { const b = make('button', label, cls); b.type = 'button'; if (title) b.title = title; b.onclick = action; return b; }
   const title = make('h2', 'The workshop'), meta = make('small', '', 'ws-meta');
   const head = make('header', null, 'ws-head'); head.append(title, meta);
+  const modelPick = make('select'); modelPick.setAttribute('aria-label', 'Workshop model');
+  for (const [value, label] of Object.entries(MODELS)) {
+    const option = make('option', label); option.value = value; modelPick.append(option);
+  }
+  modelPick.onchange = async () => {
+    modelPick.disabled = true;
+    try { await J.api('/workshop', { action: 'model', model: modelPick.value }); }
+    catch (e) { J.notice(e.message); }
+    finally { await sync(false); }
+  };
+  head.append(modelPick);
   const hint = make('div', '', 'ws-hint');
   const tabs = make('div', null, 'ws-tabs'); tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', 'What to show');
   const tabModel = button('3D model', null, () => show('model', true)), tabRender = button('Render', null, () => show('render', true));
@@ -153,6 +164,7 @@
     panelBody.scrollTop = panelBody.scrollHeight; return row;
   }
   function draw() {
+    modelPick.disabled = !!busy;
     const has = !!(scene && scene.steps.length);
     title.textContent = scene?.title || (busy === 'build' ? 'Designing…' : 'The workshop');
     bench.hidden = has || !!busy;
@@ -224,6 +236,7 @@
     const same = scene && data.scene && JSON.stringify(scene.steps) === JSON.stringify(data.scene.steps) && setup === data.scene.setup
       && comparing === JSON.stringify(variantList.map(v => v.name)) && JSON.stringify(data.refs || []) === JSON.stringify(refs);
     scene = data.scene; setup = data.scene?.setup || ''; busy = data.busy || ''; modelName = data.model || 'fable';
+    modelPick.value = data.selected_model || 'fable'; modelPick.disabled = !!busy;
     tokens = data.tokens || 0; exploded = !!data.exploded; errors = 0;
     startedAt = Date.now() / 1000 - Math.max(0, (data.now || 0) - (data.started || 0)); clock = data.seconds || 0;
     steps.replaceChildren(); for (const name of (data.notes?.length ? data.notes : (scene?.steps || []).map(s => s.name))) addStep(name);
@@ -252,6 +265,7 @@
   J.on('workshop', ev => {
     const p = ev.phase;
     if (p === 'open') sync(true);
+    else if (p === 'settings') { modelPick.value = ev.model; }
     else if (p === 'close') leave();
     else if (p === 'start') {
       busy = ev.mode; startedAt = Date.now() / 1000; tokens = 0; errors = 0; modelName = ev.model || modelName; view = 'model';

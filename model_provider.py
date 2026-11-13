@@ -1,10 +1,11 @@
-"""Which brain talks: Claude or Codex, each on the owner's own plan. No provider here can bill an API."""
+"""Which brain talks: Claude or Codex on the owner's own plan, or a local model on this PC (local_brain.py).
+No provider here can bill an API."""
 import threading
 
 import preferences
 import privacy
 
-PROVIDERS = ('claude_code', 'codex')
+PROVIDERS = ('claude_code', 'codex', 'local')
 DEFAULT = {'provider': 'claude_code', 'model': 'claude-opus-5-5'}
 SUBSCRIPTION_PROVIDERS = PROVIDERS  # every brain is a subscription brain now; kept for callers that ask
 
@@ -21,7 +22,8 @@ def catalog():
         codex_models = codex_brain.models()
     except Exception:
         codex_models = []
-    return {'claude_code': claude_code_brain.MODELS, 'codex': codex_models}
+    import local_brain
+    return {'claude_code': claude_code_brain.MODELS, 'codex': codex_models, 'local': local_brain.models()}
 
 
 def text_history(messages):
@@ -84,8 +86,16 @@ class Selection:
                 claude_code_brain.validate(config['model'])
             except Exception:
                 raise ProviderError('Claude subscription validation failed. Check that Claude Code is signed in to your Claude plan.') from None
+        elif config['provider'] == 'local':
+            import local_brain
+            try:
+                local_brain.validate(config['model'])
+            except ProviderError:
+                raise
+            except Exception:
+                raise ProviderError('The local model failed its test. Check that start-local-model.bat is running.') from None
         else:
-            raise ProviderError('Choose Claude or Codex.')
+            raise ProviderError('Choose Claude, Codex or the local model.')
 
     def snapshot(self):
         with self.lock:

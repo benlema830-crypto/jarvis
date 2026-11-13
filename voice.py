@@ -167,6 +167,11 @@ class SentenceBuffer:
     """
 
     _END = re.compile(r"[.!?…।]+[\"')\]]*\s|[。！？]+|\n+")   # also the Hindi full stop and CJK ones, which take no space
+    # A full stop after one of these is not the end of a sentence: "a few new acquaintances from Mr." was said
+    # as its own clip, with "Zubair Trabzada." after a pause (2026-11-13). Also a lone initial ("J. R. R. Tolkien"),
+    # except "I" and "A", which do end sentences ("So do I.").
+    _NOT_END = re.compile(r"(?:\b(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Mt|Sgt|Capt|Lt|Col|Gen|Gov|Sen|Rep|Rev|vs|e\.g|i\.e)"
+                          r"|(?:^|[\s(\"'])[B-HJ-Z])\.\s$")
     MIN_CHARS = 1
 
     def __init__(self):
@@ -179,7 +184,8 @@ class SentenceBuffer:
         self.buf += text
         out = []
         while True:
-            m = next((m for m in self._END.finditer(self.buf) if m.end() >= self.MIN_CHARS), None)
+            m = next((m for m in self._END.finditer(self.buf)
+                      if m.end() >= self.MIN_CHARS and not self._NOT_END.search(self.buf[: m.end()])), None)
             if m:
                 out.append(self.buf[: m.end()].strip())
                 self.buf = self.buf[m.end():]
@@ -470,6 +476,9 @@ class Voice:
     def set_output(self, name: str) -> str:
         """Play through another device ("" = Windows default). Returns its name."""
         device = find_output(name)
+        if name.strip() and device is None:
+            self.refresh_outputs()  # it may have connected after startup (Bluetooth)
+            device = find_output(name)
         if name.strip() and device is None:
             raise ValueError(f"No audio output matches '{name}'.")
         new = _Player(RATE, device)

@@ -472,6 +472,7 @@ body.view-workshop .reply{background:#060e11f2}
 .workshop.dropping::after{content:"Drop the picture on the bench";position:absolute;inset:14px;display:grid;place-content:center;border:2px dashed var(--accent);border-radius:22px;background:#03070acc;color:var(--accent);font-size:20px;font-weight:600;pointer-events:none;z-index:9}
 .ws-head{position:absolute;left:22px;top:18px;display:flex;flex-direction:column;gap:3px;pointer-events:none;max-width:34vw}
 .ws-head h2{margin:0;font-size:19px;font-weight:650;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ws-head select{pointer-events:auto;max-width:100%;margin-top:4px}
 .ws-meta{font:12px var(--mono);color:var(--muted)}
 .ws-meta:not(:empty)::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:8px;vertical-align:1px}
 .ws-hint{position:absolute;top:66px;left:calc(50% - var(--right-width) / 2);transform:translateX(-50%);padding:5px 14px;border-radius:999px;background:#060e11cc;border:1px solid var(--line);font-size:13px;color:var(--muted);pointer-events:none;white-space:nowrap}

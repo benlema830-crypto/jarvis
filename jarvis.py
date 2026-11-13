@@ -270,7 +270,7 @@ class Brain:
                 # This file is written only after successful validation, so it is reused without a start-up probe.
                 self.selection.active = dict(saved)
             else:
-                self.selection.startup_error = ('The saved brain is not Claude or Codex on your own plan. '
+                self.selection.startup_error = ('The saved brain is not Claude, Codex or the local model. '
                                                 'Choose one in More > Change model.')
                 self.selection.error = self.selection.startup_error
         self.selection.ready = True
@@ -362,6 +362,9 @@ class Brain:
                 self._codex_brain.close()
             if self._claude_code_brain is not None:
                 self._claude_code_brain.close()
+            if self.config.get('provider') == 'local':  # give the graphics card back to voice and hearing
+                import local_brain
+                local_brain.release(self.config['model'])
             self.messages = model_provider.text_history(self.messages)
             self.config = config
         hud.info.update(model=config['model'], provider=config['provider'])
@@ -470,7 +473,36 @@ class Brain:
             return self._run_codex(speak)
         if self.config['provider'] == 'claude_code':
             return self._run_claude_code(speak)
-        raise model_provider.ProviderError('My brain must be Claude or Codex on your plan. Choose one in More, Change model.')
+        if self.config['provider'] == 'local':
+            return self._run_local(speak)
+        raise model_provider.ProviderError('My brain must be Claude, Codex or the local model. Choose one in More, Change model.')
+
+    def _run_local(self, speak):
+        """The local model on this PC (local_brain.py): free and offline, with the everyday tools only."""
+        import local_brain
+        buf = SentenceBuffer()
+        def delta(text):
+            for sentence in buf.feed(text):
+                speak(sentence)
+        voice_health.api_state('requesting')
+        try:
+            # Without the recent-conversation block: its earlier replies made the small model narrate instead of
+            # calling tools (see local_brain.history).
+            answer = local_brain.Conversation().ask(self.config['model'], self._compose(recent=False), self.messages,
+                                                    TOOL_DEFS, self._tool, delta, self.cancel)
+        except (InterruptedError, Interrupted):
+            raise Interrupted() from None
+        except model_provider.ProviderError:
+            raise
+        except Exception:
+            raise model_provider.ProviderError('The local model failed to answer. Check that '
+                                               'start-local-model.bat is running.') from None
+        voice_health.api_state('responded')
+        if self.cancel.is_set():
+            raise Interrupted()
+        if rest := buf.flush():
+            speak(rest)
+        self.messages.append({'role': 'assistant', 'content': answer})
 
     def _run_api_fallback(self, speak):
         """The ChatGPT plan is at its limit: answer on the owner's OpenAI API key instead (their decision,
@@ -883,6 +915,8 @@ def saved_provider() -> str:
 
 def wait_for_network(max_seconds: int = 45):
     """At login the network can take a few seconds to come up."""
+    if saved_provider() == "local":
+        return  # the local brain needs no network
     host = "chatgpt.com" if saved_provider() == "codex" else "api.anthropic.com"
     deadline = time.time() + max_seconds
     while time.time() < deadline:
@@ -1103,7 +1137,7 @@ def main():
         demo_voices()
         return
     if saved_provider() not in model_provider.PROVIDERS:
-        print("Jarvis's brain must be Claude (Claude Code sign-in) or Codex (ChatGPT sign-in). "
+        print("Jarvis's brain must be Claude (Claude Code sign-in), Codex (ChatGPT sign-in) or local (Ollama). "
               "Set conversation_model in data/preferences.json to one of them.")
         sys.exit(1)
 

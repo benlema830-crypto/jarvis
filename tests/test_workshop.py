@@ -92,6 +92,39 @@ class ScriptFormatTest(unittest.TestCase):
         self.assertEqual(again["setup"], scene["setup"])
 
 
+class LocalGenerationTest(unittest.TestCase):
+    def test_local_stream_preserves_pictures_progress_and_usage(self):
+        import local_brain
+        text, thinking = [], []
+        events = [{"message": {"thinking": "shape", "content": "TITLE: Lamp\n"}},
+                  {"message": {"content": "=== STEP: Base\napi.add(base);"}},
+                  {"done": True, "eval_count": 42, "prompt_eval_count": 12}]
+        with mock.patch.object(local_brain, "chat", return_value=iter(events)) as chat, \
+                mock.patch.object(workshop, "_stream") as claude:
+            usage = workshop.generate(workshop.QWEN_MODEL, "low", "system", "build", [b"one", b"two"],
+                                      thinking.append, text.append)
+        payload = chat.call_args.args[0]
+        self.assertEqual(payload["messages"][1]["images"], ["b25l", "dHdv"])
+        self.assertTrue(payload["think"])
+        self.assertNotIn("tools", payload)
+        self.assertEqual(usage["output_tokens"], 42)
+        self.assertEqual(thinking, ["shape"])
+        self.assertTrue("".join(text).startswith("TITLE: Lamp"))
+        claude.assert_not_called()
+
+    def test_local_cancellation_and_incomplete_output_are_not_success(self):
+        import local_brain
+        for events, error in [([], RuntimeError), ([{"done": True, "done_reason": "length"}], RuntimeError)]:
+            with mock.patch.object(local_brain, "chat", return_value=iter(events)):
+                with self.assertRaises(error):
+                    workshop.generate(workshop.QWEN_MODEL, "low", "s", "p")
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(local_brain, "chat", return_value=iter([])):
+            with self.assertRaises(InterruptedError):
+                workshop.generate(workshop.QWEN_MODEL, "low", "s", "p", cancel=cancel)
+
+
 class WorkshopFlowTest(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -169,11 +202,37 @@ class WorkshopFlowTest(unittest.TestCase):
         self.assertIn("Base: A weighted steel disc", note)   # so questions about parts can be answered
         self.assertEqual(workshop.snapshot()["tokens"], 321)
 
+    def test_qwen_build_and_edit_use_the_installed_model(self):
+        self.prefs["workshop"]["model"] = "qwen"
+        workshop.build("a desk lamp")
+        self.wait()
+        self.replies.append(PATCH)
+        workshop.edit("make the arm red")
+        self.wait()
+        self.assertEqual([c["model"] for c in self.calls], [workshop.QWEN_MODEL] * 2)
+        self.assertEqual(workshop.snapshot()["selected_model"], "qwen")
+        self.assertEqual(workshop.snapshot()["models"], workshop.MODELS)
+
+    def test_model_selection_preserves_options_and_refuses_changes_during_a_job(self):
+        with mock.patch.object(workshop.preferences, "update") as save:
+            workshop.page_report({"action": "model", "model": "qwen"})
+            save.assert_called_once_with(workshop={"model": "qwen", "check": False, "references": False})
+            workshop._work.acquire()
+            try:
+                with self.assertRaisesRegex(ValueError, "finish"):
+                    workshop.select_model("fable")
+            finally:
+                workshop._work.release()
+            self.assertEqual(save.call_count, 1)
+            with self.assertRaises(ValueError):
+                workshop.select_model("unknown")
+
     def test_a_second_job_while_one_runs_is_not_started(self):
         workshop._work.acquire()
         self.addCleanup(lambda: workshop._work.locked() and workshop._work.release())
-        self.assertIn("still busy", workshop.build("a chair"))
+        self.assertIn("queued", workshop.build("a chair"))   # waits its turn; nothing starts alongside
         self.assertEqual(self.calls, [])
+        workshop.STATE.pop("queued", None)
 
     def test_edit_sends_the_script_back_and_can_be_undone(self):
         workshop.build("a desk lamp")
@@ -586,6 +645,29 @@ class WorkshopMoreTest(WorkshopFlowTest):
         self.assertEqual(len(self.calls[1]["image"]), 2)                    # the screens as they are when it runs
         self.assertIn("captures of the owner's screens as they are right now", self.calls[1]["prompt"])
         self.assertEqual(self.said[-1][0], "The arm is red, sir.")
+        self.assertNotIn("queued", workshop.STATE)
+
+    def test_a_build_asked_for_while_busy_is_queued_and_then_built(self):
+        self.page()
+        release = threading.Event()
+        original = workshop.generate
+
+        def slow(*args, **kwargs):
+            if len(self.calls) == 0:
+                release.wait(5)
+            return original(*args, **kwargs)
+        self.replies[:] = [SCRIPT, SCRIPT]
+        with mock.patch.object(workshop, "generate", slow):
+            workshop.build("a desk lamp")
+            reply = workshop.build("a small wooden birdhouse")
+            self.assertIn("queued", reply)
+            self.assertIn("was NOT queued", workshop.edit("make it red"))   # the waiting build isn't replaced
+            release.set()
+            for _ in range(300):
+                if len(self.calls) >= 2 and not workshop.STATE["busy"] and not workshop._work.locked():
+                    break
+                time.sleep(0.02)
+        self.assertIn("birdhouse", self.calls[1]["prompt"])
         self.assertNotIn("queued", workshop.STATE)
 
     def test_a_change_is_shown_the_owners_picture(self):
