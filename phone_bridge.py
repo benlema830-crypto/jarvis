@@ -16,8 +16,13 @@ POST /voice {"text"} -> the reply as a WAV in Jarvis's own voice (text in the X-
 GET /pending -> {"question"} (the open yes/no question, if any), POST /answer {"approve": true|false}.
 
 The phone app: the same page installs to the iPhone home screen (manifest, icons and service worker below need no
-key; they hold nothing private). GET /inbox?after=N -> answers that arrived after the phone stopped waiting;
+key; they hold nothing private). GET /inbox?after=N -> the shared feed: Siri Shortcut conversations (asked
+without the app's X-Jarvis-Client: app header) and answers that came after the phone stopped waiting;
 GET /push/key, POST /push/subscribe and /push/unsubscribe {subscription} turn alerts on and off (phone_push.py).
+
+Hands-free (the app open on screen): POST /listen with a short WAV the app cut at a pause. It is transcribed on
+this PC (the same Whisper as Telegram voice notes) and acted on only when it starts with the phone persona's name
+("Friday, ...") or comes as a follow-up right after an answer (?followup=1). Anything else is dropped unread.
 """
 import collections
 import base64
@@ -43,6 +48,10 @@ PAGE = ROOT / "hud" / "phone.html"
 PORT = int(os.getenv("JARVIS_PHONE_PORT") or 7782)
 REPLY_SECONDS = 170   # a turn that runs longer answers "still working" instead of hanging the phone
 MAX_BODY = 8000
+MAX_AUDIO = 1_500_000  # about 45 seconds of 16 kHz speech: hands-free clips are cut at a pause, far shorter
+FEED = ROOT / "data" / "phone-feed.json"
+NOISE = {"", "you", "thank you", "thanks", "thank you for watching", "thanks for watching", "bye", "okay", "ok",
+         "so", "um", "uh", "hmm", "mm"}  # what Whisper makes of a cough or a door; never a follow-up request
 APP_FILES = {  # the installable app's files: public, like the page
     "/manifest.webmanifest": ("phone.webmanifest", "application/manifest+json"),
     "/sw.js": ("phone-sw.js", "text/javascript; charset=utf-8"),
@@ -76,6 +85,27 @@ def new_token() -> str:
     return token
 
 
+def from_wav(data: bytes) -> np.ndarray:
+    """A mono 16-bit WAV (the app sends 16 kHz) as float32 samples at 16 kHz."""
+    with wave.open(io.BytesIO(data), "rb") as file:
+        if file.getsampwidth() != 2 or file.getnchannels() != 1:
+            raise ValueError("Expected mono 16-bit audio.")
+        rate = file.getframerate()
+        samples = np.frombuffer(file.readframes(file.getnframes()), "<i2").astype("float32") / 32768
+    if rate != 16000:
+        samples = np.interp(np.arange(0, len(samples), rate / 16000), np.arange(len(samples)), samples).astype("float32")
+    return samples
+
+
+def wake_command(text: str, name: str) -> str | None:
+    """"Friday, lights off" -> "lights off"; "Hey Friday" -> ""; no name at the start -> None.
+    The name may follow a greeting ("hey", "okay") and come with the punctuation Whisper adds."""
+    import re
+    word = re.escape(name.strip().lower()) if name.strip() else "friday"
+    found = re.match(rf"^\W*(?:(?:hey|hi|hello|ok|okay|yo)\W+)?{word}\b\W*(.*)$", text.strip(), re.I | re.S)
+    return found.group(1).strip() if found else None
+
+
 def to_wav(samples: np.ndarray, rate: int) -> bytes:
     pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     out = io.BytesIO()
@@ -103,7 +133,10 @@ class Bridge:
         self.server = None
         self.fails = []
         self.busy = threading.Lock()   # one phone turn at a time
-        self.inbox = collections.deque(maxlen=20)  # answers that came after the phone stopped waiting
+        self.transcribe = None   # float32 16 kHz -> text; set by jarvis.py (the Telegram voice-note transcriber)
+        self.name = lambda: "Friday"  # the name hands-free listens for; jarvis.py sets it to the phone persona
+        self.feed_path = None    # where the feed is kept between restarts (only the real BRIDGE has one)
+        self.inbox = collections.deque(maxlen=60)  # the feed: Shortcut conversations and late answers
         self.inbox_id = 0
         self._inbox_lock = threading.Lock()
 
@@ -170,8 +203,17 @@ class Bridge:
         approvals.answer("yes" if approve else "no")
         return {"ok": True, "reply": "Approved." if approve else "Declined. Nothing was changed."}
 
-    def ask(self, text: str, voice=False) -> tuple[str, bytes | None]:
-        """(reply text, WAV in Jarvis's voice when asked for and it could be made)."""
+    def ask(self, text: str, voice=False, source="app") -> tuple[str, bytes | None]:
+        """(reply text, WAV in Jarvis's voice when asked for and it could be made). A conversation the app didn't
+        start itself (source "shortcut") also goes in the feed, so the app shows it."""
+        answer, wav = self._ask(text, voice)
+        if source != "app":
+            self.to_feed("you", text)
+            if not answer.startswith("Still working on that"):
+                self.to_feed("jarvis", answer)
+        return answer, wav
+
+    def _ask(self, text: str, voice=False) -> tuple[str, bytes | None]:
         if not self.on_message:
             return "JARVIS isn't fully started yet. Try again in a moment.", None
         if not self.busy.acquire(timeout=5):
@@ -196,20 +238,66 @@ class Bridge:
         finally:
             self.busy.release()
 
-    def late_reply(self, answer: str):
-        """An answer after the phone gave up waiting: kept for the app (GET /inbox) and sent as an alert."""
+    def load_feed(self, path):
+        """Keep the feed in `path` from now on, starting from what is already there."""
+        self.feed_path = Path(path)
+        try:
+            saved = json.loads(self.feed_path.read_text(encoding="utf-8"))
+            items = [i for i in saved.get("items", []) if isinstance(i, dict) and isinstance(i.get("id"), int)]
+            with self._inbox_lock:
+                self.inbox.extend(items[-self.inbox.maxlen:])
+                self.inbox_id = max([int(saved.get("last", 0))] + [i["id"] for i in items])
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+
+    def to_feed(self, who: str, text: str) -> int:
         with self._inbox_lock:
             self.inbox_id += 1
-            self.inbox.append({"id": self.inbox_id, "text": str(answer)[:4000], "t": time.time()})
+            self.inbox.append({"id": self.inbox_id, "who": who, "text": str(text)[:4000], "t": time.time()})
+            if self.feed_path:
+                try:
+                    temp = self.feed_path.with_suffix(".tmp")
+                    temp.write_text(json.dumps({"last": self.inbox_id, "items": list(self.inbox)}), encoding="utf-8")
+                    temp.replace(self.feed_path)
+                except OSError:
+                    pass
+            return self.inbox_id
+
+    def late_reply(self, answer: str):
+        """An answer after the phone gave up waiting: kept for the app (GET /inbox) and sent as an alert."""
+        number = self.to_feed("jarvis", answer)
         import phone_push
         if phone_push.ready():
-            threading.Thread(target=phone_push.send, args=("Jarvis", str(answer)),
-                             kwargs={"tag": f"reply-{self.inbox_id}", "kind": "reply"}, daemon=True,
+            threading.Thread(target=phone_push.send, args=(self.name() or "Jarvis", str(answer)),
+                             kwargs={"tag": f"reply-{number}", "kind": "reply"}, daemon=True,
                              name="phone-alert").start()
 
     def inbox_after(self, after: int) -> dict:
         with self._inbox_lock:
-            return {"items": [item for item in self.inbox if item["id"] > after], "last": self.inbox_id}
+            return {"items": [item for item in self.inbox if item["id"] > after], "last": self.inbox_id,
+                    "name": self.name() or "Jarvis"}
+
+    def listen(self, audio: bytes, followup: bool) -> dict:
+        """One hands-free clip. Returns {"ignored"}, {"awake"} (just the name: listen for the request next) or
+        {"heard", "reply", "wav"}."""
+        if not self.transcribe:
+            return {"error": "Hands-free isn't ready on the PC yet."}
+        text = " ".join(self.transcribe(from_wav(audio)).split())
+        command = wake_command(text, self.name() or "Friday")
+        if command is None:
+            if not followup or text.lower().strip(" .,!?") in NOISE:
+                return {"ignored": True}
+            command = text  # right after an answer: no name needed, as at the PC
+        if not command.strip(" .,!?"):
+            return {"awake": True}
+        print(f"(Phone hands-free: {command})", flush=True)
+        answer, wav = self.ask(command[:3000], voice=True)
+        if not wav and self.speak:
+            try:
+                wav = self.speak(answer)
+            except Exception:
+                wav = None
+        return {"heard": command, "reply": answer, "wav": wav}
 
 
 def make_handler(bridge: Bridge):
@@ -296,10 +384,25 @@ def make_handler(bridge: Bridge):
         def do_POST(self):
             route = self.path.split("?")[0]
             self._body_read = False
-            if route not in ("/ask", "/voice", "/answer", "/push/subscribe", "/push/unsubscribe"):
+            if route not in ("/ask", "/voice", "/answer", "/listen", "/push/subscribe", "/push/unsubscribe"):
                 return self.refuse(404, "Wrong address. It should end in slash ask, or slash voice.")
             if not bridge.allowed(self.headers):
                 return self.refuse(401, "Jarvis refused the phone key. Check the Authorization header.")
+            if route == "/listen":
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= MAX_AUDIO:
+                        raise ValueError
+                    clip = self.rfile.read(size)
+                    self._body_read = True
+                    result = bridge.listen(clip, "followup=1" in self.path)
+                except (ValueError, EOFError, wave.Error):
+                    return self.refuse(400, "Jarvis couldn't read that recording.")
+                if result.get("wav"):
+                    return self.reply(200, result["wav"], "audio/wav", {"X-Jarvis-Reply": quote(result["reply"][:2000]),
+                                                                       "X-Jarvis-Heard": quote(result["heard"][:500])})
+                result.pop("wav", None)
+                return self.reply(503 if "error" in result else 200, result)
             if route in ("/push/subscribe", "/push/unsubscribe"):
                 import phone_push
                 try:
@@ -344,7 +447,8 @@ def make_handler(bridge: Bridge):
                 return self.refuse(400, "Jarvis couldn't read that request. The JSON field should be called text.", spoken)
             if not text:
                 return self.refuse(400, "Jarvis got an empty message. Set the text field to Dictated Text.", spoken)
-            answer, wav = bridge.ask(text[:3000], voice=spoken)
+            source = "app" if self.headers.get("X-Jarvis-Client") == "app" else "shortcut"
+            answer, wav = bridge.ask(text[:3000], voice=spoken, source=source)
             if spoken and not wav:  # "still working", "busy" and the like: still answer out loud
                 wav = self.audio(answer)
             if route == "/voice" and wav:

@@ -1216,6 +1216,9 @@ def start_bridges(ears):
         hud.commands.put({"label": "Phone message", "phone": reply, "voice_reply": wants_voice,
                           "prompt": f"[Via Phone] {text}"})
     phone_bridge.BRIDGE.on_message = on_phone
+    phone_bridge.BRIDGE.transcribe = bridge.transcribe  # hands-free in the phone app: the same local Whisper
+    phone_bridge.BRIDGE.name = lambda: phone_persona()[0] or "Jarvis"  # it answers to "Friday, ..."
+    phone_bridge.BRIDGE.load_feed(phone_bridge.FEED)  # Shortcut conversations, shown in the app
     if phone_bridge.BRIDGE.start():
         print(f"Phone bridge online on 127.0.0.1:{phone_bridge.PORT}.", flush=True)
     elif phone_bridge.BRIDGE.error:

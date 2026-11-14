@@ -58,8 +58,10 @@ class PhoneAppTest(unittest.TestCase):
                 time.sleep(0.01)
         status, body = self.request("GET", "/inbox?after=0", headers=AUTH)
         items = json.loads(body)["items"]
-        self.assertEqual([item["text"] for item in items], ["The render finished: 42 frames."])
-        self.assertEqual(json.loads(self.request("GET", f"/inbox?after={items[0]['id']}", headers=AUTH)[1])["items"], [])
+        # asked without the app's header, like a Siri Shortcut: the question shows in the app too
+        self.assertEqual([(item["who"], item["text"]) for item in items],
+                         [("you", "hi"), ("jarvis", "The render finished: 42 frames.")])
+        self.assertEqual(json.loads(self.request("GET", f"/inbox?after={items[-1]['id']}", headers=AUTH)[1])["items"], [])
         send.assert_called_once()
 
     def test_subscribe_checks_the_subscription(self):
@@ -103,6 +105,56 @@ class QuestionAlertTest(unittest.TestCase):
     def test_telegram_without_alerts_or_for_a_free_text_question(self):
         self.assertEqual([len(x) for x in self.deliver(alerts_on=False)], [1, 0])
         self.assertEqual([len(x) for x in self.deliver(alerts_on=True, free_text=True)], [1, 0])
+
+
+class HandsFreeAndFeedTest(unittest.TestCase):
+    setUp, request, ask = PhoneAppTest.setUp, PhoneAppTest.request, PhoneAppTest.ask  # not its tests
+
+    def wav(self):
+        return phone_bridge.to_wav(phone_bridge.np.zeros(1600, "float32"), 16000)
+
+    def listen(self, heard, followup=False):
+        self.bridge.transcribe = lambda audio: heard
+        status, body = self.request("POST", "/listen" + ("?followup=1" if followup else ""), self.wav(),
+                                    {**AUTH, "Content-Type": "audio/wav"})
+        return status, body
+
+    def test_the_name_is_needed_at_the_start(self):
+        wake = phone_bridge.wake_command
+        self.assertEqual(wake("Friday, turn off the lights.", "FRIDAY"), "turn off the lights.")
+        self.assertEqual(wake("Hey, Friday what time is it", "FRIDAY"), "what time is it")
+        self.assertEqual(wake("Hey Friday.", "FRIDAY"), "")
+        self.assertIsNone(wake("I said Friday was fun", "FRIDAY"))
+        self.assertIsNone(wake("Fridays are great", "FRIDAY"))
+
+    def test_only_a_named_request_is_answered(self):
+        self.assertEqual(json.loads(self.listen("Pass the salt please")[1]), {"ignored": True})
+        self.assertEqual(json.loads(self.listen("Hey Friday.")[1]), {"awake": True})
+        status, body = self.listen("Friday, lights on")
+        self.assertEqual((status, body[:4]), (200, b"RIFF"))
+
+    def test_a_follow_up_needs_no_name_but_noise_is_dropped(self):
+        self.assertEqual(self.listen("and the kitchen too", followup=True)[1][:4], b"RIFF")
+        self.assertEqual(json.loads(self.listen("Thank you.", followup=True)[1]), {"ignored": True})
+
+    def test_listen_needs_the_key(self):
+        self.assertEqual(self.request("POST", "/listen", self.wav(), {"Content-Type": "audio/wav"})[0], 401)
+
+    def test_shortcut_conversations_reach_the_app_but_the_apps_own_do_not_repeat(self):
+        self.ask("lights on")  # a Siri Shortcut: no app header
+        self.ask("what time is it", **{"X-Jarvis-Client": "app"})
+        items = json.loads(self.request("GET", "/inbox?after=0", headers=AUTH)[1])["items"]
+        self.assertEqual([(i["who"], i["text"]) for i in items], [("you", "lights on"), ("jarvis", "echo: lights on")])
+
+    def test_the_feed_survives_a_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "feed.json"
+            self.bridge.load_feed(path)
+            self.ask("lights on")
+            again = phone_bridge.Bridge()
+            again.load_feed(path)
+            self.assertEqual(again.inbox_after(0)["last"], 2)
+            self.assertEqual(again.to_feed("jarvis", "next"), 3)
 
 
 class RealListTest(unittest.TestCase):

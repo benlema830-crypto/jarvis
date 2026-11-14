@@ -44,7 +44,13 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 #ask small{font:600 11px/1 var(--mono);letter-spacing:.14em;color:#f5b83d}
 #ask p{margin:8px 0 12px;white-space:pre-wrap;word-wrap:break-word;max-height:38vh;overflow-y:auto}
 #ask div{display:flex;gap:10px}#ask button{flex:1}
-#alerts{min-height:32px;padding:0 12px;font-size:13px}
+#alerts,#handsfree{min-height:32px;padding:0 12px;font-size:13px}
+#handsfree.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#hfBar{display:flex;align-items:center;gap:10px;margin:12px 16px 0;padding:10px 14px;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel);font-size:14px}
+#hfBar .meter{flex:none;width:10px;height:10px;border-radius:50%;background:var(--accent);transition:transform .08s}
+#hfBar[data-state=thinking] .meter{background:#f5b83d;animation:pulse 1s infinite alternate}
+#hfBar[data-state=speaking] .meter{background:#a78bfa}
+#hfBar span:last-child{color:var(--muted)}
 .note{margin:12px 16px 0;padding:12px 14px;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel);color:var(--muted);font-size:14px}
 .note b{color:var(--ink)}.note button{float:right;min-height:28px;padding:0 10px;margin:-4px -6px 0 8px;font-size:13px}
 .stamp{align-self:center;font:11px var(--mono);color:var(--muted);letter-spacing:.08em}
@@ -53,6 +59,7 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 <body>
 <header><span class="dot" id="dot"></span><h1>JARVIS</h1>
  <button id="alerts" type="button" hidden>Turn on alerts</button>
+ <button id="handsfree" type="button" hidden aria-pressed="false">Hands-free</button>
  <label><input type="checkbox" id="speak"> Jarvis voice</label></header>
 <section class="note" id="install" hidden><button type="button" id="installHide">Later</button>
  <b>Make Jarvis an app:</b> tap the Share button, then <b>Add to Home Screen</b>. Open him from the new icon, and he'll
@@ -67,6 +74,8 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
  <p id="askText"></p>
  <div><button class="primary" id="askYes">Yes</button><button id="askNo">No</button></div>
 </section>
+<section id="hfBar" hidden aria-live="polite"><span class="meter" id="hfMeter"></span><span id="hfText"></span>
+ <span id="hfHint"></span></section>
 <main id="log" aria-live="polite"></main>
 <form id="form" hidden>
  <button type="button" id="mic" aria-label="Speak" hidden>🎙</button>
@@ -110,7 +119,7 @@ async function send(text){
   add('you', text); $('dot').className = 'dot think';
   const voice = $('speak').checked;
   try {
-    const r = await fetch(voice ? '/voice' : '/ask', {method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + key}, body: JSON.stringify({text})});
+    const r = await fetch(voice ? '/voice' : '/ask', {method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + key, 'X-Jarvis-Client':'app'}, body: JSON.stringify({text})});
     if (r.status === 401) { add('err', 'That key was refused. Enter it again.'); key = null; store.del('jarvis-key'); show(); return; }
     if ((r.headers.get('Content-Type') || '').startsWith('audio/')) {
       add('jarvis', decodeURIComponent(r.headers.get('X-Jarvis-Reply') || ''));
@@ -155,7 +164,8 @@ async function inbox(){
     if (!r.ok) return;
     const data = await r.json();
     if (data.last < inboxAfter) inboxAfter = 0;  // Jarvis restarted: his numbering began again
-    for (const item of data.items || []) if (item.id > inboxAfter) add('jarvis', item.text);
+    if (data.name) { hf.name = data.name; hfShow(); }
+    for (const item of data.items || []) if (item.id > inboxAfter) add(item.who === 'you' ? 'you' : 'jarvis', item.text);
     inboxAfter = Math.max(inboxAfter, data.last || 0); store.set('jarvis-inbox', String(inboxAfter));
   } catch {}
 }
@@ -202,6 +212,132 @@ if (Rec) {
   };
 }
 show(); if (key) { ping(); pending(); inbox(); subscribe(false); }
+</script>
+<script>
+/* Hands-free: with the app open on screen, say "Friday, …" and she answers out loud, then listens for a follow-up.
+   The phone cuts what you say at a one-second pause and sends just that clip to the PC (POST /listen), which
+   transcribes it and drops anything that doesn't start with her name. Apple stops the microphone when the app
+   leaves the screen, so it pauses then and picks up again when you come back; the screen is kept awake meanwhile. */
+const hf = { on: false, name: 'Friday', ctx: null, stream: null, src: null, node: null, busy: false, followUntil: 0,
+  floor: 0.01, loud: 0, speaking: false, chunks: [], pre: [], speechMs: 0, quietMs: 0, totalMs: 0, lock: null, failures: 0 };
+const PAUSE_MS = 1000, FOLLOW_MS = 8000, MAX_MS = 20000;
+function hfShow(){
+  $('handsfree').hidden = !key || !navigator.mediaDevices?.getUserMedia;
+  $('hfBar').hidden = !hf.on;
+  const follow = Date.now() < hf.followUntil, state = $('hfBar').dataset.state || 'listening';
+  $('hfText').textContent = state === 'thinking' ? 'Thinking…' : state === 'speaking' ? 'Speaking…' : state === 'paused' ? 'Paused'
+    : follow ? 'Go ahead…' : `Say “${hf.name[0] + hf.name.slice(1).toLowerCase()}, …”`;
+  $('hfHint').textContent = state === 'paused' ? 'resumes when Jarvis is on screen' : '';
+}
+function hfState(state){ $('hfBar').dataset.state = state; hfShow(); }
+async function hfMic(){
+  hf.stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+  if (hf.ctx.state !== 'running') await hf.ctx.resume();
+  hf.src = hf.ctx.createMediaStreamSource(hf.stream);
+  hf.node = hf.ctx.createScriptProcessor(4096, 1, 1);
+  hf.node.onaudioprocess = e => hfFrame(e.inputBuffer.getChannelData(0));
+  hf.src.connect(hf.node); hf.node.connect(hf.ctx.destination);  // it only runs when connected; it writes silence
+  hf.speaking = false; hf.loud = 0; hf.pre = [];
+}
+function hfMicOff(){
+  try { hf.node && hf.node.disconnect(); hf.src && hf.src.disconnect(); } catch {}
+  if (hf.stream) hf.stream.getTracks().forEach(t => t.stop());
+  hf.stream = hf.src = hf.node = null;
+}
+function hfFrame(samples){
+  if (!hf.on || hf.busy) return;
+  const ms = samples.length / hf.ctx.sampleRate * 1000;
+  let sum = 0; for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  const rms = Math.sqrt(sum / samples.length), loudEnough = rms > Math.max(0.012, hf.floor * 3);
+  $('hfMeter').style.transform = `scale(${1 + Math.min(1.5, rms * 25)})`;
+  if (!hf.speaking) {
+    if (!loudEnough) hf.floor = hf.floor * 0.95 + rms * 0.05;  // the room's own noise level
+    hf.pre.push(samples.slice()); if (hf.pre.length > 4) hf.pre.shift();  // keep the start of the first word
+    hf.loud = loudEnough ? hf.loud + 1 : 0;
+    if (hf.loud >= 2) { hf.speaking = true; hf.chunks = hf.pre.slice(); hf.speechMs = 2 * ms; hf.quietMs = 0; hf.totalMs = hf.chunks.length * ms; }
+    return;
+  }
+  hf.chunks.push(samples.slice()); hf.totalMs += ms;
+  if (loudEnough) { hf.speechMs += ms; hf.quietMs = 0; } else hf.quietMs += ms;
+  if (hf.quietMs >= PAUSE_MS || hf.totalMs >= MAX_MS) {
+    hf.speaking = false; hf.loud = 0; hf.pre = [];
+    if (hf.speechMs >= 300) hfSend(hf.chunks, hf.ctx.sampleRate);
+  }
+}
+function hfWav(chunks, rate){
+  const total = chunks.reduce((n, c) => n + c.length, 0), step = rate / 16000, out = new Int16Array(Math.floor(total / step));
+  const all = new Float32Array(total); let at = 0; for (const c of chunks) { all.set(c, at); at += c.length; }
+  for (let i = 0; i < out.length; i++) {
+    const from = Math.floor(i * step), to = Math.max(from + 1, Math.floor((i + 1) * step)); let v = 0;
+    for (let j = from; j < to; j++) v += all[j];
+    out[i] = Math.max(-1, Math.min(1, v / (to - from))) * 32767;
+  }
+  const head = new DataView(new ArrayBuffer(44)), text = (o, t) => [...t].forEach((ch, i) => head.setUint8(o + i, ch.charCodeAt(0)));
+  text(0, 'RIFF'); head.setUint32(4, 36 + out.length * 2, true); text(8, 'WAVEfmt '); head.setUint32(16, 16, true);
+  head.setUint16(20, 1, true); head.setUint16(22, 1, true); head.setUint32(24, 16000, true); head.setUint32(28, 32000, true);
+  head.setUint16(32, 2, true); head.setUint16(34, 16, true); text(36, 'data'); head.setUint32(40, out.length * 2, true);
+  return new Blob([head, out], {type: 'audio/wav'});
+}
+function hfChime(){
+  try {
+    const o = hf.ctx.createOscillator(), g = hf.ctx.createGain(), t = hf.ctx.currentTime;
+    o.frequency.setValueAtTime(880, t); o.frequency.setValueAtTime(1320, t + 0.08);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g); g.connect(hf.ctx.destination); o.start(t); o.stop(t + 0.3);
+  } catch {}
+}
+async function hfSend(chunks, rate){
+  hf.busy = true; hfState('thinking');
+  const follow = Date.now() < hf.followUntil;
+  try {
+    const r = await fetch('/listen' + (follow ? '?followup=1' : ''), {method: 'POST', body: hfWav(chunks, rate),
+      headers: {'Content-Type': 'audio/wav', 'Authorization': 'Bearer ' + key}});
+    if (r.status === 401) { hfStop(); add('err', 'That key was refused. Enter it again.'); return; }
+    if ((r.headers.get('Content-Type') || '').startsWith('audio/')) {
+      add('you', decodeURIComponent(r.headers.get('X-Jarvis-Heard') || ''));
+      add('jarvis', decodeURIComponent(r.headers.get('X-Jarvis-Reply') || ''));
+      hfMicOff();  // so she doesn't hear herself, and the phone plays her at full volume
+      hfState('speaking');
+      player.src = URL.createObjectURL(await r.blob());
+      await new Promise(done => { player.onended = player.onerror = done; player.play().catch(done); });
+      hf.followUntil = Date.now() + FOLLOW_MS;
+      if (hf.on && !document.hidden) await hfMic();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      if (data.awake) { hfChime(); hf.followUntil = Date.now() + FOLLOW_MS; }
+      else if (data.error && !hf.failures++) add('err', data.error);
+      else if (follow && data.ignored) hf.followUntil = Date.now() + FOLLOW_MS / 2;
+    }
+    if (r.ok) hf.failures = 0;
+  } catch {
+    if (!hf.failures++) add('err', "Can't reach JARVIS. Hands-free keeps trying.");
+    if (hf.on && !hf.stream && !document.hidden) { try { await hfMic(); } catch {} }
+  } finally { hf.busy = false; if (hf.on) hfState(document.hidden ? 'paused' : 'listening'); }
+}
+async function hfKeepAwake(){ try { if (hf.on && navigator.wakeLock && !document.hidden) hf.lock = await navigator.wakeLock.request('screen'); } catch {} }
+async function hfStart(){
+  hf.ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+  try { await hf.ctx.resume(); } catch {}
+  if (!player.src) { player.src = SILENCE; player.play().catch(() => {}); }  // this tap lets her answers play later
+  try { await hfMic(); }
+  catch { add('err', 'Jarvis needs the microphone for hands-free. Allow it for this app in Settings, then try again.'); return; }
+  hf.on = true; hf.failures = 0; hf.followUntil = 0; store.set('jarvis-handsfree', '1');
+  $('handsfree').classList.add('on'); $('handsfree').setAttribute('aria-pressed', 'true');
+  hfState('listening'); hfKeepAwake();
+}
+function hfStop(){
+  hf.on = false; hfMicOff(); store.del('jarvis-handsfree');
+  try { hf.lock && hf.lock.release(); } catch {} hf.lock = null;
+  $('handsfree').classList.remove('on'); $('handsfree').setAttribute('aria-pressed', 'false'); hfShow();
+}
+$('handsfree').onclick = () => hf.on ? hfStop() : hfStart();
+document.addEventListener('visibilitychange', async () => {
+  if (!hf.on) return;
+  if (document.hidden) { if (!hf.busy) hfMicOff(); hfState('paused'); return; }
+  hfKeepAwake();
+  if (!hf.stream && !hf.busy) { try { await hfMic(); hfState('listening'); } catch { hfStop(); } }
+});
+hfShow();
 </script>
 </body>
 </html>
