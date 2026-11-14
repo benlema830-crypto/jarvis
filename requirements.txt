@@ -117,6 +117,7 @@ yarl==1.25.1
 claude-agent-sdk==0.2.174
 
 # Always-on-top native desktop orb (Edge WebView2)
+pystray==0.19.5
 pywebview==6.2.1
 
 # Reads YouTube watch history headlessly (youtube_history.py)

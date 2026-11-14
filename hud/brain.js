@@ -53,7 +53,7 @@ J.graphics = { quality: store.get('graphicsQuality', 'auto'), busyUntil: 0,
   budget() {
     const busy = J.resources.active?.length > 0;
     if (busy) this.busyUntil = performance.now() + 1500;
-    if (document.hidden) return {fps:0,scale:.6,max:480,reason:'Hidden'};
+    if (document.hidden || J.paused) return {fps:0,scale:.6,max:480,reason:'Hidden'};  // J.paused: the app hid this window
     if (busy || performance.now() < this.busyUntil) return {fps:24,scale:.7,max:512,reason:'Prioritizing voice'};
     return ({cinematic:{fps:60,scale:1.5,max:1440,reason:'Cinematic'}, balanced:{fps:45,scale:1.1,max:960,reason:'Balanced'},
       economy:{fps:30,scale:.8,max:640,reason:'Economy'},auto:{fps:60,scale:1.35,max:1280,reason:'Automatic'}})[this.quality]
@@ -880,6 +880,7 @@ $('micBtn').onclick = async () => {
 };
 function settings(s) {
   if (s?.listening_mode) J.mode = s.listening_mode;
+  if (typeof s?.mic_muted === 'boolean') { J.micMuted = s.mic_muted; J.emit('mic', J.micMuted); }
   if (Array.isArray(s?.voice_engines)) {
     const pick = $('voicePick');
     const add = make('option', '＋ Make a new voice…'); add.value = NEW_VOICE;
@@ -920,7 +921,7 @@ function renderStatus() {
   const [state, label] = healthLabel();
   document.body.dataset.online = String(J.online); document.body.dataset.state = state;
   $('online').lastElementChild.textContent = J.online ? 'ONLINE' : 'OFFLINE';
-  $('stateText').textContent = label;
+  $('stateText').textContent = J.online && J.micMuted ? 'Mic muted' : label;
   const mic = $('micBtn'); mic.classList.toggle('on', J.online && J.mode === 'continuous');
   mic.title = J.mode === 'continuous' ? 'Continuous listening (click for wake word)' : 'Wake word "Jarvis" (click for continuous)';
   J.emit('status');
@@ -961,7 +962,7 @@ stream.onmessage = e => {
     J.emit('reset');
     for (const h of ev.history || []) { addMessage(h); J.emit('event', { ...h, replay: true }); }
     J.emit('hello', ev);
-  } else if (ev.type === 'state') { uiState = ev.state; renderStatus(); }
+  } else if (ev.type === 'state') { uiState = ev.state; renderStatus(); J.emit('state', ev); }
   else if (ev.type === 'settings') settings(ev);
   else if (ev.type === 'level') {
     if ('input' in ev && 'output' in ev) J.emit('audio',ev);

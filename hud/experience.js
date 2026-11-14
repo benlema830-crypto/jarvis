@@ -108,17 +108,34 @@
 
   J.menuItem('view','Desktop orb',async()=>{try{await J.api('/desktop-orb',{});J.notice('Desktop orb opened.');}catch(e){J.notice(e.message);}},'desktopOrbBtn');
   if(new URLSearchParams(location.search).get('compact')==='1'){
+    // The desktop app's orb (jarvis_app.py): his main face in the corner of the screen. It grows while the two of
+    // you are talking and shrinks back after a quiet spell; "Open" shows his full window, "Hide" sends him to the tray.
     document.body.classList.add('native-orb');J.setCompact(true);
+    const app=()=>window.pywebview?.api;
     const chrome=make('div',null,'orb-chrome'),drag=make('span','JARVIS','pywebview-drag-region');
-    const expand=button('Expand',async()=>{
-      const compact=!document.body.classList.contains('compact-orb');
-      if(window.pywebview?.api)await window.pywebview.api.set_compact(compact);else J.setCompact(compact);
-      expand.textContent=compact?'Expand':'Compact';
-    });
-    chrome.append(drag,expand,button('Close',()=>window.pywebview?.api.close()));document.body.append(chrome);
-    document.getElementById('reactor').addEventListener('dblclick',()=>expand.click());
+    const mic=button('Mic',async()=>{try{await J.api('/settings',{mic_muted:!J.micMuted});}catch(e){J.notice(e.message);}});
+    mic.title='Mute or unmute the microphone';
+    const open=button('Open',()=>app()?app().open_window():J.setCompact(!document.body.classList.contains('compact-orb')));
+    open.title='Open his full window';
+    const hide=button('Hide',()=>app()?.hide_orb());hide.title='Hide the orb (the icon by the clock brings him back)';
+    chrome.append(drag,mic,open,hide);document.body.append(chrome);
+    drag.addEventListener('mouseup',()=>setTimeout(()=>app()?.save_position(),150));
+    J.on('mic',muted=>{mic.textContent=muted?'Muted':'Mic';mic.classList.toggle('muted',muted);document.body.classList.toggle('mic-muted',muted);});
+    document.getElementById('reactor').addEventListener('dblclick',()=>open.click());
+    const caption=make('div',null,'orb-caption');document.body.append(caption);
     const ask=make('form',null,'orb-command'),input=make('input');input.placeholder='Ask Jarvis…';input.setAttribute('aria-label','Ask Jarvis from desktop orb');
     const send=make('button','↑');send.type='submit';ask.append(input,send);
-    ask.onsubmit=e=>{e.preventDefault();if(input.value.trim()){J.send(input.value);input.value='';}};document.body.append(ask);
+    ask.onsubmit=e=>{e.preventDefault();if(input.value.trim()){J.send(input.value);input.value='';active();}};document.body.append(ask);
+    // Grow and shrink
+    const QUIET_MS=15000;let lastActive=0,size='small',busy=false;
+    const resize=want=>{if(want===size)return;size=want;document.body.classList.toggle('orb-big',want==='big');app()?.set_size(want);};
+    const active=()=>{lastActive=Date.now();resize('big');};
+    J.focusAsk=()=>{active();setTimeout(()=>input.focus(),60);};
+    input.addEventListener('focus',active);input.addEventListener('input',active);
+    J.on('state',ev=>{busy=ev.state==='thinking';if(busy)active();});
+    J.on('you',ev=>{if(!ev.replay){caption.textContent='';active();}});
+    J.on('jarvis',ev=>{if(!ev.replay&&ev.text){caption.textContent=ev.text;active();}});
+    J.on('audio',ev=>{if((ev.output||0)>.02)lastActive=Date.now();});  // still speaking: stay big
+    setInterval(()=>{if(size==='big'&&!busy&&document.activeElement!==input&&Date.now()-lastActive>QUIET_MS){caption.textContent='';resize('small');}},1000);
   }
 })();

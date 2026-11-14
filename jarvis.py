@@ -1320,6 +1320,7 @@ def main():
 
     hud.on_stop = stop   # the page's stop button, labelled with Ctrl+Alt+J: everything
     hud.on_voice = tools.set_voice_engine
+    hud.on_mic = (lambda muted: setattr(ears, "muted", muted)) if ears else None
     if ears:
         ears.on_wake = attention
         ears.on_barge_in = barge_in

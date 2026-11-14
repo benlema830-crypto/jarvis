@@ -49,6 +49,8 @@ LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "pro
 commands: queue.Queue = response_routing.CommandQueue()
 on_stop = None  # set by jarvis.py
 on_voice = None  # set by jarvis.py: switches the speaking voice
+on_mic = None  # set by jarvis.py: mutes or unmutes the microphone (the app's tray menu, the page)
+mic_muted = False  # not saved: a restart always comes back listening
 info: dict = {}  # shown on the HUD: voice engine, speech recognition device, model
 
 _subscribers: list[queue.Queue] = []
@@ -180,6 +182,7 @@ def home() -> dict:
 def settings():
     return {"listening_mode": preferences.listening_mode(),
             "microphone_enabled": info.get("ears") != "keyboard",
+            "mic_muted": mic_muted,
             "calendar_connected": bool(context.calendar_urls()),
             **voice_settings()}
 
@@ -191,6 +194,7 @@ def voice_settings():
 
 
 def update_settings(payload):
+    global mic_muted
     if set(payload) == {"open_voice_studio"}:
         import voicestudio_voice
         if not voicestudio_voice.open_app():
@@ -206,6 +210,14 @@ def update_settings(payload):
         except RuntimeError as e:
             raise ValueError(str(e)) from e
         return settings()
+    if set(payload) == {"mic_muted"}:
+        if type(payload["mic_muted"]) is not bool or not on_mic:
+            raise ValueError("The microphone isn't available.")
+        on_mic(payload["mic_muted"])
+        mic_muted = payload["mic_muted"]
+        result = settings()
+        emit("settings", **result)
+        return result
     if set(payload) != {"listening_mode"}:
         raise ValueError("Supply a listening mode.")
     preferences.set_listening_mode(payload["listening_mode"])

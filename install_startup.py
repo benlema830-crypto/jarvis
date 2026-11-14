@@ -1,28 +1,18 @@
-"""Make Jarvis start when you log in to Windows.
+"""Make Jarvis (and his desktop app) start when you log in to Windows.
 
     .venv\\Scripts\\python.exe install_startup.py            add to startup
     .venv\\Scripts\\python.exe install_startup.py --remove   remove from startup
-"""
 
-import os
+The app's tray menu has the same switch ("Start with Windows"). `jarvis_app.py --install` also adds the
+Start menu entry and points the desktop shortcuts at the app.
+"""
 import sys
 
-import win32com.client
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-STARTUP = os.path.join(os.environ["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-SHORTCUT = os.path.join(STARTUP, "Jarvis.lnk")
+import jarvis_app
 
 if "--remove" in sys.argv:
-    if os.path.exists(SHORTCUT):
-        os.remove(SHORTCUT)
+    jarvis_app.set_starts_with_windows(False)
     print("Jarvis removed from startup.")
 else:
-    link = win32com.client.Dispatch("WScript.Shell").CreateShortcut(SHORTCUT)
-    link.TargetPath = os.path.join(HERE, "run.bat")
-    link.WorkingDirectory = HERE
-    link.WindowStyle = 7  # start minimized
-    link.IconLocation = os.path.join(HERE, "jarvis.ico") + ",0"
-    link.Description = "JARVIS assistant"
-    link.Save()
-    print(f"Jarvis will start when you log in. Shortcut: {SHORTCUT}")
+    jarvis_app.set_starts_with_windows(True)
+    print(f"Jarvis will start when you log in. Shortcut: {jarvis_app.STARTUP_LINK}")

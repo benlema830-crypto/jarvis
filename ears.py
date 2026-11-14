@@ -168,6 +168,7 @@ class Ears:
         self.on_wake = None       # called from the audio thread when "hey Jarvis" is heard
         self.on_barge_in = None   # called with (text, is_owner) for phrases spoken while Jarvis is busy
         self.level = 0.0     # mic loudness, for the HUD
+        self.muted = False   # the app's Mute: the mic stays open but only silence goes on
 
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.voiceprint = None
@@ -205,7 +206,10 @@ class Ears:
 
     def _receive(self, indata, *_):
         self.last_input = time.monotonic()
-        self._blocks.put(indata[:, 0].copy())
+        block = indata[:, 0].copy()
+        if self.muted:
+            block[:] = 0  # no wake word, no speech, no level: nothing heard leaves this line
+        self._blocks.put(block)
 
     def recover_input(self):
         """Reopen audio only; preserve the enrolled voice and loaded recognition model."""
