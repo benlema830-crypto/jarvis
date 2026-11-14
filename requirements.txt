@@ -115,6 +115,7 @@ yarl==1.25.1
 
 # Conversation on the Claude subscription via Claude Code (claude_code_brain.py)
 claude-agent-sdk==0.2.174
+http-ece==1.2.1
 
 # Always-on-top native desktop orb (Edge WebView2)
 pystray==0.19.5
@@ -122,6 +123,9 @@ pywebview==6.2.1
 
 # Reads YouTube watch history headlessly (youtube_history.py)
 playwright==1.64.1
+py-vapid==1.9.6
+pywebpush==2.5.0
+segno==1.6.6
 
 # Creator watch: YouTube captions for new Jarvis videos (creator_watch.py)
 youtube-transcript-api==1.2.5

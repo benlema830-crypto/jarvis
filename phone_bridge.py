@@ -14,7 +14,12 @@ preferences "phone_approvals": false turns the buttons off.
 Endpoints: GET / (chat page), GET /health, POST /ask {"text"} -> {"reply"},
 POST /voice {"text"} -> the reply as a WAV in Jarvis's own voice (text in the X-Jarvis-Reply header),
 GET /pending -> {"question"} (the open yes/no question, if any), POST /answer {"approve": true|false}.
+
+The phone app: the same page installs to the iPhone home screen (manifest, icons and service worker below need no
+key; they hold nothing private). GET /inbox?after=N -> answers that arrived after the phone stopped waiting;
+GET /push/key, POST /push/subscribe and /push/unsubscribe {subscription} turn alerts on and off (phone_push.py).
 """
+import collections
 import base64
 import hmac
 import io
@@ -38,6 +43,14 @@ PAGE = ROOT / "hud" / "phone.html"
 PORT = int(os.getenv("JARVIS_PHONE_PORT") or 7782)
 REPLY_SECONDS = 170   # a turn that runs longer answers "still working" instead of hanging the phone
 MAX_BODY = 8000
+APP_FILES = {  # the installable app's files: public, like the page
+    "/manifest.webmanifest": ("phone.webmanifest", "application/manifest+json"),
+    "/sw.js": ("phone-sw.js", "text/javascript; charset=utf-8"),
+    "/apple-touch-icon.png": ("phone-icon-180.png", "image/png"),
+    "/phone-icon-180.png": ("phone-icon-180.png", "image/png"),
+    "/phone-icon-192.png": ("phone-icon-192.png", "image/png"),
+    "/phone-icon-512.png": ("phone-icon-512.png", "image/png"),
+}
 LOCKOUT_FAILS, LOCKOUT_SECONDS = 10, 600
 
 
@@ -90,6 +103,9 @@ class Bridge:
         self.server = None
         self.fails = []
         self.busy = threading.Lock()   # one phone turn at a time
+        self.inbox = collections.deque(maxlen=20)  # answers that came after the phone stopped waiting
+        self.inbox_id = 0
+        self._inbox_lock = threading.Lock()
 
     def status(self):
         return {"token": STORE.is_file(), "running": self.running, "port": PORT, "error": self.error}
@@ -161,17 +177,39 @@ class Bridge:
         if not self.busy.acquire(timeout=5):
             return "I'm still on your last request. Give me a moment.", None
         try:
-            done, box = threading.Event(), []
+            done, box, gate, waiting = threading.Event(), [], threading.Lock(), [True]
 
             def reply(answer, wav=None):
-                box.append((answer, wav))
-                done.set()
+                with gate:
+                    if waiting[0]:
+                        box.append((answer, wav))
+                        done.set()
+                        return
+                self.late_reply(answer)  # the phone stopped waiting: send it to the app instead
             self.on_message(text, reply, voice)
-            if not done.wait(REPLY_SECONDS):
-                return "Still working on that. I'll show the result on the PC.", None
-            return box[0]
+            done.wait(REPLY_SECONDS)
+            with gate:
+                waiting[0] = False
+                if box:
+                    return box[0]
+            return "Still working on that. I'll send the answer to your phone when it's done.", None
         finally:
             self.busy.release()
+
+    def late_reply(self, answer: str):
+        """An answer after the phone gave up waiting: kept for the app (GET /inbox) and sent as an alert."""
+        with self._inbox_lock:
+            self.inbox_id += 1
+            self.inbox.append({"id": self.inbox_id, "text": str(answer)[:4000], "t": time.time()})
+        import phone_push
+        if phone_push.ready():
+            threading.Thread(target=phone_push.send, args=("Jarvis", str(answer)),
+                             kwargs={"tag": f"reply-{self.inbox_id}", "kind": "reply"}, daemon=True,
+                             name="phone-alert").start()
+
+    def inbox_after(self, after: int) -> dict:
+        with self._inbox_lock:
+            return {"items": [item for item in self.inbox if item["id"] > after], "last": self.inbox_id}
 
 
 def make_handler(bridge: Bridge):
@@ -201,9 +239,24 @@ def make_handler(bridge: Bridge):
                 return self.reply(200, {"ok": True})
             if route in ("/", "/index.html"):  # the page holds no secrets; the token is typed in once
                 return self.reply(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-            if route == "/pending":
+            if route in APP_FILES:
+                name, kind = APP_FILES[route]
+                return self.reply(200, (PAGE.parent / name).read_bytes(), kind)
+            if route in ("/pending", "/inbox", "/push/key"):
                 if not bridge.allowed(self.headers):
                     return self.reply(401, {"error": "key refused"})
+                if route == "/inbox":
+                    try:
+                        after = int(self.path.partition("after=")[2].split("&")[0] or 0)
+                    except ValueError:
+                        after = 0
+                    return self.reply(200, bridge.inbox_after(after))
+                if route == "/push/key":
+                    import phone_push
+                    try:
+                        return self.reply(200, {"key": phone_push.public_key()})
+                    except Exception:
+                        return self.reply(500, {"error": "Alerts can't be set up on this PC."})
                 return self.reply(200, bridge.pending())
             self.reply(404, {"error": "not found"})
 
@@ -243,10 +296,28 @@ def make_handler(bridge: Bridge):
         def do_POST(self):
             route = self.path.split("?")[0]
             self._body_read = False
-            if route not in ("/ask", "/voice", "/answer"):
+            if route not in ("/ask", "/voice", "/answer", "/push/subscribe", "/push/unsubscribe"):
                 return self.refuse(404, "Wrong address. It should end in slash ask, or slash voice.")
             if not bridge.allowed(self.headers):
                 return self.refuse(401, "Jarvis refused the phone key. Check the Authorization header.")
+            if route in ("/push/subscribe", "/push/unsubscribe"):
+                import phone_push
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= 4000:
+                        raise ValueError
+                    body = self.rfile.read(size)
+                    self._body_read = True
+                    sub = json.loads(body).get("subscription")
+                except (ValueError, AttributeError):
+                    return self.refuse(400, "Jarvis couldn't read that alert setting.")
+                if route == "/push/unsubscribe":
+                    phone_push.unsubscribe(sub.get("endpoint") if isinstance(sub, dict) else None)
+                    return self.reply(200, {"ok": True})
+                if not phone_push.subscribe(sub):
+                    return self.refuse(400, "That isn't a phone alert subscription.")
+                print("(Phone alerts turned on)", flush=True)
+                return self.reply(200, {"ok": True})
             if route == "/answer":
                 try:
                     size = int(self.headers.get("Content-Length", 0))

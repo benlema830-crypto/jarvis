@@ -764,7 +764,17 @@ def text_question(speech: str, details: str, free_text: bool = False):
     body = details if len(details) <= 700 else speech
     ending = "Reply with your answer." if free_text else "Reply yes or no."
     message = privacy.redact(f"Jarvis needs your OK.\n{body}\n{ending}")
-    threading.Thread(target=lambda: telegram_bridge.send_to_owner(message), daemon=True, name="text-question").start()
+
+    def deliver():
+        # A yes/no goes to the phone app as an alert with Yes and No inside it; Telegram only when the app has no
+        # alerts turned on or none got through, so the owner isn't buzzed twice. Free-text questions stay on Telegram.
+        import phone_bridge
+        if not free_text and phone_bridge.Bridge.approvals_on():  # the app can only take the answer when allowed to
+            import phone_push
+            if phone_push.ready() and phone_push.send("Jarvis needs your OK", body, tag="question", kind="question"):
+                return
+        telegram_bridge.send_to_owner(message)
+    threading.Thread(target=deliver, daemon=True, name="text-question").start()
 
 
 def handle_telegram_item(brain, voice, item):

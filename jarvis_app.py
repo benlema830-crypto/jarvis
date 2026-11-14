@@ -350,6 +350,10 @@ class App:
         def startup(_icon, _item):
             set_starts_with_windows(not starts_with_windows())
 
+        def phone(_icon, _item):  # a QR code on this screen that opens the phone app already connected
+            subprocess.Popen([str(PYTHONW), str(ROOT / 'scripts' / 'phone_app.py')], cwd=ROOT,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+
         def restart(_icon, _item):
             subprocess.Popen([str(PYTHONW), str(ROOT / 'scripts' / 'restart_jarvis.py')], cwd=ROOT,
                              creationflags=subprocess.CREATE_NO_WINDOW)
@@ -364,6 +368,7 @@ class App:
             item('Always listening', mode('continuous'), radio=True, checked=lambda _: state['mode'] == 'continuous'),
             item('Only when I say "Jarvis"', mode('wake'), radio=True, checked=lambda _: state['mode'] == 'wake'),
             Menu.SEPARATOR,
+            item('Put Jarvis on my phone', phone),
             item('Start with Windows', startup, checked=lambda _: starts_with_windows()),
             item('Restart Jarvis', restart),
             item('Close the app (Jarvis keeps running)', lambda *_: self.quit()),

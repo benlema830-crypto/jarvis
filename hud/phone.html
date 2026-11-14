@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="JARVIS">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#030608">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>JARVIS</title>
 <style>
 :root{color-scheme:dark;--bg:#030608;--panel:#0a1115;--raise:#101a1f;--line:rgba(130,200,190,.13);--line-strong:rgba(130,220,200,.28);
@@ -41,11 +44,19 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 #ask small{font:600 11px/1 var(--mono);letter-spacing:.14em;color:#f5b83d}
 #ask p{margin:8px 0 12px;white-space:pre-wrap;word-wrap:break-word;max-height:38vh;overflow-y:auto}
 #ask div{display:flex;gap:10px}#ask button{flex:1}
+#alerts{min-height:32px;padding:0 12px;font-size:13px}
+.note{margin:12px 16px 0;padding:12px 14px;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel);color:var(--muted);font-size:14px}
+.note b{color:var(--ink)}.note button{float:right;min-height:28px;padding:0 10px;margin:-4px -6px 0 8px;font-size:13px}
+.stamp{align-self:center;font:11px var(--mono);color:var(--muted);letter-spacing:.08em}
 </style>
 </head>
 <body>
 <header><span class="dot" id="dot"></span><h1>JARVIS</h1>
+ <button id="alerts" type="button" hidden>Turn on alerts</button>
  <label><input type="checkbox" id="speak"> Jarvis voice</label></header>
+<section class="note" id="install" hidden><button type="button" id="installHide">Later</button>
+ <b>Make Jarvis an app:</b> tap the Share button, then <b>Add to Home Screen</b>. Open him from the new icon, and he'll
+ run full screen and can alert you when he needs a yes or no.</section>
 <section id="setup" hidden>
  <p>Paste the phone key that <code>setup_phone.py</code> showed on your PC. It stays on this phone only.</p>
  <input id="key" type="password" autocomplete="off" placeholder="Phone key">
@@ -65,13 +76,28 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 <script>
 const $ = id => document.getElementById(id);
 const store = {get(k){try{return localStorage.getItem(k)}catch{return null}}, set(k,v){try{localStorage.setItem(k,v)}catch{}}, del(k){try{localStorage.removeItem(k)}catch{}}};
+// The install link (scripts/phone_app.py) carries the key after #, which never leaves the phone. In Safari it stays
+// in the address so "Add to Home Screen" keeps it for the app's first start; inside the app it is removed.
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const linked = new URLSearchParams(location.hash.slice(1)).get('key');
+if (linked) store.set('jarvis-key', linked);
+if (linked && standalone) history.replaceState(null, '', '/');
 let key = store.get('jarvis-key');
 $('speak').checked = store.get('jarvis-speak') === '1';
 $('speak').onchange = () => store.set('jarvis-speak', $('speak').checked ? '1' : '0');
 
 function show(){ $('setup').hidden = !!key; $('form').hidden = !key; $('log').hidden = !key; }
-function add(cls, text){ const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').append(d); d.scrollIntoView({block:'end'}); }
-$('save').onclick = () => { key = $('key').value.trim(); if (key) { store.set('jarvis-key', key); show(); ping(); } };
+// The conversation stays on this phone (the last 60 messages), so the app opens where you left it.
+let history_ = []; try { history_ = JSON.parse(store.get('jarvis-chat') || '[]'); } catch {}
+function draw(cls, text){ const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').append(d); d.scrollIntoView({block:'end'}); }
+function add(cls, text){
+  draw(cls, text);
+  if (cls === 'err') return;
+  history_ = history_.concat([[cls, text]]).slice(-60); store.set('jarvis-chat', JSON.stringify(history_));
+}
+for (const [cls, text] of history_) draw(cls, text);
+if (history_.length) { const s = document.createElement('div'); s.className = 'stamp'; s.textContent = 'EARLIER'; $('log').append(s); s.scrollIntoView({block:'end'}); }
+$('save').onclick = () => { key = $('key').value.trim(); if (key) { store.set('jarvis-key', key); show(); ping(); inbox(); subscribe(false); } };
 
 async function ping(){
   try { const r = await fetch('/health'); $('dot').className = 'dot' + (r.ok ? ' on' : ''); } catch { $('dot').className = 'dot'; }
@@ -119,6 +145,48 @@ async function answer(approve){
 }
 $('askYes').onclick = () => answer(true); $('askNo').onclick = () => answer(false);
 setInterval(pending, 4000); document.addEventListener('visibilitychange', pending);
+
+// Answers that came after the phone stopped waiting ("Still working on that…")
+let inboxAfter = Number(store.get('jarvis-inbox') || 0);
+async function inbox(){
+  if (!key || document.hidden) return;
+  try {
+    const r = await fetch('/inbox?after=' + inboxAfter, {headers:{'Authorization':'Bearer ' + key}});
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.last < inboxAfter) inboxAfter = 0;  // Jarvis restarted: his numbering began again
+    for (const item of data.items || []) if (item.id > inboxAfter) add('jarvis', item.text);
+    inboxAfter = Math.max(inboxAfter, data.last || 0); store.set('jarvis-inbox', String(inboxAfter));
+  } catch {}
+}
+setInterval(inbox, 15000); document.addEventListener('visibilitychange', inbox);
+
+// The installed app: offline copy of the page, and alerts (iOS allows them only from the home-screen app)
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+const canAlert = standalone && 'PushManager' in window && 'Notification' in window;
+$('install').hidden = standalone || store.get('jarvis-install-hidden') === '1' || !/iPhone|iPad/.test(navigator.userAgent);
+$('installHide').onclick = () => { store.set('jarvis-install-hidden', '1'); $('install').hidden = true; };
+const b64 = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+async function subscribe(ask){
+  if (!canAlert || !key) return;
+  if (Notification.permission === 'denied') { $('alerts').hidden = true; return; }
+  if (Notification.permission !== 'granted') {
+    $('alerts').hidden = false;
+    if (!ask || await Notification.requestPermission() !== 'granted') return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const r = await fetch('/push/key', {headers:{'Authorization':'Bearer ' + key}});
+      sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64((await r.json()).key)});
+    }
+    const r = await fetch('/push/subscribe', {method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + key}, body: JSON.stringify({subscription: sub.toJSON()})});
+    $('alerts').hidden = r.ok;
+    if (ask && r.ok) add('jarvis', "Alerts are on. I'll buzz you when I need a yes or no and you're away from the PC, or when an answer takes a while.");
+  } catch { if (ask) add('err', "Alerts couldn't be turned on. Try again in a moment."); }
+}
+$('alerts').onclick = () => subscribe(true);
 document.addEventListener('click', unlock);
 $('form').onsubmit = e => { e.preventDefault(); const t = $('text').value.trim(); if (t) { $('text').value = ''; send(t); } };
 
@@ -133,7 +201,7 @@ if (Rec) {
     rec.start();
   };
 }
-show(); if (key) { ping(); pending(); }
+show(); if (key) { ping(); pending(); inbox(); subscribe(false); }
 </script>
 </body>
 </html>
