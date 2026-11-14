@@ -675,7 +675,9 @@ class Brain:
         except claude_code_brain.WouldBillAPI:
             raise model_provider.ProviderError('Claude Code is not signed in to your Claude plan, so I stopped '
                                                'rather than use API credits. Sign in to Claude Code.') from None
-        except Exception:
+        except Exception as exc:
+            import traceback  # the spoken message can't say what broke; the log has to
+            print(f"(Claude Code turn failed: {exc!r})\n{traceback.format_exc()}", flush=True)
             raise model_provider.ProviderError('Claude subscription conversation failed. Check that Claude Code '
                                                'is signed in.') from None
         voice_health.api_state('responded')

@@ -126,6 +126,12 @@ class ClaudeCodeBrain:
             cwd=str(HERE),
             env={"ANTHROPIC_API_KEY": ""},            # use the claude.ai login, never the API key
         )
+        # The prompt goes in a file, not on the command line: Windows caps a command line at 32,767 characters and
+        # his grew past that on 2026-11-13 (WinError 206, which the SDK reports as "Claude Code not found").
+        prompt_file = HERE / "data" / "claude-brain-system.txt"
+        prompt_file.parent.mkdir(exist_ok=True)
+        prompt_file.write_text(system, encoding="utf-8")
+        options.system_prompt = {"type": "file", "path": str(prompt_file)}
         client = ClaudeSDKClient(options)
         await client.connect()
         # Checked before any message is sent: with an API key in play the account reports
