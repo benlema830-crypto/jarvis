@@ -354,6 +354,10 @@ class App:
             subprocess.Popen([str(PYTHONW), str(ROOT / 'scripts' / 'phone_app.py')], cwd=ROOT,
                              creationflags=subprocess.CREATE_NO_WINDOW)
 
+        def laptop(_icon, _item):  # the command to run on the Fedora laptop and a one-time pairing code
+            subprocess.Popen([str(PYTHONW), str(ROOT / 'scripts' / 'laptop_setup.py')], cwd=ROOT,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+
         def restart(_icon, _item):
             subprocess.Popen([str(PYTHONW), str(ROOT / 'scripts' / 'restart_jarvis.py')], cwd=ROOT,
                              creationflags=subprocess.CREATE_NO_WINDOW)
@@ -369,6 +373,7 @@ class App:
             item('Only when I say "Jarvis"', mode('wake'), radio=True, checked=lambda _: state['mode'] == 'wake'),
             Menu.SEPARATOR,
             item('Put Jarvis on my phone', phone),
+            item('Set up the laptop', laptop),
             item('Start with Windows', startup, checked=lambda _: starts_with_windows()),
             item('Restart Jarvis', restart),
             item('Close the app (Jarvis keeps running)', lambda *_: self.quit()),

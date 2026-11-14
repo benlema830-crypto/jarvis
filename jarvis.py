@@ -254,6 +254,7 @@ Using your tools:
 - send_telegram sends a message or a file (a report, a picture, a render) to the user's phone. A message starting [Via Telegram] is the user writing from their phone: your reply goes back there as text, so links and short lists are fine, but stay brief.
 - A message starting [Via Terminal] is the user typing in a terminal window on this PC: your reply is printed there, not spoken. Write for reading: exact names, file paths, commands and short lists are fine, and a few lines of output can be quoted. Stay brief.
 - A message starting [Via Phone] is the user on their iPhone (the phone page or Siri): your reply is shown or read aloud there, not spoken at the PC, so keep it short and plain. The few things that need their yes are answered by them, not you: spoken at the PC, the Yes button on the phone page, or a yes sent from their phone or Telegram. [Via Phone as NAME] means that on the phone you are NAME (for example FRIDAY, Tony Stark's other assistant): use that name if you refer to yourself, with a warmer, quicker, more casual manner than JARVIS and no "sir". You are still the same assistant underneath, with the same memory, tools, rules and judgment.
+- A message starting [Via Laptop] is the user speaking to the microphone of their Fedora laptop, which they carry around the house and sometimes out of it: your reply is played aloud from the laptop's speakers in your own voice, not at the PC, so it is spoken like any other reply. You are JARVIS there, as at the PC.
 {off_limits}
 Messages in square brackets such as [REMINDER DUE], [TASK FINISHED], [PARALLEL FINISHED], [HEARTBEAT] or [HOLO] come from your own systems, not the user.
 A [WORKING STATE] block before the user's words is your own record of where things stand: agent work, to-dos, open threads, recent decisions and project handoffs. Use it to know where you left off and to connect requests to ongoing work. Don't read it out, don't act on it unasked, and treat its AI summaries as leads to confirm, not facts.
@@ -821,13 +822,23 @@ def respond_phone(brain: Brain, voice: Voice, item: dict):
     said, wav = [], None
     name = phone_persona()[0]
     prompt = item["prompt"].replace("[Via Phone]", f"[Via Phone as {name}]", 1) if name else item["prompt"]
+    laptop = item.get("voice_as") == "jarvis"  # the laptop's room mic: he answers as himself, in his PC voice
+    if laptop:
+        prompt = item["prompt"]
     try:
         respond(brain, voice, prompt, said.append)
         if item.get("voice_reply"):
-            wav = phone_voice_wav(voice, without_marker(" ".join(said)) or NO_REPLY)
+            text = without_marker(" ".join(said)) or NO_REPLY
+            if laptop:
+                import phone_bridge
+                samples = voice.synthesize(text)
+                wav = phone_bridge.to_wav(samples, RATE) if samples.size else None
+            else:
+                wav = phone_voice_wav(voice, text)
     finally:  # never leave the phone waiting, even if the turn blew up
         reply = without_marker(" ".join(said)) or NO_REPLY
-        hud.emit("jarvis", text=f"(to phone{', as ' + name if name else ''}) " + reply)
+        where = "laptop" if laptop else f"phone{', as ' + name if name else ''}"
+        hud.emit("jarvis", text=f"(to {where}) " + reply)
         item["phone"](reply, wav)
 
 
@@ -1125,6 +1136,8 @@ def listen_loop(ears, voice: Voice, turns: Turns):
             turns.idle.clear()
             voice_health.recognition("accepted")
             runtime_metrics.begin_turn(getattr(ears, 'last_utterance_end', None), source='voice')
+            import desk_bridge
+            desk_bridge.pc_heard(command)  # the laptop's room mic may have heard it too: the PC answers it
             hud.commands.put(heard_as(command, text, woke, preferences.listening_mode()))
         except Exception as e:  # the only voice listener: log and keep listening, never exit
             print(f"(listener error: {e!r})", flush=True)
@@ -1219,6 +1232,23 @@ def start_bridges(ears):
     phone_bridge.BRIDGE.transcribe = bridge.transcribe  # hands-free in the phone app: the same local Whisper
     phone_bridge.BRIDGE.name = lambda: phone_persona()[0] or "Jarvis"  # it answers to "Friday, ..."
     phone_bridge.BRIDGE.load_feed(phone_bridge.FEED)  # Shortcut conversations, shown in the app
+    import desk_bridge
+
+    def on_laptop(text, reply):
+        hud.emit("you", text="(Laptop) " + text)
+        answered = answer_from_phone(text)
+        if answered:
+            hud.emit("jarvis", text="(to laptop) " + answered)
+            reply(answered, None)
+            return
+        hud.commands.put({"label": "Laptop message", "phone": reply, "voice_reply": True, "voice_as": "jarvis",
+                          "prompt": f"[Via Laptop] {text}"})
+    desk_bridge.BRIDGE.on_message = on_laptop
+    desk_bridge.BRIDGE.transcribe = bridge.transcribe
+    if desk_bridge.BRIDGE.start():
+        print(f"Laptop bridge online on 127.0.0.1:{desk_bridge.PORT}.", flush=True)
+    elif desk_bridge.BRIDGE.error:
+        print(f"(Laptop bridge not started: {desk_bridge.BRIDGE.error})", flush=True)
     if phone_bridge.BRIDGE.start():
         print(f"Phone bridge online on 127.0.0.1:{phone_bridge.PORT}.", flush=True)
     elif phone_bridge.BRIDGE.error:
@@ -1488,6 +1518,8 @@ def main():
         print(f"Weekday wake-up armed for {morning_wakeup.WAKE_AT.strftime('%H:%M')}.", flush=True)
     import phone_bridge
     phone_bridge.BRIDGE.speak = lambda text: phone_voice_wav(voice, text)
+    import desk_bridge
+    desk_bridge.BRIDGE.speak = lambda text: phone_bridge.to_wav(voice.synthesize(text), RATE)  # his own voice
     if text_mode:
         listener = threading.Thread(target=console_loop, args=(turns,), daemon=True)
     else:
