@@ -78,6 +78,7 @@ class ClaudeCodeBrain:
         self.client = None
         self.model = self.system = None
         self.sent_messages = 0
+        self.final_text = []  # what it wrote after its last tool call this turn (see _turn)
         self.run_tool = None
         self.tool_count = 0
         self.cancel = None
@@ -173,6 +174,7 @@ class ClaudeCodeBrain:
         from claude_agent_sdk import AssistantMessage, RateLimitEvent, ResultMessage, StreamEvent, SystemMessage
         await self.client.query(prompt)
         answer, interrupted = [], False
+        self.final_text = []
         stream = self.client.receive_response().__aiter__()
         while True:
             step = asyncio.ensure_future(stream.__anext__())
@@ -198,6 +200,11 @@ class ClaudeCodeBrain:
                 event = message.event
                 if event.get("type") == "content_block_start":
                     block = event.get("content_block") or {}
+                    # Text before a tool call is thinking aloud; only what follows the last call is the reply.
+                    # Tracked here, in stream order: the tool call itself reaches us on another channel and can
+                    # run before the note written just before it arrives (2026-11-15, notes read out as a report).
+                    if block.get("type") in ("tool_use", "server_tool_use", "mcp_tool_use"):
+                        self.final_text = []
                     if block.get("name") in ("WebSearch", "WebFetch"):  # built in, so tools.run_tool never sees them
                         self._builtin_tool(block["name"])
                     # A new stretch of text after a tool call: end the last one, or "done.Now" is glued together
@@ -209,6 +216,7 @@ class ClaudeCodeBrain:
                 if event.get("type") == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
                     text = event["delta"].get("text", "")
                     answer.append(text)
+                    self.final_text.append(text)
                     if not cancel.is_set():
                         delta(text)
             elif isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":

@@ -28,11 +28,14 @@ class FakeBrain:
 
     def ask(self, model, system, messages, definitions, run_tool, delta, cancel):
         self.model, self.system, self.request, self.definitions = model, system, messages, definitions
-        delta("Menu not shown; take a screenshot.")  # thinking aloud before acting: not part of the report
+        note = "Menu not shown; take a screenshot."  # thinking aloud before acting: not part of the report
+        delta(note)
         self.results = [run_tool(SimpleNamespace(name=name, id=str(n), input=args)) for n, (name, args) in enumerate(self.script)]
         if self.error:
             raise self.error
         delta(self.answer)
+        # The real brain keeps the text after the last tool call in stream order (claude_code_brain._turn).
+        self.final_text = [self.answer] if self.script else [note, self.answer]
         if cancel.is_set():
             raise InterruptedError()
         return self.answer
@@ -76,6 +79,10 @@ class TaskLoop(unittest.TestCase):
     def test_the_report_is_only_what_was_said_after_the_last_action(self):
         a, _, _ = self.run_task([("computer", {"actions": [{"action": "key", "text": "escape"}]})], answer="The menu is closed.")
         self.assertEqual(a.on_done.call_args.args[0]["report"], "The menu is closed.")
+
+    def test_notes_never_become_the_report_when_it_ends_on_an_action(self):
+        a, _, _ = self.run_task([("computer", {"actions": [{"action": "key", "text": "escape"}]})], answer="")
+        self.assertEqual(a.on_done.call_args.args[0]["report"], "It finished without saying what it did.")
 
     def test_a_failed_action_stops_the_rest_and_still_shows_the_screen(self):
         computer = mock.Mock(side_effect=[[{"type": "text", "text": "OK"}], ValueError("That point is off-limits."), AssertionError("must not run")])

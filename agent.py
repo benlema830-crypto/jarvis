@@ -166,7 +166,6 @@ class Agent:
     def __init__(self):
         self.brain = None  # the Claude Code session for the task in hand
         self._stopped_why = ""  # set when Jarvis himself ends a task (time limit, mouse in a corner)
-        self._said = []
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
         self.task = ""
@@ -239,9 +238,10 @@ class Agent:
             request = [{"role": "user", "content": privacy.redact(
                 f"Task from the user: {task}\n\nStart by calling computer with a single screenshot action to see the screen.")}]
             # The spoken report is what it said after its last action, not its notes to itself along the way.
-            self._said = []
-            whole = brain.ask(MODEL, system, request, TOOLS, self._tool, self._said.append, self._cancel)
-            report = "".join(self._said).strip() or whole.strip() or "It finished without saying what it did."
+            whole = brain.ask(MODEL, system, request, TOOLS, self._tool, lambda text: None, self._cancel)
+            # Not `whole` as a fallback: that is every note it wrote along the way.
+            report = ("".join(brain.final_text).strip() or ("" if self.steps else whole.strip())
+                      or "It finished without saying what it did.")
             ok = not self._stopped_why
             if self._stopped_why:
                 report = f"Stopped after {self.steps} steps without finishing - {self._stopped_why}."
@@ -321,7 +321,6 @@ class Agent:
     def _tool(self, block) -> dict:
         """One tool call from Claude Code: run it and hand back text and screenshots. Never raises."""
         self.steps += 1
-        self._said = []  # anything said before this call was thinking aloud, not the final report
         inp = block.input if isinstance(block.input, dict) else {}
         try:
             if self._cancel.is_set():

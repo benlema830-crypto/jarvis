@@ -86,3 +86,38 @@ class HonestCauseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FinalTextTest(unittest.TestCase):
+    """The screen agent's report is the text after its last tool call, judged in stream order (2026-11-15: its
+    notes to itself were read out as the report, because a tool call can run before the note before it arrives)."""
+
+    def test_only_text_after_the_last_tool_call_is_final(self):
+        import asyncio
+        from claude_agent_sdk import ResultMessage, StreamEvent
+
+        def text(t):
+            return StreamEvent(uuid="u", session_id="s", parent_tool_use_id=None,
+                               event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}})
+
+        def block(kind, name=""):
+            return StreamEvent(uuid="u", session_id="s", parent_tool_use_id=None,
+                               event={"type": "content_block_start", "content_block": {"type": kind, "name": name}})
+        stream = [block("text"), text("Menu is animating; look again."), block("tool_use", "mcp__jarvis__computer"),
+                  block("text"), text("Copy link at zoom (505,212)."), block("tool_use", "mcp__jarvis__computer"),
+                  block("text"), text("The video is "), text("a JARVIS that actually works."),
+                  ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=3,
+                                session_id="s")]
+
+        class Client:
+            async def query(self, prompt):
+                pass
+
+            async def receive_response(self):
+                for message in stream:
+                    yield message
+        brain = claude_code_brain.ClaudeCodeBrain.__new__(claude_code_brain.ClaudeCodeBrain)
+        brain.client = Client()
+        whole = asyncio.run(brain._turn("go", lambda t: None, threading.Event()))
+        self.assertIn("Menu is animating", whole)
+        self.assertEqual("".join(brain.final_text), "The video is a JARVIS that actually works.")
