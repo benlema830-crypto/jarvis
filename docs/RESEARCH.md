@@ -93,3 +93,20 @@ MCP, mainly Zapier, and one-click OAuth for some apps.
 5. **Redaction** of secrets/IDs before text reaches the model (isair/jarvis pattern).
 6. More proactive behaviour on top of the calendar heads-ups (built): e.g. "you've been in Discord for an hour"
    using the same foreground-app evidence as Focus.
+
+## GitHub sweep for enhancements and skills (2026-11-15)
+
+Searched GitHub by stars (skills, agent memory, voice, computer use, MCP servers, personal assistants) and read
+the candidates' READMEs against this codebase. Outcome of each pick:
+
+| Pick | Outcome |
+| --- | --- |
+| Agent skills (obsidian-skills, humanizer, ponytail, impeccable, two from addyosmani/agent-skills, two from anthropics/skills) | **Added.** `scripts/setup_skills.py`; see PROJECT-MAP "Skills for the agents". |
+| vercel-labs/agent-desktop (read windows through the accessibility interface) | **Added**, reading only. `ui_tree.py`; see PROJECT-MAP "The screen agent reads windows by name". CursorTouch/Windows-MCP does the same but needs Python 3.14. |
+| homeassistant-ai/ha-mcp (create and edit automations) | **Waiting on the owner.** It installs from Home Assistant's Marketplace (HA is 2026.11.1), whose first-run risk warning is per user and not yet accepted (`marketplace/info` says `warning_accepted: false`). That acceptance is the owner's. After it: install HA-MCP there, add the integration, and give its URL to Jarvis as a custom MCP connection. |
+| mem0-style automatic fact extraction | **Not added.** Tried here already and retired on 2026-11-10 (`decision_log.py`): the journal's facts were mostly one-day choices, and the proposal queue got 129 proposals and one approval. Facts are saved when the owner says them, and that works now: 30 saved in conversation since 2026-10-29, against 5 at the 2026-10-28 audit. |
+| KoljaB/RealtimeSTT 1.2 fast pause transcripts | **Not added.** Recognition here takes 0.14 s median, 0.26 s at the 90th percentile (211 phrases in `data/ears.log`); time to first words is 3.09 s median (`data/turn_metrics.jsonl`, last 400 turns). At most a tenth of a second to gain, for replacing the pipeline the wake word, voice lock and interruptions hang on. The larger wait is the one-second pause before a phrase ends, which is the owner's call (2026-11-10). |
+
+Looked at and left: screenpipe (continuous screen recording; Eyes, Watch and Focus were removed here), claude-mem
+(working memory exists), OpenClaw (a whole assistant, not an add-on), Graphiti (needs a graph database),
+the 400-skill bundles (every installed skill's description is added to each agent's context).
