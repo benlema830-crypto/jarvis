@@ -279,6 +279,82 @@ def point_at_screen(x: int, y: int, label: str = "", seconds: int = 8) -> str:
             + ". It is only shown; nothing was clicked.")
 
 
+@beta_tool(eager_input_streaming=True)
+def explain_on_screen(cards: list[dict] = [], title: str = "", region: list[int] = [],  # noqa: B006 - never mutated
+                      seconds: int = 60):
+    """Visually explain what's on the user's screen: lay a few short cards over it (key facts, a timeline, steps,
+    a little flow diagram, a summary) beside the part you're explaining, while you talk it through. Use it when
+    they say "visually explain this", "explain this page visually", "show me what this is".
+
+    Two calls. First call it with no cards: it returns a screenshot. Then call it again with the cards (and
+    usually a region), and speak your explanation in the same turn. Keep the cards short; your spoken words carry
+    the detail and shouldn't read the cards out. The cards stay on top for `seconds`, the mouse passes through
+    them, and they never take the focus; a new explanation replaces the last. clear_on_screen removes them.
+
+    Args:
+        cards: 1 to 4 cards, each {"kind": "facts" | "timeline" | "steps" | "flow" | "summary", "title": "a few
+            words", "items": ["short line", ...]} with up to 6 items of a few words each. facts: "Label: value"
+            lines show as a two-column table. timeline: "1998 - what happened". steps: in order. flow: the boxes of
+            a simple top-to-bottom diagram, one per item. summary: one or two sentences.
+            Leave out to take the screenshot first.
+        title: The headline, a few words, e.g. "What this pricing page is offering".
+        region: [left, top, right, bottom] in pixels of the screenshot: the part being explained. It gets corner
+            brackets and the cards go beside it. Leave out to use the side of the screen in front.
+        seconds: How long the cards stay, 10 to 300.
+    """
+    import explain_cards
+    import screen_pointer
+    if not cards:
+        shot = look_at_screen.call({"active_window_only": False})
+        if isinstance(shot, str):
+            return shot
+        return shot + [{"type": "text", "text": "Now call explain_on_screen again with the cards (and region) and "
+                                                "speak your explanation in the same turn."}]
+    box = screen_pointer.rect_to_native(*region[:4]) if region and len(region) >= 4 else None
+    if box and worksafe.point_blocked((box[0] + box[2]) // 2, (box[1] + box[3]) // 2):
+        raise ValueError(f"That's {worksafe.blocked_apps()}, which is off-limits.")
+    if box is None:
+        screen_pointer.to_native(0, 0)   # still insist on a fresh look, so the cards are about what's there
+    shown = explain_cards.show(title, cards, box, seconds)
+    return (f"Showing {shown['cards']} card{'s' if shown['cards'] != 1 else ''} "
+            f"({', '.join(shown['titles'])}) {shown['where']} for {shown['seconds']} seconds. They're only shown; "
+            "nothing was clicked. Now explain it out loud, briefly, without reading the cards word for word.")
+
+
+@beta_tool(eager_input_streaming=True)
+def clear_on_screen() -> str:
+    """Take your explanation cards and pointer off the screen now, when the user says "clear that", "close the
+    cards", "get that off my screen" or similar."""
+    import explain_cards
+    import screen_pointer
+    had_cards = explain_cards.hide()
+    with screen_pointer._lock:
+        had_pointer = screen_pointer._current is not None
+    screen_pointer.hide()
+    if not had_cards and not had_pointer:
+        return "Nothing of mine was on the screen."
+    return "Cleared " + " and ".join(name for name, there in (("the cards", had_cards), ("the pointer", had_pointer))
+                                     if there) + "."
+
+
+@beta_tool(eager_input_streaming=True)
+def cursor_companion(on: bool) -> str:
+    """Turn on or off the cursor companion: a small Jarvis orb that follows next to the mouse pointer, with your
+    replies shown in a speech bubble beside it. It never takes clicks or the focus. Use when the user says
+    "follow my cursor", "come with me", "stay by my mouse" (on) or "go back to normal", "stop following my
+    cursor" (off). The choice is remembered across restarts; while it's on, the corner orb is tucked away.
+
+    Args:
+        on: True to follow the cursor, False to go back to the normal corner orb.
+    """
+    import cursor_companion as companion
+    now = companion.enable(bool(on))
+    if on and not now:
+        raise RuntimeError("The companion couldn't be drawn on the screen.")
+    return ("Following the cursor now, with replies in a bubble beside it. This is remembered after restarts."
+            if now else "Back to normal: the companion is off and the corner orb is back.")
+
+
 # ---------- Media ----------
 
 MEDIA_KEYS = {"play_pause": 0xB3, "next": 0xB0, "previous": 0xB1}
@@ -1947,7 +2023,7 @@ def response_style(settings: str = '{}') -> str:
 
 
 TOOLS = [open_website, show_search_results, home_control, home_status, screen_sync, pc_lights, open_app, list_apps, find_files, open_path, read_clipboard,
-         look_at_screen, point_at_screen, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, meeting_prep, add_calendar_event, get_weather,
+         look_at_screen, point_at_screen, explain_on_screen, clear_on_screen, cursor_companion, media_control, set_volume, sleep_computer, self_check, restart_jarvis, system_status, get_schedule, meeting_prep, add_calendar_event, get_weather,
          recent_activity, remember, recall_memory, search_history, held_updates, correct_memory, update_memory, forget,
          performance_report, set_reminder, list_reminders, cancel_reminder,
          switch_voice, audio_output, do_on_computer, agent_status, stop_agent, terminal_task,

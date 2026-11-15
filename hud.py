@@ -74,6 +74,24 @@ def emit(kind: str, /, **data):
             q.put_nowait(event)
 
 
+def subscribe() -> queue.Queue:
+    """Receive every event from now on in this process (the cursor companion's bubble uses it)."""
+    q: queue.Queue = queue.Queue()
+    with _sub_lock:
+        _subscribers.append(q)
+    return q
+
+
+def unsubscribe(q: queue.Queue):
+    with _sub_lock:
+        if q in _subscribers:
+            _subscribers.remove(q)
+
+
+def current_state() -> str:
+    return _state
+
+
 def _under_test() -> bool:
     """The test suite emits fake conversations; keep them out of the real transcript."""
     import testing_guard
@@ -183,6 +201,7 @@ def settings():
     return {"listening_mode": preferences.listening_mode(),
             "microphone_enabled": info.get("ears") != "keyboard",
             "mic_muted": mic_muted,
+            "cursor_companion": bool(preferences.read().get("cursor_companion")),
             "calendar_connected": bool(context.calendar_urls()),
             **voice_settings()}
 

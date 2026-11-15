@@ -160,6 +160,8 @@ class App:
         self.lock = threading.Lock()
         self.quitting = False
         self.placed = False
+        self.companion = False     # the cursor companion is on, so the corner orb is tucked away
+        self.orb_tucked = False
 
     # Called from the orb page (window.pywebview.api.*)
     def open_window(self):
@@ -233,6 +235,25 @@ class App:
         if ask:
             self.set_size('big')
             self.orb.evaluate_js('J.focusAsk && J.focusAsk()')
+
+    def follow_companion(self, on):
+        """While the orb by the mouse pointer (cursor_companion.py) is on, the corner orb steps aside; it comes
+        back when that's turned off. Never takes the focus either way."""
+        if on == self.companion or not self.orb:
+            return
+        self.companion = on
+        import win32gui
+        hwnd = self.orb.native.Handle.ToInt32()
+        if on and win32gui.IsWindowVisible(hwnd):
+            self._hide(self.orb)
+            self.orb_tucked = True
+        elif not on and self.orb_tucked and not self.main_visible():
+            self.orb_tucked = False
+            self.orb.show()
+            try:
+                self.orb.evaluate_js('window.J && (J.paused = false)')
+            except Exception:
+                pass
 
     def main_visible(self):
         try:
@@ -323,6 +344,7 @@ class App:
                 try:
                     current = jarvis_settings()
                     state.update(muted=bool(current.get('mic_muted')), mode=current.get('listening_mode', 'wake'))
+                    self.follow_companion(bool(current.get('cursor_companion')))
                 except Exception:
                     pass
                 shown = state['muted']

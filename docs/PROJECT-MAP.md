@@ -61,6 +61,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Creator watch | creator_watch.py (Zubair Trabzada's YouTube feed and GitHub every 6 hours; new Jarvis videos written up by Codex -> Research/Zubair watch/ in the vault; `creator_watch` tool) |
 | Workshop | workshop_refs.py (photographs of the real thing, looked up by Codex), workshop.py (`workshop` tool: Fable writes a 3D scene in steps; changes, pull-apart, undo, render), hud/workshop.js (the bench around the stage), hud/workshop-frame.html (the sandboxed three.js stage), hud/vendor/three.module.js, brain.py `/workshop/*` (picture, snapshot, files), hud.py `/workshop` (state) |
 | Screen pointer | screen_pointer.py (`point_at_screen`: a click-through ring and label over a control) |
+| Screen overlays | overlay_ui.py (see-through, click-through, never-focused windows in the page's style, one thread), explain_cards.py (`explain_on_screen` / `clear_on_screen`: cards beside the part of the screen being explained), cursor_companion.py (`cursor_companion`: a small orb by the mouse pointer with replies in a bubble; preferences `cursor_companion`, read by jarvis_app.py to tuck its corner orb away) |
 | Meeting prep | meeting_prep.py (`meeting_prep` tool, and a brief half an hour before an event when the vault, facts or tasks hold something on it -> Briefs/Meetings/ in the vault) |
 | Reply language | reply_language.py (`reply_language` tool; a line in the brain's instructions and the language given to the voice; preferences `reply_language`) |
 | Teardowns | teardown.py (`reverse_engineer` tool: an agent session with the REA toolkit -> Research/Teardowns/ in the vault), scripts/setup_rea.py (installs REA in vendor/rea and connects it for data/teardowns only) |
@@ -398,6 +399,15 @@ down between the agent's own actions ("you took over the mouse"). `preferences "
 **Pointer** (`screen_pointer.py`): `look_at_screen` records how its picture maps onto the desktop; `point_at_screen`
 turns a point in that picture into a real one and draws a ring and label there for a few seconds in a layered,
 click-through, never-focused window.
+
+**Overlays** (`overlay_ui.py`): every overlay is a layered window filled from a PIL image with per-pixel alpha
+(UpdateLayeredWindow), on one "jarvis-overlays" thread that pumps messages and ticks animations. Palette and fonts
+copy hud/brain.css (dark panel, teal accent, mono labels) and the violet core of hud/holo.js. `explain_on_screen`
+is two calls: no cards -> a screenshot; then cards + a region in screenshot pixels -> corner brackets round the
+region and a staggered stack of cards beside it (right, else left, else over its edge; two columns when tall),
+gone after `seconds`, from the close button (the only clickable overlay; WM_MOUSEACTIVATE -> no focus) or
+`clear_on_screen`. The companion subscribes to hud events (`hud.subscribe`) for state and reply text, follows
+GetCursorPos at ~40 fps, and hides while a full-screen app is in front.
 
 **Telegram files**: `send_telegram(text, file)`; pictures up to 10 MB as photos, anything up to 50 MB as a document,
 only ever to the paired chat, never a credentials file.

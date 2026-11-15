@@ -46,6 +46,19 @@ def to_native(x, y, now=None):
     return (round(left + x * (right - left) / width), round(top + y * (bottom - top) / height))
 
 
+def rect_to_native(left, top, right, bottom):
+    """A box in the last screenshot -> the same box on the real desktop, trimmed to the screenshot's edges."""
+    with _lock:
+        look = _look
+    if not look:
+        return to_native(0, 0)   # raises the "look first" error
+    width, height = look["size"]
+    clamp = (lambda v, hi: min(max(float(v), 0), hi))
+    l, r = sorted((clamp(left, width), clamp(right, width)))
+    t, b = sorted((clamp(top, height), clamp(bottom, height)))
+    return (*to_native(l, t), *to_native(r, b))
+
+
 def _window_proc(hwnd, message, wparam, lparam):
     import win32con
     import win32gui
