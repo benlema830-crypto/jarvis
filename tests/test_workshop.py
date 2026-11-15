@@ -360,14 +360,14 @@ class WorkshopFlowTest(unittest.TestCase):
         self.assertNotIn("NOT CONFIRMED", workshop.explode(True))
 
     def test_no_page_means_one_is_opened_and_jarvis_is_told_the_truth(self):
-        reply = workshop.build("a desk lamp")           # no page has said it is there, and the browser won't open
+        reply = workshop.build("a desk lamp")           # no page has said it is there, and his window won't open
         self.wait()
         self.assertEqual(self.opened, [1])
         self.assertIn("NOT CONFIRMED", reply)
-        self.assertIn("Jarvis CEO", reply)
+        self.assertIn("Jarvis app", reply)
         self.assertIn("isn't showing it right now", self.said[0][0])
         self.assertIn("NOT CONFIRMED", workshop.show("model"))
-        self.assertEqual(self.opened, [1])              # not a new tab for every sentence
+        self.assertEqual(self.opened, [1])              # not a new window for every sentence
 
     def test_a_page_opened_for_it_counts_once_it_reports_in(self):
         self.browser = True

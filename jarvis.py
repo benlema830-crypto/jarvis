@@ -7,7 +7,7 @@ Run:  run.bat            voice mode - say "Jarvis, ..." to talk to him
       run.bat --text     type instead of talk
       run.bat --voices   hear the available offline (Kokoro) British voices
       --quiet-start      skip the spoken startup briefing
-      --no-window        don't open the classic HUD window
+      --no-window        don't open his app window
 
 Say "Jarvis" or press Ctrl+Alt+J at any time - even mid-sentence - to get his attention.
 """
@@ -139,7 +139,7 @@ OPEN_SELF = re.compile(r"\s*(?:please\s+)?(?:open(?:\s+(?:up|yourself))?|show\s+
 
 
 def open_brain_page():
-    """Open Jarvis's own Brain page (starting its server if needed), as the Jarvis CEO icon does."""
+    """Open Jarvis's own app window (starting the page server if needed), as the Jarvis desktop icon does."""
     import subprocess
     subprocess.Popen([os.path.join(HERE, ".venv", "Scripts", "pythonw.exe"), os.path.join(HERE, "open_brain.py")],
                      cwd=HERE, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -157,7 +157,7 @@ def quick_reply(text):
         try:
             open_brain_page()
         except OSError:
-            return "I couldn't open my Brain page."
+            return "I couldn't open my window."
         hud.emit("tool", name="open_brain", input={})
         return ""
     import music
@@ -1053,8 +1053,8 @@ def wait_for_network(max_seconds: int = 45):
 def single_instance():
     mutex = win32event.CreateMutex(None, False, MUTEX_NAME)
     if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        print("Jarvis is already running - bringing up his HUD.")
-        hud.open_window()
+        print("Jarvis is already running - bringing up his window.")
+        open_brain_page()
         sys.exit(0)
     return mutex
 
@@ -1296,7 +1296,7 @@ def main():
     print("JARVIS starting up...", flush=True)
     hud_on = os.getenv("JARVIS_HUD", "on").lower() != "off" and hud.start()
     if hud_on and "--no-window" not in sys.argv:
-        hud.open_window()  # shows the boot sequence while everything loads
+        open_brain_page()  # his app window, never a browser tab
     apps.refresh()
     turns = Turns()
     engine = (preferences.read().get("voice_engine") or os.getenv("JARVIS_TTS")  # the UI's choice wins

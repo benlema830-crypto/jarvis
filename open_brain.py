@@ -1,13 +1,12 @@
-"""Open the second-brain companion without duplicating the voice assistant.
+"""Start Jarvis and his page server if they aren't running, then open his own app window (jarvis_app.py).
 
---no-browser starts the hidden assistant and Brain server only (used by the Startup shortcut)."""
+--no-browser starts the hidden assistant and Brain server only (used by the app itself). His page never opens in a
+browser tab any more: the app window is the one way in."""
 from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
-import webbrowser
-import chrome_browser  # noqa: F401 - open links in Chrome
 from instance_config import HUD_PORT
 
 root = Path(__file__).resolve().parent
@@ -33,4 +32,6 @@ if not running:
                 break
         time.sleep(.1)
 if "--no-browser" not in sys.argv:
-    webbrowser.open("http://127.0.0.1:7781")
+    sys.path.insert(0, str(root))
+    import jarvis_app
+    jarvis_app.launch(window=True)

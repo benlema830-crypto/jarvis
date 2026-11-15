@@ -2,7 +2,7 @@
 
 Jarvis CEO is the active project, previously named Jarvis Brain. The workspace at
 `C:\Users\Lemab\Documents\Jarvis Agent` contains the `Jarvis CEO` project folder; it is the only
-Jarvis (the older variants were deleted on 2026-10-26). Open **Jarvis CEO** on the desktop for the app
+Jarvis (the older variants were deleted on 2026-10-26). Open **Jarvis** on the desktop for the app
 and **JARVIS Workspace** for the active project's files.
 
 | Jarvis CEO folder | Contents |
@@ -29,7 +29,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | --- | --- | --- | --- |
 | `jarvis.py` (the assistant) | 7778 (classic HUD + event stream) | `open_brain.py`, `run.bat` | Ears, voice, brain, tools, Telegram bridge, HOLO watcher, calendar heads-ups |
 | `brain.py` (Brain companion) | 7781 | `open_brain.py` | Serves the Jarvis page (3D model, graph, Console) and the graph data; proxies chat/status to 7778 |
-| `desktop_orb.py` | Uses 7781 | Jarvis Orb desktop shortcut / More menu | Native WebView2 orb; always on top when compact, expands to full Brain workspace |
+| `desktop_orb.py` | Uses 7781 | More menu "Desktop orb" (shim for jarvis_app.py) | Native WebView2 orb; always on top when compact, expands to full Brain workspace |
 | VoiceStudio app | 3900 | the user / Jarvis on voice warm-up | Default voices (VoiceStudio profiles), GPU synthesis |
 | `qwen_fast_worker.py` | — | the assistant, when the Qwen voice is chosen | Local Qwen voice synthesis in `models\qwen-voice` |
 | HOLO `server.py` (optional) | 4890 | "Jarvis, open HOLO" | The separate hand-gesture notes app |

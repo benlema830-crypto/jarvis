@@ -91,7 +91,7 @@ def main(argv=None):
         print(f"Jarvis refused the question (HTTP {error.code}).", file=sys.stderr)
         return 1
     except (urllib.error.URLError, OSError):
-        print("Jarvis isn't running. Open the Jarvis CEO shortcut to start him.", file=sys.stderr)
+        print("Jarvis isn't running. Open the Jarvis desktop shortcut to start him.", file=sys.stderr)
         return 1
     for stream in (sys.stdout,):
         if hasattr(stream, "reconfigure"):

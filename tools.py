@@ -1492,7 +1492,7 @@ def holo(action: str = "open") -> str:
 
 @beta_tool(eager_input_streaming=True)
 def workshop(action: str, request: str = "", picture: str = ""):
-    """The workshop, a tab on the Jarvis page (the browser tab called Jarvis CEO; don't name a browser): you
+    """The workshop, a view in your own app window (the Jarvis app; don't name a browser): you
     build a thing in 3D in front of the user, piece by piece, and change it by voice. Each result says whether
     a page is really showing it; when it says NOT CONFIRMED, tell the user they can't see it yet and where it is. Use it when they ask you to build, design, model or mock up something they can look at
     ("build yourself a body", "make a 3D model of a desk lamp", "turn this floor plan into 3D"), and for

@@ -99,7 +99,7 @@ companion (end the `pythonw … brain.py` process, then open the shortcut).
 
 ## Troubleshooting
 
-- **Brain says OFFLINE:** the assistant isn't running — open the Jarvis CEO shortcut. `data/brain-assistant.log` has its output.
+- **Brain says OFFLINE:** the assistant isn't running — open the Jarvis desktop shortcut. `data/brain-assistant.log` has its output.
 - **He doesn't react to his name:** More → Voice health shows the mic, voice-lock and last recognition result. "Voice not matched" means the voice lock rejected it; re-run `enroll.bat` if your setup changed.
 - **"Codex conversation failed":** check the Codex app is signed in with ChatGPT and you're within plan limits.
 - **Camera modes say permission denied:** click the camera icon in the address bar and allow it for 127.0.0.1.

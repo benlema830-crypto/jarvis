@@ -258,12 +258,11 @@ _restored = False
 # The workshop is drawn by the Jarvis page. A page that was opened before the workshop existed, or no page at all,
 # shows nothing, and on 2026-11-11 Jarvis told the owner a model was "up" when it wasn't. So the page says every
 # few seconds that it is there and whether the workshop is the view on screen, and Jarvis reports from that.
-PAGE_URL = "http://127.0.0.1:7781/?workshop=1"
 PAGE_FRESH_SECONDS = 20
 PAGE_WAIT_SECONDS = 3
 PAGE_LOAD_SECONDS = 12
 NOT_SHOWN = ("NOT CONFIRMED: no Jarvis page is showing the workshop, so the user can't see it yet. Tell them that "
-             "plainly: the workshop is the Workshop tab on the Jarvis page (the browser tab called Jarvis CEO).")
+             "plainly: the workshop is the Workshop view in Jarvis's own window (the Jarvis app).")
 _page = {"at": 0.0, "visible": False, "opened": 0.0}
 
 
@@ -277,14 +276,14 @@ def page_showing(now=None):
 
 
 def open_page():
-    """Open the Jarvis page on the workshop in the browser. Replaced in tests. True when a browser was asked to."""
+    """Open Jarvis's app window on the workshop. Replaced in tests. True when the app was asked to."""
     import testing_guard
     if testing_guard.under_test():
         return False
     try:
-        import webbrowser
-        import chrome_browser  # noqa: F401 - Chrome rather than the Windows default
-        return bool(webbrowser.open(PAGE_URL))
+        import jarvis_app
+        jarvis_app.launch(workshop=True)
+        return True
     except Exception as e:
         print(f"(workshop: couldn't open the Jarvis page: {e!r})", flush=True)
         return False

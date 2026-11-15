@@ -2,15 +2,17 @@
 
     pythonw jarvis_app.py             the orb (or bring the running app forward)
     pythonw jarvis_app.py --window    open his full window
+    pythonw jarvis_app.py --workshop  open his full window on the workshop
     pythonw jarvis_app.py --startup   what Windows runs at log-in: start Jarvis quietly, then the orb
 
 The orb is his main face: it sits above the taskbar, grows while you talk to each other and shrinks when it's quiet.
-His full window (the 3D model, the Console, the menus) opens from the orb, the tray icon or the "Jarvis CEO" shortcut,
+His full window (the 3D model, the Console, the menus) opens from the orb, the tray icon or the "Jarvis" shortcut,
 and closing it puts him back in the corner. Ctrl+Alt+Space from anywhere opens the orb's ask box.
 
 This is only the face. Jarvis himself (voice, wake word, tools) is jarvis.py and keeps running when the app is
-closed; open_brain.py starts him if he isn't running. Both windows show the same local page as the browser
-(brain.py, port 7781), in Edge WebView2. One app at a time: a second launch asks the first to show a window.
+closed; open_brain.py starts him if he isn't running. Both windows show his local page (brain.py, port 7781) in
+Edge WebView2; nothing opens it in a browser tab any more. One app at a time: a second launch asks the first to show
+a window.
 """
 import ctypes
 import ctypes.wintypes
@@ -34,9 +36,11 @@ STARTUP_LINK = Path(os.environ.get('APPDATA', '')) / 'Microsoft/Windows/Start Me
 START_MENU_LINK = Path(os.environ.get('APPDATA', '')) / 'Microsoft/Windows/Start Menu/Programs/Jarvis.lnk'
 
 
-def launch(window=False):
-    """Start the app (or poke the running one). Used by the page's "Desktop orb" menu item."""
-    subprocess.Popen([str(PYTHONW), str(ROOT / 'jarvis_app.py')] + (['--window'] if window else []), cwd=ROOT,
+def launch(window=False, workshop=False):
+    """Start the app (or poke the running one): the orb, his window, or his window on the workshop. This is how
+    everything opens Jarvis's page (open_brain.py, "Jarvis, open up", Restart Jarvis, the workshop)."""
+    flag = ['--workshop'] if workshop else ['--window'] if window else []
+    subprocess.Popen([str(PYTHONW), str(ROOT / 'jarvis_app.py')] + flag, cwd=ROOT,
                      creationflags=subprocess.CREATE_NO_WINDOW)
     return {'status': 'launched'}
 
@@ -115,17 +119,24 @@ def set_starts_with_windows(enabled):
         STARTUP_LINK.unlink()
 
 
+OLD_DESKTOP_LINKS = ('Jarvis CEO.lnk', 'Jarvis Orb.lnk')  # replaced by the one "Jarvis" shortcut
+
+
 def install_shortcuts():
-    """Start menu entry, log-in entry, and the desktop's Jarvis CEO / Jarvis Orb shortcuts all open the app."""
+    """Start menu entry, log-in entry, and one desktop shortcut, "Jarvis", that opens his window. The old
+    Jarvis CEO / Jarvis Orb desktop shortcuts are removed (the orb comes up by itself at log-in and from the tray)."""
     make_shortcut(START_MENU_LINK, ['--window'], 'Jarvis')
     set_starts_with_windows(True)
     import win32com.client
     shell = win32com.client.Dispatch('WScript.Shell')
     desktop = Path(shell.SpecialFolders('Desktop'))
-    made = [str(START_MENU_LINK), str(STARTUP_LINK)]
-    for name, args in (('Jarvis CEO.lnk', ['--window']), ('Jarvis Orb.lnk', [])):
-        make_shortcut(desktop / name, args, 'Jarvis')
-        made.append(str(desktop / name))
+    make_shortcut(desktop / 'Jarvis.lnk', ['--window'], 'Jarvis')
+    made = [str(START_MENU_LINK), str(STARTUP_LINK), str(desktop / 'Jarvis.lnk')]
+    for name in OLD_DESKTOP_LINKS:
+        old = desktop / name
+        if old.exists() and 'jarvis_app.py' in shell.CreateShortcut(str(old)).Arguments:
+            old.unlink()
+            made.append(f'removed {old}')
     return made
 
 
@@ -281,6 +292,15 @@ class App:
             self._show(self.main)
         self._hide(self.orb)
 
+    def show_workshop(self):
+        """His window, switched to the workshop (what Jarvis asks for when he builds something to show you)."""
+        self.show_main()
+        try:  # the page may still be loading its scripts; keep asking for a few seconds
+            self.main.evaluate_js("(function go(n){ if (window.J && J.workshop) J.workshop.sync(true);"
+                                  " else if (n) setTimeout(function(){ go(n - 1); }, 500); })(30)")
+        except Exception as exc:
+            print(f'(could not switch to the workshop: {exc!r})', flush=True)
+
     def _main_closing(self):
         if self.quitting:
             return True
@@ -420,21 +440,23 @@ class App:
 
     def watch_signals(self, events):
         import win32event
-        handles = [events['orb'], events['window']]
+        handles = [events['orb'], events['window'], events['workshop']]
         while not self.quitting:
             result = win32event.WaitForMultipleObjects(handles, False, 1000)
             if result == win32event.WAIT_OBJECT_0:
                 self.show_orb()
             elif result == win32event.WAIT_OBJECT_0 + 1:
                 self.show_main()
+            elif result == win32event.WAIT_OBJECT_0 + 2:
+                self.show_workshop()
 
 
-def signals(create):
+def signals(create, kinds=('orb', 'window', 'workshop')):
     import win32event
     from instance_config import MUTEX_NAME
     make = (lambda name: win32event.CreateEvent(None, False, False, name)) if create else \
         (lambda name: win32event.OpenEvent(win32event.EVENT_MODIFY_STATE, False, name))
-    return {kind: make(f'{MUTEX_NAME}_App_{kind}') for kind in ('orb', 'window')}
+    return {kind: make(f'{MUTEX_NAME}_App_{kind}') for kind in kinds}
 
 
 def main():
@@ -446,17 +468,20 @@ def main():
     if '--install' in sys.argv:
         print('\n'.join(install_shortcuts()))
         return
-    want_window = '--window' in sys.argv
+    want_workshop = '--workshop' in sys.argv
+    want_window = want_workshop or '--window' in sys.argv
     if sys.stdout is None:  # pythonw: keep what the app prints (a taken hotkey, a failed placement) in a log
         (ROOT / 'data').mkdir(exist_ok=True)
         sys.stdout = sys.stderr = open(ROOT / 'data' / 'app.log', 'a', encoding='utf-8', buffering=1)  # noqa: SIM115 - open for the app's life
         print(f'===== app started {time.strftime("%Y-%m-%d %H:%M:%S")} =====', flush=True)
     mutex = win32event.CreateMutex(None, False, MUTEX_NAME + '_App')  # noqa: F841 - held for the app's life
     if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        try:
-            win32event.SetEvent(signals(create=False)['window' if want_window else 'orb'])
-        except Exception:
-            pass
+        for kind in (['workshop'] if want_workshop else []) + (['window'] if want_window else ['orb']):
+            try:  # an app started before the workshop signal existed only knows 'window'
+                win32event.SetEvent(signals(create=False, kinds=(kind,))[kind])
+                break
+            except Exception:
+                continue
         return
     events = signals(create=True)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)  # his own taskbar button, not Python's
@@ -481,7 +506,9 @@ def main():
         app.start_tray()
         threading.Thread(target=app.watch_hotkey, daemon=True).start()
         threading.Thread(target=app.watch_signals, args=(events,), daemon=True).start()
-        if want_window:
+        if want_workshop:
+            app.show_workshop()
+        elif want_window:
             app.show_main()
 
     webview.start(started, gui='edgechromium', private_mode=False, storage_path=str(ROOT / 'data/orb-webview'),

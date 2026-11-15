@@ -3,7 +3,7 @@
 Used by the "Restart Jarvis" desktop shortcut and by Jarvis's own restart_jarvis tool.
 
     pythonw scripts/restart_jarvis.py            restart quietly (no spoken briefing)
-    pythonw scripts/restart_jarvis.py --open     ...and open the Brain page afterwards
+    pythonw scripts/restart_jarvis.py --open     ...and open his app window afterwards
     pythonw scripts/restart_jarvis.py --delay 6  wait first, so a spoken reply can finish
 
 What it does:
@@ -250,7 +250,7 @@ def message_box(text):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--delay", type=float, default=0, help="seconds to wait before stopping Jarvis")
-    parser.add_argument("--open", action="store_true", help="open the Brain page when Jarvis is back")
+    parser.add_argument("--open", action="store_true", help="open his app window when Jarvis is back")
     parser.add_argument("--briefing", action="store_true", help="speak the startup briefing")
     args = parser.parse_args(argv)
     if args.delay > 0:
@@ -272,9 +272,9 @@ def main(argv=None):
         return 1
     log("Jarvis is back up.")
     if args.open:
-        import webbrowser
-        import chrome_browser  # noqa: F401 - open links in Chrome, like the Jarvis CEO shortcut
-        webbrowser.open(f"http://127.0.0.1:{BRAIN_PORT}")
+        sys.path.insert(0, str(ROOT))
+        import jarvis_app
+        jarvis_app.launch(window=True)  # his own window, like the Jarvis desktop shortcut; never a browser tab
     return 0
 
 
