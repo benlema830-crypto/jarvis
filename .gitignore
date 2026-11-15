@@ -17,3 +17,5 @@ voices/
 voice-profile.json
 # REA (reverse-engineering toolkit) is installed by scripts/setup_rea.py, not kept in git
 vendor/rea/
+# agent-desktop (reads windows by name) is installed by scripts/setup_agent_desktop.py, not kept in git
+vendor/agent-desktop/

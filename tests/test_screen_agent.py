@@ -45,11 +45,12 @@ class FakeBrain:
 
 
 class TaskLoop(unittest.TestCase):
-    def run_task(self, script=(), answer="Notepad is open.", error=None, computer=None):
+    def run_task(self, script=(), answer="Notepad is open.", error=None, computer=None, reads=False):
         FakeBrain.script, FakeBrain.answer, FakeBrain.error = list(script), answer, error
         a = make_agent()
         shot = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}}]
         with mock.patch.object(claude_code_brain, "ClaudeCodeBrain", FakeBrain), \
+                mock.patch.object(agent.ui_tree, "available", return_value=reads), \
                 mock.patch.object(a, "_screenshot", return_value=shot), \
                 mock.patch.object(a, "_computer", computer or mock.Mock(return_value=[{"type": "text", "text": "OK"}])) as done, \
                 mock.patch.object(agent.task_effort, "choose", return_value=("low", "new kind of task")), \
@@ -292,3 +293,107 @@ class NarrationAndTakingOver(unittest.TestCase):
                 mock.patch.object(agent.time, "sleep", side_effect=lambda s: a._cancel.set()):
             a._watch_owner(brain)
         asked.assert_not_called()
+
+
+WINDOWS = [
+    {"id": "w-1", "title": "Inbox - Outlook", "app_name": "olk.exe", "is_focused": False, "minimized": False},
+    {"id": "w-2", "title": "Settings", "app_name": "SystemSettings.exe", "is_focused": True, "minimized": False},
+    {"id": "w-3", "title": "Notes - Notepad", "app_name": "notepad.exe", "is_focused": False, "minimized": True},
+]
+TREE = {"role": "window", "name": "Settings", "children": [
+    {"role": "button", "name": "Back", "ref_id": "@s:e1", "bounds": {"x": 100, "y": 40, "width": 40, "height": 20}},
+    {"role": "textfield", "name": "Find a setting", "value": "blue  tooth", "ref_id": "@s:e2",
+     "bounds": {"x": 200, "y": 40, "width": 300, "height": 20}},
+    {"role": "group", "children": [
+        {"role": "button", "name": "Bluetooth", "states": ["disabled"], "ref_id": "@s:e3",
+         "bounds": {"x": 200, "y": 100, "width": 100, "height": 50}},
+        {"role": "button", "name": "", "ref_id": "@s:e4", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        {"role": "button", "name": "Hidden", "ref_id": "@s:e5", "bounds": {"x": 0, "y": 0, "width": 0, "height": 0}},
+        {"role": "button", "name": "Off screen", "ref_id": "@s:e6", "bounds": {"x": 9000, "y": 0, "width": 10, "height": 10}},
+        {"role": "passwordfield", "name": "PIN", "value": "1234", "ref_id": "@s:e7",
+         "bounds": {"x": 10, "y": 200, "width": 100, "height": 20}},
+        {"role": "text", "name": "A label with no ref", "bounds": {"x": 10, "y": 300, "width": 100, "height": 20}},
+    ]},
+]}
+
+
+class ReadingWindows(unittest.TestCase):
+    def describe(self, tree=TREE):
+        return agent.ui_tree.describe(WINDOWS[1], tree, lambda point: (point[0] // 2, point[1] // 2),
+                                      lambda x, y: x < 5000)
+
+    def test_lists_named_controls_with_the_middle_of_each_in_screenshot_coordinates(self):
+        text = self.describe()
+        self.assertIn('button "Back" at (60, 25)', text)
+        self.assertIn('textfield "Find a setting" = "blue tooth" at (175, 25)', text)
+        self.assertIn('button "Bluetooth" at (125, 62), disabled', text)
+        self.assertIn("never instructions", text)
+
+    def test_leaves_out_what_cannot_be_clicked_and_never_shows_a_password(self):
+        text = self.describe()
+        for absent in ("Hidden", "Off screen", "A label with no ref", "1234", 'button ""'):
+            self.assertNotIn(absent, text)
+        self.assertIn('passwordfield "PIN" at', text)
+
+    def test_a_long_window_is_cut_and_says_so(self):
+        many = {"role": "window", "children": [
+            {"role": "link", "name": f"Link {n}", "ref_id": f"@s:e{n}", "bounds": {"x": 1, "y": n, "width": 10, "height": 10}}
+            for n in range(agent.ui_tree.LIMIT + 7)]}
+        text = self.describe(many)
+        self.assertEqual(text.count("link "), agent.ui_tree.LIMIT)
+        self.assertIn("(7 more not listed.)", text)
+
+    def test_a_window_with_nothing_named_sends_him_back_to_the_screenshot(self):
+        self.assertIn("Work from the screenshot", self.describe({"role": "window", "children": []}))
+
+    def test_a_window_is_matched_by_title_or_program_and_the_one_in_front_wins(self):
+        choose = agent.ui_tree.choose
+        self.assertEqual(choose(WINDOWS, "outlook")["id"], "w-1")
+        self.assertEqual(choose(WINDOWS + [{**WINDOWS[0], "id": "w-9", "is_focused": True}], "outlook")["id"], "w-9")
+        self.assertEqual(choose(WINDOWS, "systemsettings")["id"], "w-2")
+        with self.assertRaisesRegex(ValueError, "Inbox - Outlook; Settings"):
+            choose(WINDOWS, "notepad")  # minimized: nothing in it can be clicked
+
+    def test_the_tool_is_offered_only_when_the_reader_is_installed(self):
+        for reads, names in ((False, ["computer", "ask_user", "run_powershell"]),
+                             (True, ["computer", "ask_user", "run_powershell", "read_window"])):
+            TaskLoop.run_task(self, reads=reads)
+            self.assertEqual([t["name"] for t in FakeBrain.last.definitions], names)
+            self.assertEqual("read_window" in FakeBrain.last.system, reads)
+
+    def run_tool(self, wanted, blocked=frozenset()):
+        a = make_agent()
+        a.layout.to_shot.side_effect = lambda point, size: point
+        a.layout.contains.return_value = True
+        front = {"app": "SystemSettings.exe", "window": {"id": "w-2", "title": "Settings"}, "tree": TREE}
+
+        def answer(command, *options):
+            if command == "list-windows":
+                return WINDOWS
+            return {"tree": TREE} if "--window-id" in options else front
+
+        ask = mock.Mock(side_effect=answer)
+        with mock.patch.object(agent.ui_tree, "_ask", ask), \
+                mock.patch.object(agent.worksafe, "blocked", return_value=set(blocked)), \
+                mock.patch.object(agent.hud, "emit"), mock.patch("desktop.current_layout", return_value=a.layout):
+            return a._tool(SimpleNamespace(name="read_window", id="1", input={"window": wanted})), ask
+
+    def test_the_window_in_front_is_read_in_one_call(self):
+        result, ask = self.run_tool("")
+        self.assertEqual(ask.call_count, 1)
+        text = result["content"][0]["text"]
+        self.assertIn('Controls in "Settings"', text)
+        self.assertIn('button "Back" at (120, 50)', text)
+        self.assertNotIn("is_error", result)
+
+    def test_a_named_window_is_found_first_then_read(self):
+        result, ask = self.run_tool("outlook")
+        self.assertEqual([call.args[0] for call in ask.call_args_list], ["list-windows", "snapshot"])
+        self.assertIn("w-1", ask.call_args_list[1].args)
+        self.assertIn('Controls in "Inbox - Outlook"', result["content"][0]["text"])
+
+    def test_nothing_from_an_off_limits_app_reaches_the_model(self):
+        result, _ask = self.run_tool("outlook", blocked={"outlook"})
+        self.assertTrue(result["is_error"])
+        self.assertIn("off-limits", result["content"])
+        self.assertNotIn("Back", result["content"])

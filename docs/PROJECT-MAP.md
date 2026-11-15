@@ -513,3 +513,23 @@ and, for the eight text-only coding ones, the Linux sandbox. The talking brain l
   bill the Anthropic API). A note at the top of each of those two SKILL.md files tells the agent so.
 - `defuddle` is installed (`npm install -g defuddle`). The `obsidian` command is not on this PC's PATH: it is
   switched on inside Obsidian (Settings, General, Command line interface), which is the owner's to do.
+
+## The screen agent reads windows by name (2026-11-15)
+
+`ui_tree.py` asks Windows' accessibility interface what a window contains, through agent-desktop 1.3.1
+(vercel-labs, Apache-2.0; `scripts/setup_agent_desktop.py` installs it into `vendor/agent-desktop`, checksum
+pinned, npm install scripts not run). The screen agent gets one more tool, `read_window`: the window in front,
+or one named by part of its title or program, as lines like `button "Reload" at (27, 18)` and
+`textfield "Address and search bar" = "youtube.com/..." at (410, 18)`, in screenshot coordinates.
+
+- Why: both monitors together are 5120 pixels wide and a screenshot is scaled to 1456, so a toolbar button is a
+  few pixels across in the picture. The list gives its name and exact middle.
+- Reading only. Clicking and typing still go through `agent.py`'s own mouse and keyboard, so off-limits apps,
+  the owner taking over and the corner stop cover them as before. An off-limits app's controls are not passed on,
+  a password field's value is never listed, and the text goes through `privacy.redact`.
+- Without the program (`ui_tree.available()` false) the tool and its line in the prompt are not offered.
+- Measured here: 0.8 s for the window in front, 1.6 s for one found by name. A click at a listed point lands
+  inside its control for 42 of 43 controls in Chrome (the miss is a control narrower than the scaling step).
+  One real run on Sonnet, a read-only question, answered in 5.9 s using the tool. Not tried: a task that clicks
+  from the list, and apps that expose nothing (games, canvases), where it says to use the screenshot.
+- Not used: agent-desktop's own clicking and typing by reference, which would bypass those checks.

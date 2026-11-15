@@ -37,6 +37,7 @@ import cc_guard
 import hud
 import preferences
 import task_effort
+import ui_tree
 import worksafe
 
 MODEL = os.getenv("JARVIS_AGENT_MODEL", "claude-sonnet-5-5")
@@ -64,7 +65,7 @@ How to work - speed matters, the user is waiting (if they touch the mouse or key
 - Put several actions in one call whenever you can predict the outcome, e.g. click a box, type, press enter. Look again only when the next step depends on what happens.
 - Prefer keyboard shortcuts and Windows search (press super, type the app's name, press enter) over hunting for icons.
 - For file, folder and settings chores, one PowerShell script via run_powershell is far faster than clicking.
-- When the task asks you to circle, mark, highlight, point at or show the user something on screen, finish with a point action on it: it draws a ring with a short label over it for about 20 seconds and touches nothing. Leave it on screen (don't scroll or click afterwards) and then give your final reply. Never claim it's circled or marked without having done the point action.
+{read_window}- When the task asks you to circle, mark, highlight, point at or show the user something on screen, finish with a point action on it: it draws a ring with a short label over it for about 20 seconds and touches nothing. Leave it on screen (don't scroll or click afterwards) and then give your final reply. Never claim it's circled or marked without having done the point action.
 - Narrate: with every computer call that does something, give `saying`, a short first-person line JARVIS speaks while it runs ("Clicking Create to start a new campaign."). Say what and why, in under twelve words, never coordinates or key names.
 
 Rules:
@@ -130,6 +131,20 @@ TOOLS = [
         }, "required": ["script", "purpose"]},
     },
 ]
+
+READ_WINDOW = {
+    "name": "read_window",
+    "description": "List a window's buttons, fields, links and menus by name, each with the screenshot coordinates "
+                   "of its middle and, for a field, the text in it. About a second, and the coordinates are "
+                   "exact. It only reads; click with computer afterwards.",
+    "input_schema": {"type": "object", "properties": {
+        "window": {"type": "string", "description": "Part of the window's title or program name, e.g. 'Settings' or "
+                                                     "'chrome'. Leave out for the window in front."},
+    }},
+}
+READ_WINDOW_RULE = ("- To find a control in an app (a button, field, link, menu item), call read_window: it lists them by "
+                    "name with exact click coordinates and what each field holds, faster and more precisely than "
+                    "zooming into a screenshot. Games, canvases and some custom apps list nothing; use the screenshot there.\n")
 
 KEYMAP = {
     "return": "enter", "enter": "enter", "kp_enter": "enter", "backspace": "backspace", "escape": "esc",
@@ -237,12 +252,15 @@ class Agent:
             threading.Thread(target=self._watch_owner, args=(brain,), daemon=True, name="agent-takeover").start()
         try:
             import privacy
+            reads = ui_tree.available()  # agent-desktop is installed: windows can be read by name
             system = SYSTEM.format(w=self.shot_size[0], h=self.shot_size[1],
-                                   monitors=self.layout.describe(self.shot_size), off_limits=worksafe.rule("- {apps} are off-limits: they appear blacked out and actions on them are refused. Don't try to work around this.\n"))
+                                   monitors=self.layout.describe(self.shot_size),
+                                   read_window=READ_WINDOW_RULE if reads else "", off_limits=worksafe.rule("- {apps} are off-limits: they appear blacked out and actions on them are refused. Don't try to work around this.\n"))
             request = [{"role": "user", "content": privacy.redact(
                 f"Task from the user: {task}\n\nStart by calling computer with a single screenshot action to see the screen.")}]
             # The spoken report is what it said after its last action, not its notes to itself along the way.
-            whole = brain.ask(MODEL, system, request, TOOLS, self._tool, lambda text: None, self._cancel)
+            tools = TOOLS + [READ_WINDOW] if reads else TOOLS
+            whole = brain.ask(MODEL, system, request, tools, self._tool, lambda text: None, self._cancel)
             # Not `whole` as a fallback: that is every note it wrote along the way.
             report = ("".join(brain.final_text).strip() or ("" if self.steps else whole.strip())
                       or "It finished without saying what it did.")
@@ -332,6 +350,8 @@ class Agent:
             if block.name == "computer":
                 self._narrate(inp.get("saying"))
                 content = self._actions(inp.get("actions"))
+            elif block.name == "read_window":
+                content = self._read_window(str(inp.get("window") or ""))
             elif block.name == "ask_user":
                 content = self._ask(str(inp["question"]))
             elif block.name == "run_powershell":
@@ -395,6 +415,20 @@ class Agent:
         img.save(buf, format="JPEG", quality=85)
         return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(buf.getvalue()).decode()}}]
+
+    def _read_window(self, wanted: str) -> list[dict]:
+        """A window's named controls with where to click them (ui_tree.py). Reads only; nothing is touched."""
+        import privacy
+        self.log.append(f"read window {wanted or 'in front'}")
+        hud.emit("tool", name="agent read_window", input={"window": wanted[:60]})
+        self._check_layout()
+        window, tree = ui_tree.read(wanted)
+        if (worksafe.title_blocked(str(window.get("title", "")))
+                or str(window.get("app_name", "")).lower() in worksafe.blocked_processes()):
+            raise Blocked(f"That's {worksafe.blocked_apps()}, which is off-limits.")
+        text = ui_tree.describe(window, tree,
+                                lambda point: self.layout.to_shot(point, self.shot_size), self.layout.contains)
+        return [{"type": "text", "text": privacy.redact(text)}]
 
     def _check_point(self, x: int, y: int):
         self._check_layout()
