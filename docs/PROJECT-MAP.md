@@ -488,3 +488,28 @@ Three days of transcripts (11-11 to 11-13) were read for what went wrong, and ea
   he says so and how to end it. "Stop everything" / "cancel all the agents", Ctrl+Alt+J and the page's stop button:
   every agent (`jarvis.is_stop_everything`). "Stop the Giant builder": the brain stops that one (`names_work`).
 - **The local brain is marked on the page.** The brain pill reads "Local · qwen3.5" in amber (`J.showModel`).
+
+## Skills for the agents (2026-11-15)
+
+`scripts/setup_skills.py` installs fifteen agent skills (folders with a SKILL.md that an agent loads when a task
+matches) into `~/.claude/skills` (terminal agents and coding sessions), `~/.agents/skills` (Codex project agents)
+and, for the eight text-only coding ones, the Linux sandbox. The talking brain loads none: it starts with
+`setting_sources=[]`. Checked with a real run of each: both `claude -p` and `codex exec` list them.
+
+| From | Skills |
+| --- | --- |
+| obsidianmd/obsidian-skills | obsidian-markdown, obsidian-bases, json-canvas, obsidian-cli, defuddle |
+| blader/humanizer | humanizer (takes AI-sounding phrasing out of text) |
+| DietrichGebert/ponytail | ponytail (least new code), ponytail-review, ponytail-audit, ponytail-debt |
+| pbakaus/impeccable | impeccable (design critique and polish), guidance only |
+| addyosmani/agent-skills | debugging-and-error-recovery, test-driven-development |
+| anthropics/skills | mcp-builder, webapp-testing |
+
+- Each source is pinned to the commit that was read before it was added. To update one: read the new version,
+  then change its commit in `SOURCES`. `--check` lists what is installed, `--remove` takes them out.
+- A folder the script didn't install (no `.jarvis-skill.json`) is never replaced or removed.
+- Left out on purpose: Impeccable's engine (a downloaded program with usage reporting and a paid tier; its
+  source has `IMPECCABLE_NO_TELEMETRY`, so it reports by default) and mcp-builder's evaluation scripts (they
+  bill the Anthropic API). A note at the top of each of those two SKILL.md files tells the agent so.
+- `defuddle` is installed (`npm install -g defuddle`). The `obsidian` command is not on this PC's PATH: it is
+  switched on inside Obsidian (Settings, General, Command line interface), which is the owner's to do.
