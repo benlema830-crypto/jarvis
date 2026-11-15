@@ -52,6 +52,11 @@ def agent_work(now=None):
         return []
     sessions = raw.get("sessions", {}) if isinstance(raw, dict) else {}
     sessions = list(sessions.values()) if isinstance(sessions, dict) else []
+    try:
+        import self_state
+        restarted = (self_state.started() or {}).get("started") or 0
+    except Exception:
+        restarted = 0
     lines = []
     for s in sorted((s for s in sessions if isinstance(s, dict)), key=lambda s: -(s.get("reported_at") or 0)):
         status, when = s.get("status") or "idle", s.get("reported_at") or 0
@@ -67,6 +72,9 @@ def agent_work(now=None):
         line = head + f". Task: {_clip(s.get('task'), 160)}"
         if s.get("report") and not live:
             line += f" Result: {_clip(s['report'], 220)}"
+            if (restarted and when and when < restarted  # "not live until a restart" in it is no longer true
+                    and re.search(r"restart|push|not live|aren't live|isn't live|won't work until", s["report"], re.I)):
+                line += " (Reported before your last restart: what it says about restarting or being live is out of date.)"
         lines.append(line)
     return lines[:5]
 

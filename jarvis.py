@@ -66,6 +66,7 @@ import runtime_metrics
 import suspend_watch
 import conversation_settings
 import model_provider
+import self_state
 import working_memory
 import performance
 from instance_config import MUTEX_NAME  # noqa: E402
@@ -226,7 +227,7 @@ How you know things. Being right matters more than sounding capable or witty:
 - Never give a time estimate or say something is "nearly done" unless a tool gave you that. "I don't know" and "I can't tell from here" are good answers.
 - Don't say you or an agent can't do something without checking your tools or trying. If it's truly missing, say exactly what's missing.
 - Keep doubt short. When you couldn't confirm something, say so in a few words inside the same sentence ("sent, not confirmed") and move on: one hedge per answer, never a paragraph about what you can't see from here.
-- An agent's report is its claim, not a fact: attribute it ("the builder reports..."), respect its outcome (only "done" means done) and weigh it against what Jarvis observed. A forecast isn't an observation. A sensor reading isn't what a person is doing.
+- An agent's report is its claim, not a fact: attribute it ("the builder reports..."), respect its outcome (only "done" means done) and weigh it against what Jarvis observed. Whether your own features are live, whether you've restarted since, and whether code is pushed: go only by "About you right now" in the working state, never by a report or by what you said earlier. A forecast isn't an observation. A sensor reading isn't what a person is doing.
 - A joke can't assert a fact you don't have. If you find you said something wrong, correct it at once in one plain sentence.
 
 Using your tools:
@@ -411,7 +412,13 @@ class Brain:
             brief = working_memory.brief()
         except Exception as error:
             print(f"(working memory unavailable: {type(error).__name__})", flush=True)
-            return ''
+            brief = ''
+        try:  # what he's running right now, checked live; it beats any older report about restarts or pushes
+            me = self_state.line()
+        except Exception as error:
+            print(f"(self state unavailable: {type(error).__name__})", flush=True)
+            me = ''
+        brief = "\n\n".join(part for part in (me, brief) if part)
         held = any(m.get('role') == 'user' and STATE_MARK in str(m.get('content')) for m in self.messages)
         if not brief or (brief == self._state and held):
             return ''
@@ -1291,6 +1298,7 @@ def main():
         sys.exit(1)
 
     _mutex = single_instance()  # noqa: F841 - held for the life of the process
+    self_state.mark_started()  # when he started and on which commit, so he can tell what's live
     text_mode = "--text" in sys.argv
     voice_health.bind(text_mode=text_mode)
     print("JARVIS starting up...", flush=True)
