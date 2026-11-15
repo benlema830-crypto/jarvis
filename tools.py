@@ -259,7 +259,8 @@ def look_at_screen(active_window_only: bool = False):
 def point_at_screen(x: int, y: int, label: str = "", seconds: int = 8) -> str:
     """Show the user where something is on their screen: a ring with a short label appears over it for a few
     seconds. It doesn't click or type; the mouse passes through it. Use it after look_at_screen when they ask
-    where something is or where to click, and to walk them through steps one at a time ("click here, then
+    where something is or where to click, or to "circle", "mark", "highlight" or "point at" something already on
+    screen (if it first has to be found by clicking around, do_on_computer finds it and circles it itself), and to walk them through steps one at a time ("click here, then
     I'll show you the next one"). A new pointer replaces the last.
 
     Args:
@@ -865,7 +866,9 @@ def do_on_computer(task: str) -> str:
     finishes; it asks the user before anything consequential.
 
     Use it for jobs that need the mouse, e.g. "make a Spotify playlist called Focus", "close my
-    YouTube tab". Never use it just to play, find or control music: the Spotify tools (call_mcp_tool,
+    YouTube tab". When they want the thing it finds circled, marked, highlighted or pointed at ("find X and
+    circle it"), say so in the task: it draws the ring itself at the end. You don't get a turn when it finishes
+    (its report is read out as it is), so never promise to circle or show something "once it's up" yourself. Never use it just to play, find or control music: the Spotify tools (call_mcp_tool,
     spotify_search then spotify_play with the track, playlist or album URI) do that in the background. For files, folders, system checks, scripts or coding, use terminal_task instead;
     When it starts, tell the user briefly that you're on it. You say what you're doing as you go, and if they
     move the mouse, click or press a key you stop and the PC is theirs again, so there is no need to warn them

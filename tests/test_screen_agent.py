@@ -154,8 +154,24 @@ class ToolShape(unittest.TestCase):
     def test_every_action_the_executor_knows_is_offered(self):
         offered = agent.TOOLS[0]["input_schema"]["properties"]["actions"]["items"]["properties"]["action"]["enum"]
         self.assertEqual(offered, agent.ACTIONS)
-        for name in ("screenshot", "zoom", "left_click", "type", "key", "scroll", "left_click_drag", "wait"):
+        for name in ("screenshot", "zoom", "left_click", "type", "key", "scroll", "left_click_drag", "wait", "point"):
             self.assertIn(name, offered)
+
+    def test_point_draws_a_ring_and_touches_nothing(self):
+        a = make_agent()
+        a.layout.to_native.return_value = (900, 400)
+        a.layout.contains.return_value = True
+        with mock.patch("screen_pointer.show", return_value=True) as ring, \
+             mock.patch.object(agent.worksafe, "point_blocked", return_value=False),              mock.patch.object(a, "_check_layout"), \
+             mock.patch.object(agent.pyautogui, "click") as click, mock.patch.object(agent.pyautogui, "moveTo") as move:
+            result = a._computer("point", {"coordinate": [500, 300], "text": "This one"})
+        ring.assert_called_once_with(900, 400, "This one", 20.0)
+        click.assert_not_called()
+        move.assert_not_called()
+        self.assertIn("nothing was clicked", result[0]["text"])
+        with self.assertRaises(ValueError):
+            a._computer("point", {})
+        self.assertIn("point action", agent.SYSTEM)
 
     def test_do_on_computer_is_no_longer_blocked(self):
         import tools

@@ -64,6 +64,7 @@ How to work - speed matters, the user is waiting (if they touch the mouse or key
 - Put several actions in one call whenever you can predict the outcome, e.g. click a box, type, press enter. Look again only when the next step depends on what happens.
 - Prefer keyboard shortcuts and Windows search (press super, type the app's name, press enter) over hunting for icons.
 - For file, folder and settings chores, one PowerShell script via run_powershell is far faster than clicking.
+- When the task asks you to circle, mark, highlight, point at or show the user something on screen, finish with a point action on it: it draws a ring with a short label over it for about 20 seconds and touches nothing. Leave it on screen (don't scroll or click afterwards) and then give your final reply. Never claim it's circled or marked without having done the point action.
 - Narrate: with every computer call that does something, give `saying`, a short first-person line JARVIS speaks while it runs ("Clicking Create to start a new campaign."). Say what and why, in under twelve words, never coordinates or key names.
 
 Rules:
@@ -80,7 +81,7 @@ Black gaps between monitors are not clickable."""
 
 ACTIONS = ["screenshot", "zoom", "left_click", "right_click", "middle_click", "double_click", "triple_click",
            "mouse_move", "left_click_drag", "left_mouse_down", "left_mouse_up", "scroll", "type", "key", "hold_key",
-           "wait", "cursor_position"]
+           "wait", "cursor_position", "point"]
 TOOLS = [
     {
         "name": "computer",
@@ -95,16 +96,19 @@ TOOLS = [
             "type": "object", "properties": {
                 "action": {"type": "string", "enum": ACTIONS},
                 "coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
-                               "description": "Where to click, move or scroll. Omit to use the current pointer position."},
+                               "description": "Where to click, move, scroll or point. Omit to use the current pointer "
+                                              "position (point needs it)."},
                 "start_coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
                                      "description": "left_click_drag: where the drag starts."},
                 "text": {"type": "string", "description": "type: the text. key and hold_key: a key or combination such "
-                                                           "as enter, ctrl+s, alt+tab, super. Clicks: modifier keys to hold."},
+                                                           "as enter, ctrl+s, alt+tab, super. Clicks: modifier keys to hold. "
+                                                           "point: a label of a few words shown under the ring."},
                 "region": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4,
                            "description": "zoom: [x0, y0, x1, y1] to enlarge."},
                 "scroll_direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
                 "scroll_amount": {"type": "integer", "description": "Notches to scroll; default 3."},
-                "duration": {"type": "number", "description": "wait and hold_key: seconds."},
+                "duration": {"type": "number", "description": "wait and hold_key: seconds. point: how long the ring "
+                                                               "stays, default 20, at most 30."},
                 "repeat": {"type": "integer", "description": "key: how many times; default 1."},
             }, "required": ["action"]}}}, "required": ["actions"]},
     },
@@ -445,6 +449,16 @@ class Agent:
                 for k in reversed(held):
                     pyautogui.keyUp(k)
             return ok
+
+        if name == "point":  # a ring for the user to see; nothing is clicked and the mouse doesn't move
+            if "coordinate" not in inp:
+                raise ValueError("point needs a coordinate: the middle of the thing to circle.")
+            x, y = self._to_screen(inp["coordinate"])
+            self._check_point(x, y)
+            import screen_pointer
+            if not screen_pointer.show(x, y, inp.get("text", ""), float(inp.get("duration") or 20)):
+                raise RuntimeError("The ring couldn't be drawn on the screen.")
+            return [{"type": "text", "text": "Ring drawn there; nothing was clicked."}]
 
         # Mouse actions
         if "coordinate" in inp:
