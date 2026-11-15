@@ -292,6 +292,7 @@ class Overheard(str):
 
 
 NO_NAME = "[no name said]"
+LOST_TRAIN = "Apologies, sir, I lost my train of thought."  # said when a turn fails with an unexpected error
 NAMED = re.compile(r"\b(?:jarvis|jarvas|jervis)\b", re.I)
 
 
@@ -518,6 +519,16 @@ class Brain:
                                   f"{said} [cut off: the user interrupted]" if said else "[The user interrupted before I answered.]"})
             self._save_turn(text, said + " [Interrupted; may not have finished speaking or acting.]", self._turn_privacy)
             raise
+        except Exception as exc:
+            # respond() says the failure out loud, so it belongs in what he remembers saying. On 2026-11-15 he
+            # said "check that Claude Code is signed in", this turn was thrown away, and a minute later he told
+            # the owner he had never said it.
+            heard = str(exc) if isinstance(exc, model_provider.ProviderError) else LOST_TRAIN
+            said = " ".join([*spoken, heard])
+            del self.messages[start + 1:]  # discard any unmatched tool_use blocks
+            self.messages.append({"role": "assistant", "content": f"{said} [This turn failed: that last part "
+                                  "was an error message I said out loud, not an answer.]"})
+            raise  # not saved for later launches: a failed turn isn't worth carrying past a restart
         except BaseException:
             del self.messages[start:]  # keep history consistent after a failed turn
             raise
@@ -676,11 +687,16 @@ class Brain:
         except claude_code_brain.WouldBillAPI:
             raise model_provider.ProviderError('Claude Code is not signed in to your Claude plan, so I stopped '
                                                'rather than use API credits. Sign in to Claude Code.') from None
+        except claude_code_brain.SignedOut:
+            raise model_provider.ProviderError('Claude Code says its sign-in failed. Open a terminal, type claude, '
+                                               'then type /login.') from None
         except Exception as exc:
             import traceback  # the spoken message can't say what broke; the log has to
             print(f"(Claude Code turn failed: {exc!r})\n{traceback.format_exc()}", flush=True)
-            raise model_provider.ProviderError('Claude subscription conversation failed. Check that Claude Code '
-                                               'is signed in.') from None
+            # Only say "sign-in" when Claude Code said so (above). This used to blame the sign-in for every
+            # failure, and on 2026-11-15 sent the owner looking for a login problem that didn't exist.
+            raise model_provider.ProviderError('My Claude brain broke partway through that, sir. The cause is in '
+                                               'my brain log. Ask me again.') from None
         voice_health.api_state('responded')
         if self.cancel.is_set():
             raise Interrupted()
@@ -709,7 +725,7 @@ def respond(brain: Brain, voice: Voice, text: str, speak=None) -> str:
         voice_health.api_state("error")
         print(f"(error: {e!r})", flush=True)
         hud.emit("error", text=repr(e))
-        speak("Apologies, sir, I lost my train of thought.")
+        speak(LOST_TRAIN)
     return "failed"
 
 

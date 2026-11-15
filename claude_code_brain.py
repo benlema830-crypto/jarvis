@@ -34,6 +34,15 @@ class WouldBillAPI(RuntimeError):
     """Claude Code would have used an API key instead of the subscription."""
 
 
+class SignedOut(RuntimeError):
+    """Claude Code itself reported that its sign-in failed."""
+
+
+# Claude Code echoes every tool result back as one JSON line; watch_video's frames made one over the SDK's 1 MB
+# default on 2026-11-15, which killed the turn (and he then blamed the sign-in).
+MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+
+
 def _mcp_content(content):
     """Jarvis tool_result content -> MCP content blocks (text and images)."""
     if isinstance(content, str):
@@ -125,6 +134,7 @@ class ClaudeCodeBrain:
             max_turns=getattr(self, "max_turns", MAX_TURNS),
             cwd=str(HERE),
             env={"ANTHROPIC_API_KEY": ""},            # use the claude.ai login, never the API key
+            max_buffer_size=MAX_MESSAGE_BYTES,        # video frames and screenshots come back as big messages
         )
         # The prompt goes in a file, not on the command line: Windows caps a command line at 32,767 characters and
         # his grew past that on 2026-11-13 (WinError 206, which the SDK reports as "Claude Code not found").
@@ -205,6 +215,8 @@ class ClaudeCodeBrain:
                 raise LimitReached("Claude plan usage limit reached.")
             elif isinstance(message, AssistantMessage) and message.error in ("rate_limit", "billing_error"):
                 raise LimitReached(f"Claude plan unavailable ({message.error}).")
+            elif isinstance(message, AssistantMessage) and message.error == "authentication_failed":
+                raise SignedOut("Claude Code reported authentication_failed.")
             elif isinstance(message, ResultMessage):
                 if interrupted:
                     raise InterruptedError()
@@ -212,6 +224,8 @@ class ClaudeCodeBrain:
                     text = (message.result or "").lower()
                     if re.search(r"usage limit|rate limit|limit reached|out of extra usage", text):
                         raise LimitReached(message.result or "Claude plan usage limit reached.")
+                    if re.search(r"/login|not logged in|log in again|invalid api key|authentication", text):
+                        raise SignedOut(message.result)
                     raise RuntimeError(f"Claude Code could not complete the turn ({message.subtype}).")
         if interrupted:
             raise InterruptedError()
