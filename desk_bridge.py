@@ -183,6 +183,8 @@ class Bridge:
             return {"error": "Jarvis isn't fully started yet."}
         arrived = time.time()
         text = " ".join(self.transcribe(phone_bridge.from_wav(audio)).split())
+        if phone_bridge.hint_echo(text):
+            return {"ignored": True}
         command = phone_bridge.wake_command(text, "Jarvis")
         if command is None:
             if not followup or text.lower().strip(" .,!?") in phone_bridge.NOISE:

@@ -180,6 +180,14 @@ class DeskBridgeTest(unittest.TestCase):
         self.assertEqual((status, body[:4], response.headers["X-Jarvis-Reply"]), (200, b"RIFF", "Done%3A%20lights%20off"))
         self.assertEqual(self.listen("and the fan", followup=True)[0], 200)
 
+    def test_the_recognisers_own_hint_words_are_never_a_request(self):
+        # 2026-11-15: unclear sound at the laptop came back as the hint words and opened Roblox four times.
+        with mock.patch.dict(os.environ, {"JARVIS_STT_HOTWORDS": "Jarvis, Rocket Frontier, Roblox"}):
+            for heard in ("Rocket Frontier, Roblox", "Roblox.", "Jarvis, Rocket Frontier, Roblox"):
+                self.assertEqual(json.loads(self.listen(heard, followup=True)[1]), {"ignored": True}, heard)
+            self.assertEqual(self.listen("Jarvis, open Rocket Frontier")[0], 200)
+            self.assertEqual(json.loads(self.listen("Hey Jarvis.")[1]), {"awake": True})
+
     def test_what_the_pc_already_heard_is_answered_once(self):
         desk_bridge.pc_heard("Jarvis, turn the lights off")
         self.assertEqual(json.loads(self.listen("Jarvis, turn the lights off.")[1]),

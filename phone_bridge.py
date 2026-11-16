@@ -106,6 +106,17 @@ def wake_command(text: str, name: str) -> str | None:
     return found.group(1).strip() if found else None
 
 
+def hint_echo(text: str) -> bool:
+    """True when a transcript is only the recogniser's own hint words (JARVIS_STT_HOTWORDS) handed back, which is
+    what Whisper makes of unclear sound. On 2026-11-15 the laptop's room mic "heard" the hints "Rocket Frontier,
+    Roblox" four times and opened Roblox. A real request says more: "open Rocket Frontier" still gets through."""
+    def words(value):
+        return "".join(c.lower() if c.isalnum() else " " for c in value).split()
+    hints = set(words(os.getenv("JARVIS_STT_HOTWORDS", ""))) - {"jarvis"}
+    said = [w for w in words(text) if w not in {"jarvis", "hey"}]
+    return bool(said) and all(w in hints for w in said)
+
+
 def to_wav(samples: np.ndarray, rate: int) -> bytes:
     pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     out = io.BytesIO()
@@ -283,6 +294,8 @@ class Bridge:
         if not self.transcribe:
             return {"error": "Hands-free isn't ready on the PC yet."}
         text = " ".join(self.transcribe(from_wav(audio)).split())
+        if hint_echo(text):
+            return {"ignored": True}
         command = wake_command(text, self.name() or "Friday")
         if command is None:
             if not followup or text.lower().strip(" .,!?") in NOISE:
