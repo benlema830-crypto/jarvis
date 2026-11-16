@@ -141,8 +141,17 @@ PLAN = """I looked at the folder. Two parts is right, but each needs a fuller br
 ```"""
 
 
+ROUND_TWO = """Tool one's report shows it has an API, which the build needs. One more agent.
+
+```json
+{"split": true, "reason": "The build needs what round one found.", "parts": [
+  {"task": "Build the importer against tool one's API, as found in round one.", "model": "sonnet", "effort": "medium", "folder": ""}]}
+```"""
+
+
 class LeadTest(ParallelTest):
-    """A lead (Fable) plans the split, cheaper models do the parts, and the lead combines the reports."""
+    """A lead (Fable) plans the work, cheaper models do the parts, and the lead checks and combines the reports,
+    sending agents out again when the job isn't finished."""
 
     def lead(self, parts=None, mode="research", lead="fable"):
         parts = parts or [{"task": "Research tool one"}, {"task": "Research tool two"}, {"task": "Research tool three"}]
@@ -273,6 +282,74 @@ class LeadTest(ParallelTest):
         self.assertEqual(len(saved[0].read_text(encoding="utf-8")), 9000)
         self.assertIn(str(saved[0]), prompt)
 
+    def round_one(self):
+        self.lead()
+        self.lead_reports(PLAN)
+        self.part_reports("Parallel A", "Tool one is free.")
+        self.part_reports("Parallel B", "Tool two costs money.", outcome="partial")
+
+    def test_the_lead_can_send_agents_out_again_on_what_came_back(self):
+        self.round_one()
+        self.assertIn("order another round", self.sessions.started[-1]["task"])
+        self.assertTrue(self.lead_reports(ROUND_TWO))               # swallowed: an order is not read out
+        again = self.sessions.started[-1]
+        self.assertEqual((again["name"], again["model"], again["fresh"]), ("Parallel A", "sonnet", True))
+        self.assertIn("Build the importer", again["task"])
+        self.assertEqual(self.queued, [])
+        self.assertIn("round 2", self.groups.status())
+        self.part_reports("Parallel A", "Importer built and run.")
+        merge = self.sessions.started[-1]
+        self.assertEqual((merge["name"], merge["fresh"]), ("Parallel Lead", False))
+        self.assertIn("Importer built and run.", merge["task"])
+        self.assertNotIn("Tool two costs money.", merge["task"])     # it has round one's reports already
+        self.lead_reports("The importer is built on tool one.")
+        self.assertEqual(self.queued[0]["say"], "The importer is built on tool one.")
+        self.assertIn("2 of 3 agents reported being done, over 2 rounds", self.queued[0]["note"])
+        self.assertEqual(self.groups.status(), "No parallel job is running.")
+
+    def test_rounds_are_limited(self):
+        self.round_one()
+        for _ in range(parallel.MAX_ROUNDS - 1):
+            self.lead_reports(ROUND_TWO)
+            self.part_reports("Parallel A", "Importer half built.", outcome="partial")
+        self.assertNotIn("order another round", self.sessions.started[-1]["task"])   # the last round: it must answer
+        count = len(self.sessions.started)
+        self.lead_reports(ROUND_TWO)                                 # it orders one anyway
+        self.assertEqual(len(self.sessions.started), count)          # nothing more starts
+        item = self.queued[0]
+        self.assertTrue(item["merge"])                               # Jarvis combines what there is
+        self.assertIn("Tool one is free.", item["prompt"])           # every round's reports, not only the last
+        self.assertIn("Importer half built.", item["prompt"])
+        self.assertEqual(self.groups.status(), "No parallel job is running.")
+
+    def test_a_round_that_cannot_run_ends_the_job_with_what_there_is(self):
+        self.round_one()
+        self.lead_reports('```json\n{"split": true, "reason": "r", "parts": [{"task": "x", "model": "gemini"}]}\n```')
+        item = self.queued[0]
+        self.assertTrue(item["merge"])
+        self.assertIn("Unknown agent model", item["prompt"])
+        self.assertIn("Tool one is free.", item["prompt"])
+        self.assertEqual(self.groups.status(), "No parallel job is running.")
+
+    def test_a_led_job_can_be_one_agent_at_a_time(self):
+        reply = self.lead(parts=[{"task": "Find out which tool has an API, then build on it"}])
+        self.assertIn("is planning the split", reply)
+        self.assertIn("later round", self.sessions.started[0]["task"])     # steps that depend on each other are rounds
+        self.lead_reports('```json\n{"split": true, "reason": "Find out first.", "parts": '
+                          '[{"task": "Find which tool has an API.", "model": "sonnet"}]}\n```')
+        self.assertEqual([s["name"] for s in self.sessions.started[1:]], ["Parallel A"])
+        self.assertIn("0 of 1 parts finished", self.groups.status())
+
+    def test_in_a_job_that_changes_files_a_part_that_only_looks_can_share_the_folder(self):
+        self.lead(mode="work", parts=[{"task": "Add the importer and check it"}])
+        self.lead_reports('```json\n{"split": true, "reason": "r", "parts": [{"task": "Build it."}, '
+                          '{"task": "Read the API notes and report the limits.", "mode": "research"}]}\n```')
+        self.assertEqual([(s["name"], s["mode"]) for s in self.sessions.started[1:]],
+                         [("Parallel A", "work"), ("Parallel B", "research")])
+        research = parallel.Groups()                                  # a job that changes nothing stays that way
+        research.start(self.sessions, "Compare", [{"task": "one", "mode": "work"}, {"task": "two"}], "research")
+        self.assertEqual([s["mode"] for s in self.sessions.started[3:]], ["research", "research"])
+
     def test_a_job_whose_agents_died_cannot_block_the_next_one(self):
         self.start([{"task": "one"}, {"task": "two"}])
         self.sessions.finish("Parallel A")                           # both ended without ever reporting
@@ -334,6 +411,11 @@ class WiringTest(unittest.TestCase):
         self.assertIn("your answer must recommend running the parts as parallel agents", jarvis.SYSTEM_PROMPT)
         self.assertIn("they should not have to know to ask", jarvis.SYSTEM_PROMPT)
         self.assertIn("uses more of their plan", jarvis.SYSTEM_PROMPT)
+        self.assertIn("Big jobs get a lead.", jarvis.SYSTEM_PROMPT)          # he starts it himself, without asking
+        self.assertIn("don't ask first: start parallel_agents with lead \"fable\"", jarvis.SYSTEM_PROMPT)
+        lead = tools.TOOLS_BY_NAME["parallel_agents"].to_dict()["input_schema"]["properties"]["lead"]["description"]
+        self.assertIn("sends agents out again, up to three rounds", " ".join(lead.split()))
+        self.assertEqual(parallel.MAX_ROUNDS, 3)                             # the number both texts name
         self.assertIsNone(jarvis.truth_guard.classify("parallel_status", True, "x"))
 
 

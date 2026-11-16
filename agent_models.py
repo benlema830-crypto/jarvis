@@ -14,8 +14,8 @@ Effort is separate: low for small jobs, medium for ordinary ones, high for big o
 the effort learned from how similar tasks went is used (task_effort.py).
 
 Fable has two more jobs besides running a single hard task. It can lead a parallel job (parallel.py): it plans
-the split and combines the reports while cheaper models do the parts. And it can do research queued for while
-the owner is away (away_jobs.py), reading the web and nothing else.
+the work, checks the reports, sends agents out again if the job isn't finished, and combines the reports, while
+cheaper models do the parts. And it can run a job queued for while the owner is away (away_jobs.py).
 
 Away jobs (queued for while the owner is gone) always use Codex: nobody is there to answer a question, so they
 need its sandbox. The owner's preference "agent_model" changes the default choice.

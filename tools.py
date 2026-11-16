@@ -1077,32 +1077,37 @@ def parallel_agents(goal: str, parts: list[dict], mode: str = "research", projec
     back together as one combined answer, so don't poll.
 
     Good for: several topics to research, the same question checked in several places, separate projects or
-    folders, independent reviews of one thing. Not for: small jobs, steps where one depends on another's
-    result, or several changes in the same folder (parts that change files each need their own folder, or it
-    is refused). It finishes sooner but uses more of the user's plan, so say so when you recommend it.
+    folders, independent reviews of one thing, and, with a lead, any big job. Not for small jobs. Without a
+    lead it is also not for steps where one depends on another's result, or several changes in the same folder
+    (parts that change files each need their own folder, or it is refused). It finishes sooner but
+    uses more of the user's plan, so say so.
 
     Recommend it when a request clearly has independent parts that would each take an agent minutes: say in
     one sentence how you would split it and that it uses more of the plan, and start it when the user agrees.
-    If they already asked for it to be done in parallel or as fast as possible, just start it.
+    If they already asked for it to be done in parallel or as fast as possible, just start it. A big job
+    doesn't wait for a yes: start it with a lead and say that you have.
 
     Args:
         goal: The whole job in one or two sentences, as the user put it. Used to combine the answers.
         parts: One entry per agent, each {"task": complete instructions that stand on their own, "model": as in
             send_agent_task (blank for Claude Opus 5.5), "effort": low, medium, high or blank, "folder": where it
-            works (optional; required to differ between parts when mode is work)}.
+            works (optional; required to differ between parts when mode is work)}. 2 to 4 parts; with a lead, 1 to
+            4, and one is right when you can't see how the job splits.
         mode: research (look, read, investigate; changes nothing) or work (make changes).
         project: Configured project the agents belong to; Jarvis unless the work is in another project.
-        lead: Who plans the split and combines the reports. You choose, per job:
+        lead: Who plans the work, checks it and combines the reports. You choose, per job:
             blank for a quick job (parts that take an agent a few minutes): your split runs as you wrote it and you
             combine the reports yourself.
-            "fable" for a big or hard job (a build across folders, a deep investigation, anything where each part
-            takes an agent ten minutes or more, or a wrong split would waste the plan): Claude Fable 5.2, the most
-            capable model, first improves your split and writes each agent's instructions, or advises against
-            splitting; the agents then run on the cheaper models it names; at the end it checks their reports
-            against each other and the files and writes the combined answer. It only reads. It adds a few minutes
-            before the agents start and uses more of the plan, so say so. Your parts are still required: they are
-            its starting draft, and they run as they are if its plan can't be used.
-            "opus" for the same on Claude Opus 5.5.
+            "fable" for a big or hard job (a build, a deep investigation, a job in stages such as find out, then
+            build, then check, anything that would take one agent more than about ten minutes, or where a wrong
+            approach would waste the plan): Claude Fable 5.2, the most capable model, plans the first round and
+            writes each agent's instructions, or advises against running it this way; the agents run on the
+            cheaper models it names; it then checks their reports against each other and the files, and if the job
+            isn't finished it sends agents out again, up to three rounds, before it writes the combined answer. So
+            the steps may depend on each other. It only reads. It adds a few minutes before the agents start and
+            uses more of the plan, so say so. Your parts are its starting draft, and they run as they are if its
+            plan can't be used.
+            "opus" for the same on Claude Opus 5.5: when the user asks for Opus to lead, or Fable can't be used.
     """
     import parallel
     if TERMINAL.running:

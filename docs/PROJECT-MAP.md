@@ -166,8 +166,20 @@ the parts run on the models it named. Last it gets every report with what Jarvis
 what a quick look can settle, and writes the one answer the owner hears. It only reads, and it is not running
 while the parts are, so it takes no agent slot.
 
-If the lead fails at either step the job carries on without it: Jarvis's own split runs, and Jarvis's own brain
+If the lead fails at any step the job carries on without it: Jarvis's own split runs, and Jarvis's own brain
 combines the reports (`merge_turn`). If that turn fails too, the reports are read out as written.
+
+Since 2026-11-15 the lead can send agents out again. After reading a round's reports it either writes the
+answer or orders another round (the same JSON plan), up to `MAX_ROUNDS` (3) in all. That is how a led job does
+steps that depend on each other, such as find out, then build, then check: each step is a round. A led round
+can be a single agent, so Jarvis's draft for a led job can be one part. In a job that changes files, a part
+the plan marks `"mode": "research"` only looks, so it can share a folder with the one writer. An order that
+can't be run (unknown model, two writers in one folder, a fourth round) ends the job with Jarvis's own brain
+combining every round's reports.
+
+Jarvis starts a led job himself for anything big (the "Big jobs get a lead" line in `jarvis.SYSTEM_PROMPT`):
+he says so in a sentence and doesn't wait for a yes. Quick parallel jobs are still a recommendation first.
+The general name for this is orchestrator and workers.
 
 ## Fable for away work (2026-11-11)
 
