@@ -137,7 +137,8 @@ class ServedTest(unittest.TestCase):
             body = json.loads(response.read())
             connection.close()
         self.assertEqual(response.status, 200)
-        self.assertEqual(set(body), {"now", "job", "agents", "counts"})
+        self.assertEqual(set(body), {"now", "job", "agents", "counts", "room"})
+        self.assertIn(body["room"]["headset"], (True, False))
 
 
 if __name__ == "__main__":

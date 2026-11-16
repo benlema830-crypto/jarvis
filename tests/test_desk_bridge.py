@@ -203,6 +203,40 @@ class DeskBridgeTest(unittest.TestCase):
         with mock.patch.object(desk_bridge.time, "time", return_value=time.time() + 60):
             self.assertEqual(json.loads(self.listen("what time is it", followup=True)[1]), {"ignored": True})
 
+    # ---------- headset on at the PC: the laptop neither listens nor speaks (owner's choice "A", 2026-11-16) ----------
+    def test_the_headset_in_use_pauses_the_room_mic(self):
+        heard = []
+        self.bridge.headset_heard = lambda: time.time() - 30   # the PC's headset mic carried sound half a minute ago
+        self.bridge.transcribe = lambda audio: heard.append(1) or "Jarvis, lights off"
+        self.bridge.on_message = lambda text, reply: reply("Done", None)
+        wav = phone_bridge.to_wav(phone_bridge.np.zeros(1600, "float32"), 16000)
+        status, body, _ = self.request("POST", "/room/listen", wav, {**self.key(), "Content-Type": "audio/wav"})
+        self.assertEqual((status, json.loads(body)), (200, {"ignored": True, "headset": True}))
+        self.assertEqual(heard, [])  # not even transcribed
+        self.assertEqual(json.loads(self.request("GET", "/room/ping", headers=self.key())[1]), {"ok": True, "headset": True})
+
+    def test_the_laptop_listens_again_once_the_headset_has_been_flat_for_a_while(self):
+        self.bridge.headset_heard = lambda: time.time() - desk_bridge.HEADSET_SECONDS - 5
+        self.assertEqual(json.loads(self.request("GET", "/room/ping", headers=self.key())[1]), {"ok": True, "headset": False})
+        self.assertEqual(self.listen("Jarvis, lights off")[0], 200)
+        self.bridge.headset_heard = None   # no PC microphone (text mode): the laptop listens
+        self.assertFalse(self.bridge.headset_on())
+        self.bridge.headset_heard = lambda: 1 / 0   # a broken reading never silences the laptop
+        self.assertFalse(self.bridge.headset_on())
+
+    def test_the_laptop_program_asks_about_the_headset(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("satellite", desk_bridge.LAPTOP / "satellite.py")
+        satellite = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(satellite)
+        url = f"http://127.0.0.1:{self.server.server_port}"
+        self.bridge.headset_heard = lambda: time.time()
+        with mock.patch.object(desk_bridge.Bridge, "owner_ok", return_value=True):
+            self.assertIs(satellite.headset_on(url, "laptop-key"), True)
+            self.bridge.headset_heard = None
+            self.assertIs(satellite.headset_on(url, "laptop-key"), False)
+            self.assertIsNone(satellite.headset_on(url, "wrong-key"))  # can't tell: keep listening as before
+
     def test_a_quiet_answer_is_not_spoken(self):
         self.bridge.transcribe = lambda audio: "Jarvis, never mind that"
         self.bridge.speak = lambda text: phone_bridge.to_wav(phone_bridge.np.zeros(160, "float32"), 16000)

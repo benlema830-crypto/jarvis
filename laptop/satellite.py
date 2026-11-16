@@ -38,6 +38,7 @@ CONFIG = Path.home() / ".config" / "jarvis-laptop" / "config.json"
 RATE, FRAME = 16000, 1600            # 100 ms frames of 16-bit mono
 PAUSE_S, MAX_S, MIN_SPEECH_S = 1.0, 20.0, 0.3
 FOLLOW_S = 8.0
+ASK_EVERY_S = 10.0                   # how often to ask the PC whether its headset is in use
 RECORDERS = [
     ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(RATE), "-c", "1"],
     ["parecord", "--raw", f"--rate={RATE}", "--channels=1", "--format=s16le"],
@@ -115,12 +116,25 @@ def send(url, key, clip: bytes, followup: bool):
         return ("awake", None) if data.get("awake") else ("quiet", None)
 
 
+def headset_on(url, key):
+    """True while the owner is on the headset at the PC (then this laptop stays deaf and silent), False when not,
+    None when the PC can't be asked (then nothing changes)."""
+    request = urllib.request.Request(url + "/room/ping", headers={"Authorization": "Bearer " + key})
+    try:
+        with urllib.request.urlopen(request, timeout=10, context=ssl.create_default_context()) as response:
+            return bool(json.loads(response.read() or b"{}").get("headset"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
 class Microphone:
-    """The recorder runs all the time; frames read while `muted` are thrown away (so nothing piles up)."""
+    """The recorder runs all the time; frames read while `muted` (Jarvis talking) or `paused` (the headset is in use
+    at the PC) are thrown away, so nothing piles up and nothing is sent."""
 
     def __init__(self, source=None):
         self.frames: queue.Queue[bytes] = queue.Queue(maxsize=50)
         self.muted = False
+        self.paused = False
         if source is None:
             command = tool(RECORDERS)
             if not command:
@@ -134,7 +148,7 @@ class Microphone:
         while frame := source.read(FRAME * 2):
             if len(frame) < FRAME * 2:
                 break
-            if not self.muted:
+            if not self.muted and not self.paused:
                 try:
                     self.frames.put_nowait(frame)
                 except queue.Full:
@@ -197,10 +211,21 @@ class Sender:
             self.follow_until = time.time() + FOLLOW_S
 
 
+def watch_headset(url, key, mic):
+    while True:
+        answer = headset_on(url, key)
+        if answer is not None and answer != mic.paused:
+            mic.paused = answer
+            log("Headset in use at the PC: not listening" if answer else "Listening again")
+        time.sleep(ASK_EVERY_S)
+
+
 def run(source=None, stop_after=None):
     url, key = config()
     mic = Microphone(source)
     sender = Sender(url, key, mic)
+    if source is None:  # a test feeding a recording doesn't ask
+        threading.Thread(target=watch_headset, args=(url, key, mic), daemon=True).start()
     floor, loud, speaking, clip, pre = 300.0, 0, False, [], []
     speech_s = quiet_s = total_s = 0.0
     sent = 0
@@ -211,6 +236,8 @@ def run(source=None, stop_after=None):
         try:
             frame = mic.frames.get(timeout=1)
         except queue.Empty:
+            if mic.paused:  # drop a phrase cut off by the pause rather than send half of it later
+                speaking, clip, pre, loud = False, [], [], 0
             continue
         if not frame:
             if stop_after:  # a test's recording ran out: let the last clips finish

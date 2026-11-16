@@ -44,5 +44,22 @@ class MicMuteTest(unittest.TestCase):
         self.assertFalse(ears._blocks.get_nowait().any())
 
 
+
+class HeadsetSoundTest(unittest.TestCase):
+    def test_the_ears_note_when_the_headset_mic_last_carried_sound(self):
+        # The INZONE dongle stays "connected" with the headset off and sends a flat +-1 signal; real sound is louder.
+        import queue
+        import time
+        from ears import Ears
+        ears = Ears.__new__(Ears)
+        ears._blocks, ears.muted, ears.last_sound = queue.Queue(), False, 0.0
+        flat = np.array([[0], [1], [-1], [0]], dtype=np.int16)
+        ears._receive(flat)
+        self.assertEqual(ears.last_sound, 0.0)
+        ears.muted = True  # Jarvis's own Mute doesn't mean the headset is off
+        ears._receive(np.array([[0], [40], [-35], [3]], dtype=np.int16))
+        self.assertAlmostEqual(ears.last_sound, time.time(), delta=2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -121,7 +121,8 @@ Exec=$BIN/jarvis-room off
 DESKTOP
 
 systemctl --user daemon-reload
-systemctl --user enable --now jarvis-room
+systemctl --user enable jarvis-room
+systemctl --user restart jarvis-room   # a re-run (to update) starts the new program now
 sleep 2
 if systemctl --user is-active --quiet jarvis-room; then ROOM="on"; else ROOM="NOT running (see: jarvis-room log)"; fi
 

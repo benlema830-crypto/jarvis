@@ -337,7 +337,10 @@ class _Handler(BaseHTTPRequestHandler):
             import agent_board
             import parallel
             from agent_sessions import MANAGER
-            self._json(agent_board.snapshot(MANAGER.snapshot(), parallel.GROUPS))
+            import desk_bridge
+            board = agent_board.snapshot(MANAGER.snapshot(), parallel.GROUPS)
+            board["room"] = {"headset": desk_bridge.BRIDGE.headset_on()}  # the laptop mic paused for the headset
+            self._json(board)
         elif self.path == "/home":
             self._json(home())
         elif self.path == "/jobs":

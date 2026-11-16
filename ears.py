@@ -48,6 +48,10 @@ WAKE_THRESHOLD = float(os.getenv("JARVIS_WAKE_THRESHOLD", "0.5"))
 STT_MODEL = os.getenv("JARVIS_STT_MODEL", "large-v3-turbo")
 HOTWORDS = os.getenv("JARVIS_STT_HOTWORDS", "Jarvis")
 WAKE_WORDS = ("jarvis", "jarvas", "jervis")
+# The INZONE H5 dongle stays "connected" in Windows with the headset off; its mic then sent a flat +-1 signal for
+# 20 minutes on 2026-11-16. A live mic in a room carries more than that. Whether a live mic with the headset's
+# noise reduction can sit as flat is not known yet (the on/off test hasn't been run).
+HEADSET_SOUND_PEAK = 8
 # A voice this far under the voice-lock threshold still counts as the owner's when the phrase says "Jarvis".
 # In the ten days to 2026-11-12 the lock ignored 80 phrases scoring 0.50 to 0.62 against 193 it accepted, three of
 # them in a row just before "Jarvis, I'm just gonna restart you". Short or irritated speech scores lower than the
@@ -191,6 +195,7 @@ class Ears:
         if wanted.strip() and device is None:
             print(f"(Mic '{wanted}' not found - using the Windows default mic)", flush=True)
         self.last_input = self.last_processed = 0.0
+        self.last_sound = 0.0  # when the mic last carried real sound (desk_bridge: is the headset in use?)
         self.last_utterance_end = None
         self.pause_seconds = conversation_settings.read()['pause_seconds']
         self._input_lock = threading.Lock()
@@ -207,6 +212,8 @@ class Ears:
     def _receive(self, indata, *_):
         self.last_input = time.monotonic()
         block = indata[:, 0].copy()
+        if block.size and int(np.abs(block.astype(np.int32)).max()) > HEADSET_SOUND_PEAK:
+            self.last_sound = time.time()  # before Mute: Jarvis muted doesn't mean the headset is off
         if self.muted:
             block[:] = 0  # no wake word, no speech, no level: nothing heard leaves this line
         self._blocks.put(block)

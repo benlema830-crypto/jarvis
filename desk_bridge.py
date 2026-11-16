@@ -42,6 +42,7 @@ MAX_UPLOAD = 100_000_000  # the workshop page may hand over a large model
 REPLY_SECONDS = 170
 PAIR_SECONDS = 600
 HEARD_AT_PC_SECONDS = 8
+HEADSET_SECONDS = 300          # the PC's headset mic counts as in use this long after it last carried sound
 CALLED_SECONDS = 15           # after "Jarvis" alone: time to say the request and for the clip to arrive
 LOCKOUT_FAILS, LOCKOUT_SECONDS = 10, 600
 HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-authenticate",
@@ -110,6 +111,8 @@ class Bridge:
         self.error = ""
         self.fails = []
         self.called_until = 0.0
+        self.headset_heard = None  # () -> when the PC's mic last carried sound (ears.last_sound); set by jarvis.py
+        self._headset_was = False
         self.busy = threading.Lock()
 
     def start(self) -> bool:
@@ -179,10 +182,27 @@ class Bridge:
         print("(Laptop paired)", flush=True)
         return self.key() or None
 
+    def headset_on(self) -> bool:
+        """Is the owner on the headset at the PC? Then the laptop neither listens nor speaks (their choice, 2026-11-16).
+        Windows can't tell (the dongle stays connected), so: has the PC's mic carried real sound in the last
+        HEADSET_SECONDS? No PC microphone, or a reading that fails, means no: the laptop is never silenced by a fault."""
+        try:
+            heard = float(self.headset_heard()) if self.headset_heard else 0.0
+        except Exception:
+            heard = 0.0
+        now_on = bool(heard) and time.time() - heard < HEADSET_SECONDS
+        if now_on != self._headset_was:
+            self._headset_was = now_on
+            print("(Headset in use at the PC: laptop mic paused)" if now_on
+                  else "(Headset quiet for 5 minutes: laptop mic listening)", flush=True)
+        return now_on
+
     def listen(self, audio: bytes, followup: bool) -> dict:
         """One clip from the laptop's microphone: {"ignored"}, {"awake"} or {"heard", "reply", "wav"}."""
         if not self.transcribe or not self.on_message:
             return {"error": "Jarvis isn't fully started yet."}
+        if self.headset_on():  # also stops a laptop still running the older program, which doesn't ask first
+            return {"ignored": True, "headset": True}
         arrived = time.time()
         text = " ".join(self.transcribe(phone_bridge.from_wav(audio)).split())
         if phone_bridge.hint_echo(text):
@@ -297,7 +317,7 @@ def make_handler(bridge: Bridge):
                     return self.send(303, b"", "text/plain", {"Location": "/login"})
                 return self.send(401, {"error": "This laptop isn't paired with Jarvis."})
             if route == "/room/ping":
-                return self.send(200, {"ok": True})
+                return self.send(200, {"ok": True, "headset": bridge.headset_on()})
             self.proxy()
 
         def do_POST(self):

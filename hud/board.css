@@ -34,6 +34,7 @@ body[data-state=offline] .lamp,body[data-state=lost] .lamp{background:var(--dang
 body[data-state=offline] .jarvis,body[data-state=lost] .jarvis{color:var(--danger)}
 .tally{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tally b{color:var(--ink);font-weight:600}
+.headset{color:var(--amber);font-size:14px;white-space:nowrap;padding:5px 10px;border:1px solid color-mix(in srgb,var(--amber) 40%,transparent);border-radius:999px}
 .bar-end{display:flex;align-items:center;gap:20px;white-space:nowrap}
 .quiet-link{color:var(--muted);text-decoration:none;font-size:14px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;transition:color .15s,border-color .15s}
 .quiet-link:hover{color:var(--ink);border-color:var(--line-strong)}
@@ -157,6 +158,7 @@ h2{font:600 14px/1.2 var(--sans);color:var(--muted);margin-bottom:12px}
  body{display:block;height:auto;overflow:auto}
  .bar{position:sticky;top:0;z-index:2;height:var(--bar);gap:14px}
  .tally,.quiet-link{display:none}
+ .headset{white-space:normal;font-size:12.5px;line-height:1.25;padding:3px 9px}
  .bar-end{margin-left:auto}
  main{overflow:visible;padding:20px 16px 28px}
  .job-head{flex-direction:column;gap:6px}

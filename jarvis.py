@@ -1270,6 +1270,8 @@ def start_bridges(ears):
                           "prompt": f"[Via Laptop] {text}"})
     desk_bridge.BRIDGE.on_message = on_laptop
     desk_bridge.BRIDGE.transcribe = bridge.transcribe
+    if ears:
+        desk_bridge.BRIDGE.headset_heard = lambda: ears.last_sound  # headset on at the PC: the laptop stays out of it
     if desk_bridge.BRIDGE.start():
         print(f"Laptop bridge online on 127.0.0.1:{desk_bridge.PORT}.", flush=True)
     elif desk_bridge.BRIDGE.error:

@@ -142,6 +142,7 @@
     const inJob = agents.filter(a => a.role !== 'solo'), solo = agents.filter(a => a.role === 'solo');
     const working = solo.filter(a => a.live), earlier = solo.filter(a => !a.live);
 
+    $('headset').hidden = !(board.room && board.room.headset);
     const tally = $('tally'); tally.replaceChildren();
     if (counts.working) {
       tally.append(make('b', String(counts.working)), ` agent${counts.working === 1 ? '' : 's'} working`);
