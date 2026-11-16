@@ -18,13 +18,27 @@ if ! curl -fsS --max-time 10 -o /dev/null "$URL/login"; then
   exit 1
 fi
 
-if [ -f "$CONF_DIR/config.json" ] && [ "${1:-}" != "--pair" ]; then
+if [ -f "$CONF_DIR/config.json" ] && [ "${1:-}" != "--pair" ] && ! [[ "${1:-}" =~ ^[0-9]{6}$ ]]; then
   echo "Already paired; updating the programs. (Run with --pair to pair again.)"
 else
-  read -rp "Pairing code shown on the PC: " CODE < /dev/tty
-  KEY=$(curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"code\": \"${CODE//[^0-9]/}\"}" "$URL/laptop/pair" \
-        | python3 -c 'import json, sys; print(json.load(sys.stdin)["key"])') || {
-    echo "That code didn't work. Make a new one on the PC and run this again."; exit 1; }
+  # The code can also come on the command line (curl ... | bash -s -- 123456), so nothing has to be typed blind.
+  KEY=""; CODE=""
+  for word in "$@"; do [[ "$word" =~ ^[0-9]{6}$ ]] && CODE="$word"; done
+  for _ in 1 2 3; do
+    [ -n "$CODE" ] || read -rp "Pairing code shown on the PC: " CODE < /dev/tty
+    CODE="${CODE//[^0-9]/}"
+    if [ "${#CODE}" -ne 6 ]; then
+      echo "That came through as \"$CODE\", and the code is 6 digits. Use the number row, not the number pad."
+      CODE=""; continue
+    fi
+    echo "Sending code $CODE"
+    KEY=$(curl -sS -X POST -H 'Content-Type: application/json' -d "{\"code\": \"$CODE\"}" "$URL/laptop/pair" \
+          | python3 -c 'import json, sys; print(json.load(sys.stdin).get("key") or "")') || KEY=""
+    [ -n "$KEY" ] && break
+    echo "The PC refused code $CODE. Check it against the PC."
+    CODE=""
+  done
+  [ -n "$KEY" ] || { echo "Pairing didn't work. Make a new code on the PC and run this again."; exit 1; }
   mkdir -p "$CONF_DIR"
   ( umask 077; printf '{"url": "%s", "key": "%s"}\n' "$URL" "$KEY" > "$CONF_DIR/config.json" )
   echo "Paired."
