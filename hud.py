@@ -333,6 +333,11 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/sessions":
             from agent_sessions import MANAGER
             self._json(MANAGER.snapshot())
+        elif self.path == "/agents":  # the agent board (hud/board.html): each agent and what it is doing
+            import agent_board
+            import parallel
+            from agent_sessions import MANAGER
+            self._json(agent_board.snapshot(MANAGER.snapshot(), parallel.GROUPS))
         elif self.path == "/home":
             self._json(home())
         elif self.path == "/jobs":

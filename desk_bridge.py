@@ -245,7 +245,7 @@ const key = new URLSearchParams(location.hash.slice(1)).get('key');
 history.replaceState(null, '', '/login');
 if (!key) document.getElementById('m').textContent = 'Open Jarvis from the Jarvis icon on this laptop. To set the laptop up, use "Set up the laptop" in the Jarvis tray menu on the PC.';
 else fetch('/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})})
-  .then(r => { if (r.ok) location.replace('/'); else document.getElementById('m').textContent = 'Jarvis refused this laptop key. Run the setup again.'; })
+  .then(r => { if (r.ok) location.replace('/board'); else document.getElementById('m').textContent = 'Jarvis refused this laptop key. Run the setup again.'; })
   .catch(() => document.getElementById('m').textContent = "Can't reach Jarvis. Is Tailscale on and the PC awake?");
 </script></body></html>"""
 
@@ -293,7 +293,7 @@ def make_handler(bridge: Bridge):
             if route == "/login":
                 return self.send(200, LOGIN_PAGE, "text/html; charset=utf-8")
             if not bridge.allowed(self.headers):
-                if route == "/":
+                if route in ("/", "/board"):
                     return self.send(303, b"", "text/plain", {"Location": "/login"})
                 return self.send(401, {"error": "This laptop isn't paired with Jarvis."})
             if route == "/room/ping":

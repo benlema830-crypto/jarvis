@@ -99,6 +99,12 @@ class DeskBridgeTest(unittest.TestCase):
         self.assertEqual(self.request("GET", "/brain-data", headers={**self.key(), "Tailscale-User-Login": "x@y.z"})[0], 401)
         self.assertEqual(self.request("GET", "/", headers=self.key())[1], b"<html>brain page</html>")
 
+    def test_the_laptop_opens_on_the_agent_board(self):
+        status, _, response = self.request("GET", "/board")
+        self.assertEqual((status, response.headers["Location"]), (303, "/login"))  # signed out: sign in first
+        self.assertIn(b"location.replace('/board')", self.request("GET", "/login")[1])
+        self.assertEqual(self.request("GET", "/board", headers=self.key())[0], 200)
+
     def test_login_sets_a_strict_cookie_that_opens_the_page(self):
         status, _, response = self.request("POST", "/login", json.dumps({"key": "laptop-key"}), {"Content-Type": "application/json"})
         cookie = response.headers["Set-Cookie"]

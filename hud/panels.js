@@ -47,7 +47,8 @@
   /* ---------- Tasks & agents ---------- */
   const agents = dialog('agentsDialog', 'Tasks & agents', 'Your to-do list lives in Tasks.md in your vault. Agent sessions are Codex workers JARVIS manages.');
   const taskBox = make('div'), sessionBox = make('div', null, 'grid');
-  agents.body.append(make('div', 'To-do (Tasks.md)', 'section-label'), taskBox, make('div', 'Agent sessions', 'section-label'), sessionBox);
+  const boardLink = make('a', 'Open the agent board: every agent and what it is doing, on one page'); boardLink.href = '/board';
+  agents.body.append(boardLink, make('div', 'To-do (Tasks.md)', 'section-label'), taskBox, make('div', 'Agent sessions', 'section-label'), sessionBox);
   async function showAgents() {
     try {
       const data = await J.api('/tasks'); taskBox.replaceChildren();

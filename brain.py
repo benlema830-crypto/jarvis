@@ -104,6 +104,8 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/vendor/three.module.js": ("vendor/three.module.js", "text/javascript"),
           "/vendor/GLTFExporter.js": ("vendor/GLTFExporter.js", "text/javascript"),
           "/vendor/TextureUtils.js": ("vendor/TextureUtils.js", "text/javascript"),
+          "/board": ("board.html", "text/html"), "/board.css": ("board.css", "text/css"),
+          "/board.js": ("board.js", "text/javascript"),
           "/": ("brain.html", "text/html")}
 # The workshop's 3D stage is a sandboxed frame, so its request for three.js arrives with no origin ("null").
 # That one file is a public library with nothing of the owner's in it, so any page may read it.
@@ -157,7 +159,7 @@ def workshop_file(query):
     return path.read_bytes(), "image/png" if name.endswith(".png") else "image/jpeg"
 # Read-only pass-through to the assistant's own HUD server (port from voice-profile.json).
 PROXY = {"GET": {"/events", "/status", "/voice-health", "/conversation-settings", "/settings", "/sessions", "/classic", "/models", "/intel",
-                 "/home", "/attention", "/jobs", "/workshop"},
+                 "/home", "/attention", "/jobs", "/workshop", "/agents"},
          "POST": {"/command", "/stop", "/settings", "/models", "/voice-recovery", "/conversation-settings", "/session-control",
                   "/workshop"}}
 

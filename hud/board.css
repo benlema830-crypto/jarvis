@@ -1,0 +1,166 @@
+/* The agent board: every agent and what it is doing, read at a glance from across a desk.
+   Same colours and type as the dashboard (brain.css); its own file because it shares none of the graph's layout. */
+:root{
+ color-scheme:dark;
+ --bg:#030608;--panel:#0a1115;--raise:#101a1f;--well:#060b0e;
+ --line:rgba(130,200,190,.13);--line-strong:rgba(130,220,200,.28);
+ --ink:#dfe9e6;--muted:#9bafad;--faint:#829895;
+ --accent:#5eead4;--accent-ink:#04201b;--amber:#f5b83d;--danger:#f87171;--ok:#34d399;
+ --mono:"Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+ --sans:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+ --radius:14px;--gap:16px;--rail:320px;--bar:56px;
+ --ease:cubic-bezier(.16,1,.3,1);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{height:100%;scrollbar-color:#22363b transparent;scrollbar-width:thin}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:16px/1.45 var(--sans);
+ display:grid;grid-template:var(--bar) minmax(0,1fr) / minmax(0,1fr) var(--rail);height:100vh;overflow:hidden}
+::selection{background:color-mix(in srgb,var(--accent) 35%,transparent);color:#fff}
+h1,h2,h3,p,ul,ol{margin:0;padding:0}
+ul,ol{list-style:none}
+a{color:var(--accent);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+time,.num{font-variant-numeric:tabular-nums}
+
+/* ---------- Top bar: Jarvis himself, the tally, the clock ---------- */
+.bar{grid-column:1 / -1;display:flex;align-items:center;gap:24px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.jarvis{display:flex;align-items:center;gap:10px;font-weight:600;white-space:nowrap}
+.lamp{width:10px;height:10px;border-radius:50%;background:var(--faint);flex:none}
+body[data-state=listening] .lamp{background:var(--accent)}
+body[data-state=thinking] .lamp{background:var(--amber);animation:beat 1.6s ease-in-out infinite}
+body[data-state=speaking] .lamp{background:var(--accent);animation:beat .8s ease-in-out infinite}
+body[data-state=offline] .lamp,body[data-state=lost] .lamp{background:var(--danger)}
+body[data-state=offline] .jarvis,body[data-state=lost] .jarvis{color:var(--danger)}
+.tally{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tally b{color:var(--ink);font-weight:600}
+.bar-end{display:flex;align-items:center;gap:20px;white-space:nowrap}
+.quiet-link{color:var(--muted);text-decoration:none;font-size:14px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;transition:color .15s,border-color .15s}
+.quiet-link:hover{color:var(--ink);border-color:var(--line-strong)}
+#clock{font:500 19px/1 var(--sans);color:var(--ink)}
+
+/* ---------- Main column ---------- */
+main{overflow-y:auto;padding:24px 20px 40px;display:flex;flex-direction:column;gap:36px;scrollbar-gutter:stable}
+main>*{min-width:0;flex:none}
+h2{font:600 14px/1.2 var(--sans);color:var(--muted);margin-bottom:12px}
+
+.job-head{display:flex;align-items:baseline;gap:20px;justify-content:space-between}
+.job h1{font:600 23px/1.25 var(--sans);text-wrap:balance;max-width:60ch}
+.job-facts{color:var(--muted);white-space:nowrap;font-size:14px}
+.job-facts .num{color:var(--ink);font:500 16px/1 var(--mono)}
+.job-note{margin-top:12px;color:var(--amber);font-size:14px;max-width:75ch}
+
+/* Stages: where the job is. A real sequence, so it is drawn as one. */
+.stages{display:flex;align-items:flex-start;margin:20px 0 4px;overflow-x:auto;padding-bottom:4px}
+.stage{flex:1 1 0;min-width:84px;position:relative;padding-top:26px;font-size:14px;color:var(--faint)}
+.stage::before{content:"";position:absolute;left:0;right:0;top:8px;height:2px;background:var(--line-strong)}
+.stage:first-child::before{left:9px}
+.stage:last-child{flex:0 0 auto;min-width:64px}
+.stage:last-child::before{display:none}
+.stage::after{content:"";position:absolute;left:0;top:0;width:18px;height:18px;border-radius:50%;background:var(--bg);border:2px solid var(--line-strong)}
+.stage[data-state=done]{color:var(--muted)}
+.stage[data-state=done]::before{background:color-mix(in srgb,var(--accent) 55%,transparent)}
+.stage[data-state=done]::after{background:color-mix(in srgb,var(--accent) 55%,var(--bg));border-color:transparent}
+.stage[data-state=now]{color:var(--ink);font-weight:600}
+.stage[data-state=now]::after{border-color:var(--accent);background:var(--accent-ink);animation:ring 1.6s ease-out var(--beat,0ms) infinite}
+.stage small{display:flex;gap:6px;margin-top:3px;font:500 12.5px/1.3 var(--mono);font-weight:400}
+.stage small [data-outcome=done]{color:var(--ok)}
+.stage small [data-outcome=failed]{color:var(--danger)}
+.stage small [data-outcome=stopped]{color:var(--amber)}
+.stage small [data-outcome=""]{color:var(--accent)}
+
+/* The lead: one line across, above the agents it directs */
+.lead{display:flex;align-items:center;gap:14px;margin-top:18px;padding:12px 16px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--raise)}
+.lead .who{font-weight:600;white-space:nowrap}
+.lead .model{color:var(--muted);font-size:14px;white-space:nowrap}
+.lead .saying{flex:1;min-width:0}
+.lead .clock{font:500 16px/1 var(--mono);color:var(--muted)}
+
+/* ---------- Agent cards ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:var(--gap);margin-top:var(--gap)}
+#soloCards{margin-top:0}
+.agent{display:flex;flex-direction:column;gap:10px;min-width:0;padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+.agent[data-live=true]{border-color:var(--line-strong)}
+.agent header{display:flex;align-items:center;gap:10px}
+.agent h3{font:600 16px/1.2 var(--sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .clock{font:500 16px/1 var(--mono);color:var(--muted)}
+.agent[data-live=true] .clock{color:var(--ink)}
+.agent .meta{color:var(--muted);font-size:14px;margin-top:-6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .doing{font-size:19px;line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
+.agent[data-live=false] .doing{font-size:16px;color:var(--ink)}
+.agent .quiet{color:var(--amber);font-size:14px}
+.steps{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:10px;background:var(--well);font:12.5px/1.5 var(--mono);color:var(--faint)}
+.steps li{display:flex;gap:10px;min-width:0}
+.steps li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.steps li time{flex:none;color:var(--faint)}
+.steps li:last-child{color:var(--ink)}
+.steps li[data-state=failed]{color:var(--danger)}
+.agent details{font-size:14px;color:var(--muted)}
+.agent summary,.earlier summary{cursor:pointer;color:var(--muted);list-style:none}
+.agent summary::-webkit-details-marker,.earlier summary::-webkit-details-marker{display:none}
+.agent summary::before{content:"";display:inline-block;width:6px;height:6px;margin:0 9px 2px 2px;border:solid var(--faint);border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform .2s var(--ease)}
+.agent details[open] summary::before{transform:rotate(45deg)}
+.agent summary:hover{color:var(--ink)}
+.agent details p{margin-top:8px;max-width:75ch;color:var(--ink);line-height:1.5;overflow-wrap:anywhere}
+.agent .foot{color:var(--faint);font-size:12.5px;margin-top:auto}
+
+/* Status mark: drawn, one stroke weight, coloured by what it means */
+.mark{width:18px;height:18px;flex:none;color:var(--faint)}
+.mark[data-status=running]{color:var(--accent)}
+.mark .halo{transform-origin:center;transform-box:fill-box;animation:pulse 1.6s ease-out var(--beat,0ms) infinite}
+.mark[data-status=waiting],.mark[data-status=paused],.mark[data-status=interrupted]{color:var(--amber)}
+.mark[data-status=completed]{color:var(--ok)}
+.mark[data-status=failed]{color:var(--danger)}
+
+/* ---------- Nothing running ---------- */
+.idle{padding:8vh 0 2vh;max-width:60ch}
+.idle h1{font:600 28px/1.2 var(--sans);margin-bottom:12px}
+.idle p{color:var(--muted);font-size:17px;line-height:1.55}
+.idle q{color:var(--ink);quotes:"\201C" "\201D"}
+
+/* ---------- Finished earlier ---------- */
+.earlier{border-top:1px solid var(--line)}
+.earlier li{border-bottom:1px solid var(--line)}
+.earlier summary{display:grid;grid-template-columns:18px minmax(120px,190px) minmax(0,1fr) auto;gap:14px;align-items:center;padding:11px 4px;transition:background .15s}
+.earlier summary:hover{background:#ffffff08}
+.earlier .name{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.earlier .line{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.earlier .when{font-size:14px;color:var(--faint);white-space:nowrap}
+.earlier .more{padding:2px 4px 16px 36px;display:grid;gap:10px;max-width:80ch;color:var(--ink);font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+.earlier .more .label{color:var(--muted)}
+
+/* ---------- Right rail: Jarvis, live ---------- */
+.rail{border-left:1px solid var(--line);background:var(--panel);padding:20px 16px;overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+.rail section{margin-bottom:24px}
+.queue li{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.queue li b{display:block;font-weight:600;color:var(--ink)}
+.queue li span{color:var(--muted)}
+.feed{display:flex;flex-direction:column;gap:12px;font-size:14px;line-height:1.45}
+.feed li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;overflow-wrap:anywhere}
+.feed time{color:var(--faint);font-size:12.5px;padding-top:2px;white-space:nowrap;min-width:38px}
+.feed [data-kind=you] p{color:var(--ink)}
+.feed [data-kind=jarvis] p{color:var(--accent)}
+.feed [data-kind=event] p,.feed [data-kind=tool] p{color:var(--muted)}
+.feed [data-kind=tool] p{font:12.5px/1.5 var(--mono)}
+.feed [data-kind=error] p{color:var(--danger)}
+.feed li.new{animation:arrive .5s var(--ease)}
+.feed-empty{color:var(--faint);font-size:14px;line-height:1.5}
+
+@keyframes beat{50%{opacity:.35}}
+@keyframes ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 50%,transparent);opacity:1}100%{box-shadow:0 0 0 9px transparent;opacity:.55}}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.15);opacity:0}}
+@keyframes arrive{from{opacity:0;transform:translateY(-6px);filter:blur(2px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* A narrow window (the PC app beside other things, or a phone): the live column goes underneath */
+@media (max-width:900px){
+ body{display:block;height:auto;overflow:auto}
+ .bar{position:sticky;top:0;z-index:2;height:var(--bar);gap:14px}
+ .tally,.quiet-link{display:none}
+ .bar-end{margin-left:auto}
+ main{overflow:visible;padding:20px 16px 28px}
+ .job-head{flex-direction:column;gap:6px}
+ .rail{border-left:0;border-top:1px solid var(--line);overflow:visible}
+ .earlier summary{grid-template-columns:18px minmax(0,1fr) auto}
+ .earlier .line{display:none}
+}
