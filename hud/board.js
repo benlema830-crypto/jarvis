@@ -125,7 +125,7 @@
     const key = 'earlier:' + agent.name;
     details.open = open.has(key);
     details.addEventListener('toggle', () => details.open ? open.add(key) : open.delete(key));
-    const when = agent.updated_at ? `${ago(serverNow() - agent.updated_at)} ago · took ${span(agent.seconds)}` : '';
+    const when = agent.updated_at ? `${ago(serverNow() - agent.updated_at)} ago` + (agent.seconds ? ` · took ${span(agent.seconds)}` : '') : '';
     summary.append(mark(agent.status), make('span', agent.name, 'name'),
       make('span', agent.doing || STATUS_WORDS[agent.status] || agent.status, 'line'), make('span', when, 'when num'));
     const more = make('div', null, 'more');
