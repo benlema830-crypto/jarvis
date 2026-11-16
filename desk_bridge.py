@@ -9,7 +9,7 @@ needs the laptop key AND the owner's Tailscale login, the same lock as the phone
                the laptop sees and controls exactly what the PC's page does. Requests from any other website are
                refused before they reach brain.py (its own Origin check only knows the PC).
     Room mic   POST /room/listen with a WAV clip the laptop cut at a pause (laptop/satellite.py). Transcribed on this
-               PC, acted on only when it starts with "Jarvis" (or is a follow-up just after an answer), and answered
+               PC, acted on only when it starts with "Jarvis" (always: nothing here checks whose voice it is), and answered
                in his PC voice. A request the PC's own microphone also heard is answered once, at the PC.
     Pairing    scripts/laptop_setup.py (tray: "Set up the laptop") makes a 6-digit code valid for ten minutes, used
                once. The laptop runs  curl -fsSL https://<pc>:8443/laptop | bash  and types it; POST /laptop/pair
@@ -187,9 +187,9 @@ class Bridge:
             return {"ignored": True}
         command = phone_bridge.wake_command(text, "Jarvis")
         if command is None:
-            if not followup or text.lower().strip(" .,!?") in phone_bridge.NOISE:
-                return {"ignored": True}
-            command = text
+            # Always his name here, even right after an answer (`followup`). Nothing checks whose voice this is,
+            # so stray sound in that window became requests and every answer opened it again (2026-11-15).
+            return {"ignored": True}
         if not command.strip(" .,!?"):
             return {"awake": True}
         # The laptop next to the PC: both microphones hear "Jarvis, ...". Give the PC a moment to claim it.
@@ -198,6 +198,8 @@ class Bridge:
             return {"ignored": True, "why": "heard at the PC"}
         print(f"(Laptop room mic: {command})", flush=True)
         answer, wav = self.ask(command[:3000])
+        if "(quiet)" in answer.lower():  # he judged it wasn't meant for him: say nothing, not the word "quiet"
+            return {"ignored": True}
         return {"heard": command, "reply": answer, "wav": wav}
 
     def ask(self, text: str) -> tuple[str, bytes | None]:

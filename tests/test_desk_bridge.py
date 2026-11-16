@@ -178,7 +178,21 @@ class DeskBridgeTest(unittest.TestCase):
         self.assertEqual(json.loads(self.listen("Hey Jarvis.")[1]), {"awake": True})
         status, body, response = self.listen("Jarvis, lights off")
         self.assertEqual((status, body[:4], response.headers["X-Jarvis-Reply"]), (200, b"RIFF", "Done%3A%20lights%20off"))
-        self.assertEqual(self.listen("and the fan", followup=True)[0], 200)
+
+    def test_the_room_mic_always_needs_his_name(self):
+        # No voice check at the laptop: on 2026-11-15 stray sound in the follow-up window ("Cut!", "Thanks for
+        # listening.") became requests, each answer opened the window again, and it looped.
+        for heard in ("and the fan", "Cut!", "Thanks for listening.", "Go to www.btistudios.com"):
+            self.assertEqual(json.loads(self.listen(heard, followup=True)[1]), {"ignored": True}, heard)
+
+    def test_a_quiet_answer_is_not_spoken(self):
+        self.bridge.transcribe = lambda audio: "Jarvis, never mind that"
+        self.bridge.speak = lambda text: phone_bridge.to_wav(phone_bridge.np.zeros(160, "float32"), 16000)
+        self.bridge.on_message = lambda text, reply: reply("(quiet)", None)
+        wav = phone_bridge.to_wav(phone_bridge.np.zeros(1600, "float32"), 16000)
+        with mock.patch.object(desk_bridge.time, "sleep"):
+            body = self.request("POST", "/room/listen", wav, {**self.key(), "Content-Type": "audio/wav"})[1]
+        self.assertEqual(json.loads(body), {"ignored": True})
 
     def test_the_recognisers_own_hint_words_are_never_a_request(self):
         # 2026-11-15: unclear sound at the laptop came back as the hint words and opened Roblox four times.
