@@ -214,12 +214,17 @@ class SpotifyApprovalTest(unittest.TestCase):
             self.assertIn('Done', out)
 
     def test_other_servers_and_lookalikes_still_ask(self):
-        for name, host, tool in (('Zapier MCP', 'mcp.zapier.com', 'gmail_send'),
-                                 ('Spotify (local)', 'evil.example', 'spotify_pause'),
-                                 ('Spotify (local)', '127.0.0.1:8791', 'spotify_delete_everything')):
-            out, called, asked = self.run_call(name, host, tool)
-            self.assertTrue(asked, (name, host, tool))
-            self.assertFalse(called, (name, host, tool))
+        out, called, asked = self.run_call('Zapier MCP', 'mcp.zapier.com', 'gmail_send')   # a message to someone: always
+        self.assertTrue(asked)
+        self.assertFalse(called)
+        # A lookalike gets no free pass from the Spotify list: it goes by the owner's approval settings like any
+        # outside tool, so it asks whenever those say to.
+        with mock.patch('approvals.auto_approved', return_value=False):
+            for name, host, tool in (('Spotify (local)', 'evil.example', 'spotify_pause'),
+                                     ('Spotify (local)', '127.0.0.1:8791', 'spotify_delete_everything')):
+                out, called, asked = self.run_call(name, host, tool)
+                self.assertTrue(asked, (name, host, tool))
+                self.assertFalse(called, (name, host, tool))
 
 
 class BridgeAutostartTest(unittest.TestCase):

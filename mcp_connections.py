@@ -4,6 +4,7 @@ Credentials and endpoint URLs are protected with Windows DPAPI. Discovery never
 executes a tool. Remote text is data, not permission to perform other actions.
 """
 import base64
+import ipaddress
 import json
 import threading
 import time
@@ -45,9 +46,20 @@ def validate_url(url):
     parsed = urlsplit(url.strip())
     if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise ValueError("Use an endpoint URL without embedded username, password, or fragment.")
-    if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}):
-        raise ValueError("Use HTTPS, or HTTP on localhost for a local MCP server.")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and _on_home_network(parsed.hostname)):
+        raise ValueError("Use HTTPS, or HTTP for a server on this PC or at a home-network address (like 192.168.0.44).")
     return url.strip()
+
+
+def _on_home_network(host):
+    """This PC, or a private address written as numbers (Home Assistant on the Pi). Names are refused: a name
+    can be pointed anywhere, and the secret in the URL would travel unencrypted to wherever that is."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
 
 
 def _load():
@@ -265,9 +277,14 @@ def manage(payload):
         return public(item)
 
 
-def catalog(connection_id=""):
+FULL_CATALOG_CHARS = 30000  # past this, one server's schemas are too much to hand the brain at once
+
+
+def catalog(connection_id="", tool=""):
     """Enabled servers. Unfiltered: tool names only - full schemas for every server ran past 80k characters,
-    so the brain never saw the last one (Spotify). Filtered by ID, or by name ("spotify"): full schemas."""
+    so the brain never saw the last one (Spotify). Filtered by ID, or by name ("spotify"): full schemas, unless
+    the server is a big one (Home Assistant's 77 tools ran to 278,000 characters): then each tool's name and the
+    start of its description, and `tool` asks for one tool's full schema."""
     enabled = [c for c in connections() if c["enabled"]]
     if not connection_id:
         return [{"id": c["id"], "name": c["name"], "tools": [t["name"] for t in c["tools"]],
@@ -276,7 +293,17 @@ def catalog(connection_id=""):
     picked = ([c for c in enabled if c["id"] == connection_id]
               or [c for c in enabled if c["name"].casefold() == key]
               or [c for c in enabled if key and key in c["name"].casefold()])
-    return [{"id": c["id"], "name": c["name"], "tools": c["tools"]} for c in picked[:1]]
+    for c in picked[:1]:
+        if tool:
+            return [{"id": c["id"], "name": c["name"], "tools": [t for t in c["tools"] if t["name"] == tool]}]
+        if len(json.dumps(c["tools"])) > FULL_CATALOG_CHARS:
+            brief = [{"name": t["name"], "description": " ".join(str(t.get("description", "")).split())[:160]}
+                     for t in c["tools"]]
+            return [{"id": c["id"], "name": c["name"], "tools": brief,
+                     "note": "Descriptions are cut short. Before calling a tool, get its full description and input "
+                             "schema: list_mcp_tools with this id and tool_name."}]
+        return [{"id": c["id"], "name": c["name"], "tools": c["tools"]}]
+    return []
 
 
 def call(connection_id, tool_name, arguments):

@@ -122,9 +122,12 @@ class ConnectionsTest(unittest.TestCase):
         self.assertEqual(mcp.connections(), [])
 
     def test_endpoint_validation_and_duplicate(self):
-        for url in ['file:///tmp/a','http://example.com/mcp','https://user:password@example.com/mcp','https://example.com/mcp#secret']:
+        for url in ['file:///tmp/a','http://example.com/mcp','https://user:password@example.com/mcp','https://example.com/mcp#secret',
+                    'http://8.8.8.8/mcp', 'http://homeassistant.local:9584/mcp']:   # plain HTTP off the home network, or by name
             with self.assertRaises(ValueError):
                 mcp.validate_url(url)
+        for url in ['http://192.168.0.44:9584/private_abc', 'http://10.0.0.5/mcp', 'http://127.0.0.1:8765/mcp']:
+            self.assertEqual(mcp.validate_url(url), url)   # a server on the home network, by its address (Home Assistant)
         self.connect()
         with self.assertRaises(ValueError):
             self.connect()
@@ -149,6 +152,18 @@ class CatalogTest(unittest.TestCase):
                 self.assertEqual(mcp.catalog(key)[0]['id'], 'bbb')
                 self.assertIn('inputSchema', mcp.catalog(key)[0]['tools'][0])
             self.assertEqual(mcp.catalog('slack'), [])
+
+    def test_a_big_server_is_listed_briefly_and_one_tool_can_be_asked_for(self):
+        with patch.object(mcp, 'connections', return_value=self.ITEMS):   # Home Assistant's 77 tools ran to 278,000 characters
+            listed = mcp.catalog('github')[0]
+            self.assertLess(len(json.dumps(listed)), 12000)
+            self.assertEqual(len(listed['tools']), 40)                    # every tool is still named
+            self.assertNotIn('inputSchema', listed['tools'][0])
+            self.assertIn('tool_name', listed['note'])
+            one = mcp.catalog('github', 't7')[0]
+            self.assertEqual([t['name'] for t in one['tools']], ['t7'])
+            self.assertIn('inputSchema', one['tools'][0])
+            self.assertEqual(mcp.catalog('github', 'nope')[0]['tools'], [])
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ import tools
 
 
 class DispatchTests(unittest.TestCase):
-    def dispatch(self, approved, effect=None, available=True):
+    def dispatch(self, approved, effect=None, available=True, auto=False):
         catalog = [{'id': 'test', 'name': 'Test server', 'tools': [{'name': 'echo'}]}]
         # Run the background job inline, without affecting an actual supervisor.
         def thread(*, target, **kwargs):
@@ -18,6 +18,7 @@ class DispatchTests(unittest.TestCase):
         with patch.object(mcp, 'catalog', return_value=catalog if available else []), \
              patch.object(mcp, 'call', side_effect=effect, return_value=json.dumps({'isError': True, 'content': []})) as call, \
              patch.object(approvals, 'ask', return_value=(approved, 'test')) as ask, \
+             patch.object(approvals, 'auto_approved', return_value=auto), \
              patch.object(tools.hud, 'commands', Mock()) as queue, \
              patch('threading.Thread', side_effect=thread):
             result = tools.run_tool(SimpleNamespace(name='call_mcp_tool', id='one',
@@ -53,6 +54,21 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(queue.put.call_args.args[0]['label'], 'MCP request failed')
         self.assertIn('unavailable', queue.put.call_args.args[0]['say'])
         self.assertFalse(tools._mcp_busy.locked())
+
+    def test_a_call_that_needs_no_yes_runs_in_the_turn_and_its_result_comes_straight_back(self):
+        result, call, ask, queue = self.dispatch(True, auto=True)
+        ask.assert_not_called()
+        call.assert_called_once_with('test', 'echo', {'text': 'test'})
+        queue.put.assert_not_called()                      # no separate report: the result is the tool's answer
+        self.assertIn('untrusted data', result['content'])
+        self.assertIn('"isError": true', result['content'])
+        self.assertFalse(tools._mcp_busy.locked())
+
+    def test_a_direct_call_that_fails_says_why(self):
+        result, call, ask, queue = self.dispatch(True, auto=True,
+                                                 effect=ValueError('Tool is unavailable or its connection is disabled.'))
+        self.assertIn('unavailable', result['content'])
+        self.assertNotIn('MCP RESULT', result['content'])
 
     def test_unavailable_catalog_does_not_request_approval(self):
         result, call, ask, queue = self.dispatch(True, available=False)

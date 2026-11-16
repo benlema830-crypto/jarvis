@@ -523,8 +523,35 @@ and, for the eight text-only coding ones, the Linux sandbox. The talking brain l
 - Left out on purpose: Impeccable's engine (a downloaded program with usage reporting and a paid tier; its
   source has `IMPECCABLE_NO_TELEMETRY`, so it reports by default) and mcp-builder's evaluation scripts (they
   bill the Anthropic API). A note at the top of each of those two SKILL.md files tells the agent so.
-- `defuddle` is installed (`npm install -g defuddle`). The `obsidian` command is not on this PC's PATH: it is
-  switched on inside Obsidian (Settings, General, Command line interface), which is the owner's to do.
+- `defuddle` is installed (`npm install -g defuddle`). The `obsidian` command was switched on the same day at
+  the owner's word: `"cli": true` in `%APPDATA%\obsidian\obsidian.json` (what the setting under Settings,
+  General writes; the old file is kept beside it as `obsidian.json.bak-2026-11-15`) and Obsidian's folder on the
+  user PATH. It answers only while Obsidian is open, and it doesn't open Obsidian itself. In Git Bash, type
+  `obsidian.com`, because plain `obsidian` there finds the window program.
+
+## Home Assistant through HA-MCP (2026-11-15)
+
+HA-MCP 9.2.0 (homeassistant-ai/ha-mcp) runs inside Home Assistant on the Pi, installed from Home Assistant's
+Marketplace, and Jarvis reaches it as the MCP connection named "Home Assistant" (77 tools: automations,
+scripts, scenes, helpers, dashboards, history, logs, devices, updates, backups). Switching things on and off
+stays with `home_control`, which reads the device back; the prompt line "Home Assistant has two routes" says so.
+
+- How it is set up: remote access off (no webhook, so nothing reaches it through Nabu Casa or the internet),
+  network access "Local network" on port 9584, with a secret path in the address as the only credential. It
+  acts with the same Home Assistant token Jarvis already uses (`HA_TOKEN`), so its changes are recorded under
+  that account. The address is kept only in Jarvis's encrypted connection store.
+- To change or remove it: Home Assistant, Settings, Devices & services, HA-MCP (Configure shows the address and
+  can make a new secret). In Jarvis, the Armory removes the connection.
+- `mcp_connections.validate_url` now accepts plain HTTP for an address on the home network written as numbers
+  (192.168.x.x and the like), as well as this PC. Names are still refused, and so is HTTP to anywhere else.
+- A server with many tools is listed briefly (`mcp_connections.catalog`): Home Assistant's full list was
+  278,000 characters, now 16,600, and `list_mcp_tools(connection, tool_name)` gives one tool in full.
+- `call_mcp_tool` runs a call in the same turn and returns its result when the owner's approval settings
+  need no yes for it, which is every call except sending a message or spending money. Before, each call came
+  back as a separate spoken report, so two steps could not follow each other. This holds for every MCP
+  connection, not only this one.
+- Tried: Jarvis read the bedroom fan automation through it in one turn (a search, then the automation).
+  Not tried: creating or changing an automation.
 
 ## The screen agent reads windows by name (2026-11-15)
 
