@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis orb: hologram with tiny sparks</title>
+<!-- Fifth round of orb mockups (2026-11-16): the full hologram from shell-orbs.html with tiny electric sparks (the bolts in lightning-orbs.html were too big). Nothing here is wired into Jarvis: the voice is made up
+     and the states are switched by the buttons. The chosen idea gets ported into hud/holo.js. -->
+<style>
+:root{--bg:#04060b;--line:#1b2433;--text:#d7e0ee;--dim:#8391a8;--accent:#b18aff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+header{padding:18px 22px 8px}
+h1{font-size:18px;margin:0 0 4px;font-weight:600}
+header p{margin:0;color:var(--dim);max-width:80ch}
+.controls{display:flex;flex-wrap:wrap;gap:10px 22px;padding:12px 22px;position:sticky;top:0;background:#04060bf0;z-index:5;border-bottom:1px solid var(--line)}
+.group{display:flex;align-items:center;gap:8px}
+.group>span{color:var(--dim);font:11px Consolas,monospace;text-transform:uppercase;letter-spacing:.08em}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:transparent;color:var(--text);border:0;border-right:1px solid var(--line);padding:6px 11px;font:inherit;font-size:13px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:#121a27}
+.seg button[aria-pressed=true]{background:var(--accent);color:#05060a;font-weight:600}
+.seg button.live{box-shadow:inset 0 -3px 0 var(--accent)}
+.swatch{width:22px;height:22px;border-radius:50%;border:2px solid transparent;background:var(--c);cursor:pointer;padding:0}
+.swatch[aria-pressed=true]{border-color:#fff}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;padding:16px 22px 30px}
+.tile{border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:zoom-in;display:flex;flex-direction:column;background:#05070c}
+.tile:hover{border-color:#2c3a52}
+.stage{position:relative;aspect-ratio:1;background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--accent) 13%,#070a11) 0%,#05070c 62%)}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage canvas.glow{mix-blend-mode:screen;pointer-events:none}
+.cap{padding:11px 14px 13px;border-top:1px solid var(--line)}
+.cap b{font:600 13px Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.cap p{margin:3px 0 0;color:var(--dim);font-size:13px}
+main.focusing .tile:not(.focus){display:none}
+main.focusing .tile{cursor:zoom-out}
+main.focusing .stage{aspect-ratio:auto;height:calc(100vh - 230px);min-height:340px}
+main.corner .stage{aspect-ratio:auto;width:250px;height:250px;margin:14px auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>Jarvis orb: the hologram with tiny sparks</h1>
+  <p>The same hologram, with the big bolts gone and small electric sparks instead, three ways. They are sparse when he is standing by,
+     busier while he thinks, and follow the voice when he speaks or listens. The voice here is made up. Click one to see it large.</p>
+</header>
+<div class="controls" id="controls"></div>
+<main id="grid">
+  <section class="tile" data-kind="static"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
+    <div class="cap"><b>A · Static</b><p>Tiny zaps that jump from one block to the next and are gone in a blink.</p></div></section>
+  <section class="tile" data-kind="streamer"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
+    <div class="cap"><b>B · Streamers</b><p>Little tufts of thin hairs that reach out from one spot on the shell and dance for a moment, like the top of a Tesla coil.</p></div></section>
+  <section class="tile" data-kind="mix"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
+    <div class="cap"><b>C · Mix</b><p>A little of each.</p></div></section>
+</main>
+<script>
+'use strict';
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), clamp01 = v => clamp(v, 0, 1);
+const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const AXES = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+// The same colour themes Jarvis already has (hud/holo.js), so the mockups show his real colours per state.
+const THEMES = {
+  violet: { label: 'Violet', swatch: '#b18aff', states: { standby: '#8938ff', listening: '#a05aff', speaking: '#b178ff', thinking: '#7025ef' } },
+  cyan: { label: 'Cyan', swatch: '#5eead4', states: { standby: '#5eead4', listening: '#22d3ee', speaking: '#7dd3fc', thinking: '#f5b83d' } },
+  mark42: { label: 'Red and gold', swatch: '#f59e0b', states: { standby: '#f59e0b', listening: '#fcd34d', speaking: '#fb7185', thinking: '#ef4444' } },
+  stealth: { label: 'White', swatch: '#e2e8f0', states: { standby: '#cbd5e1', listening: '#f8fafc', speaking: '#e2e8f0', thinking: '#94a3b8' } },
+  emerald: { label: 'Emerald', swatch: '#34d399', states: { standby: '#34d399', listening: '#6ee7b7', speaking: '#a7f3d0', thinking: '#fbbf24' } },
+};
+const STATES = ['standby', 'listening', 'thinking', 'speaking'];
+const params = new URLSearchParams(location.search);
+const ui = { state: params.get('state') || 'auto', theme: params.get('theme') || 'cyan', density: +(params.get('blocks') ?? 1),
+  style: params.get('style') || 'solid', size: params.get('size') || 'full' };
+
+/* ---------- Shared pretend-Jarvis: which state he's in and a made-up voice level ---------- */
+const sim = { t: +(params.get('t') || 0), dt: 0, now: 'standby', level: 0, hist: new Float32Array(90), tint: [.4, .9, .85],
+  w: { standby: 1, listening: 0, thinking: 0, speaking: 0 } };
+sim.lv = delay => sim.hist[clamp(delay | 0, 0, 89)];   // the level a few frames ago, so a pulse can travel across the sphere
+function fakeVoice(t, seed) {
+  const phrase = Math.sin(t * .9 + seed) > -.55 ? 1 : 0;                     // short pauses between phrases
+  const syllable = Math.pow(Math.abs(Math.sin(t * 7.3 + seed * 3)), 1.6);
+  return phrase * syllable * (.55 + .45 * Math.sin(t * 2.1 + seed * 5));
+}
+function stepSim(dt) {
+  sim.dt = dt; sim.t += dt;
+  sim.now = ui.state === 'auto' ? STATES[Math.floor(sim.t / 6) % 4] : ui.state;
+  const blend = 1 - Math.exp(-dt / .35);
+  for (const s of STATES) sim.w[s] += ((s === sim.now ? 1 : 0) - sim.w[s]) * blend;
+  const target = sim.now === 'speaking' ? fakeVoice(sim.t, 0) : sim.now === 'listening' ? fakeVoice(sim.t, 2.2) * .8 : 0;
+  sim.level += (target - sim.level) * (1 - Math.exp(-dt / (target > sim.level ? .04 : .16)));
+  sim.hist.copyWithin(1, 0); sim.hist[0] = sim.level;
+  const hexc = THEMES[ui.theme].states[sim.now];
+  for (let i = 0; i < 3; i++) sim.tint[i] += (parseInt(hexc.slice(1 + i * 2, 3 + i * 2), 16) / 255 - sim.tint[i]) * blend;
+}
+
+/* ---------- Building a stack of rings ---------- */
+function quatFromBasis(x, y, z) {   // rotation whose columns are x, y, z (right-handed)
+  const m00 = x[0], m10 = x[1], m20 = x[2], m01 = y[0], m11 = y[1], m21 = y[2], m02 = z[0], m12 = z[1], m22 = z[2], tr = m00 + m11 + m22;
+  if (tr > 0) { const s = Math.sqrt(tr + 1) * 2; return [(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, s / 4]; }
+  if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; return [s / 4, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s]; }
+  if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; return [(m01 + m10) / s, s / 4, (m12 + m21) / s, (m02 - m20) / s]; }
+  const s = Math.sqrt(1 + m22 - m00 - m11) * 2; return [(m02 + m20) / s, (m12 + m21) / s, s / 4, (m10 - m01) / s];
+}
+// One block = 14 numbers: centre xyz, rotation xyzw, size xyz, glow, kind, heat (colour to white-hot), brightness of a piece of light.
+// Kinds: 0 solid metal block, 3 a piece of light (arc piece or spark), 4 a block drawn as an outline of light.
+function put(out, i, cx, cy, cz, q, sx, sy, sz, glow, kind, heat, lit) {
+  const o = i * 14;
+  out[o] = cx; out[o + 1] = cy; out[o + 2] = cz; out[o + 3] = q[0]; out[o + 4] = q[1]; out[o + 5] = q[2]; out[o + 6] = q[3];
+  out[o + 7] = sx; out[o + 8] = sy; out[o + 9] = sz; out[o + 10] = glow; out[o + 11] = kind; out[o + 12] = heat; out[o + 13] = lit;
+}
+const IDENTITY = [0, 0, 0, 1];
+// o: rings for each block size (M), blocks per ring (factor), how much of its slot a block fills sideways (wf) and
+// upwards (hf), rings left off at each pole (trim) and replaced by one hub pin, plus optional per-ring choices.
+function buildRings(density, o) {
+  const M = o.M[density], step = Math.PI / M, rings = [], blocks = [], unit = [.1, .075, .06][density];
+  for (let j = o.trim; j < M - o.trim; j++) {
+    if (o.omit && o.omit(j, M)) continue;
+    const lat = ((j + .5) / M - .5) * Math.PI, rest = o.rest ? o.rest(j) : .8, count = Math.max(6, Math.round(o.factor * M * Math.cos(lat)));
+    const r = { j, lat, count, rest, dir: j % 2 ? 1 : -1, angle: hash(j) * TAU, snap: 0, shown: 0, timer: hash(j) * 1.5, seed: hash(j + 2.2),
+      wide: TAU * Math.cos(lat) * rest / count * o.wf, tall: step * rest * o.hf, lobes: 3 + Math.floor(hash(j + 9) * 4), phase: hash(j + 4) * TAU };
+    r.twist = o.twist ? o.twist(r) : 0; rings.push(r);
+    for (let b = 0; b < count; b++) {
+      if (o.skip && o.skip(r, b)) continue;
+      blocks.push({ r, b, d: [0, 0, 0], lon: 0, lat, r1: hash(blocks.length), r2: hash(blocks.length + .5), h: rest, peak: rest });
+    }
+  }
+  if (o.trim) for (const s of [1, -1]) {       // one square pin closes each pole
+    const r = { j: s > 0 ? M : -1, lat: s * Math.PI / 2, rest: .8, dir: 1, seed: hash(s + 7), lobes: 0, phase: 0 };
+    blocks.push({ r, hub: s, d: [0, s, 0], lon: 0, lat: r.lat, r1: hash(s + 31), r2: hash(s + 41), h: .8, peak: .8,
+      width: .8 * Math.sin(o.trim * step) * 1.25, q: s > 0 ? quatFromBasis(AXES[2], AXES[0], AXES[1]) : quatFromBasis(AXES[0], AXES[2], [0, -1, 0]) });
+  }
+  // Blocks move in whole steps of `unit`; the amounts below say how far each state pushes them.
+  return { M, step, unit, rings, blocks, amp: { S: .8 * unit, L: 1.6 * unit, T: 1.6 * unit, V: Math.max(.22, 2.6 * unit) } };
+}
+// Each ring drifts its own way at `rate`; while thinking it also clicks round like a combination lock.
+function spin(rings, rate) {
+  const dt = sim.dt;
+  for (const r of rings) {
+    r.angle += r.dir * dt * rate;
+    r.timer -= dt * sim.w.thinking;
+    if (r.timer < 0) { r.timer = .3 + hash(r.snap * 3.7 + r.lat) * .9; r.snap += r.dir * TAU / r.count * (1 + Math.floor(hash(r.snap + r.lat * 5) * 3)); }
+    r.shown += (r.snap - r.shown) * (1 - Math.exp(-dt * 12));
+  }
+}
+function aim(c) {                    // where a ring block points this frame, and its rotation
+  if (c.hub) return c.q;
+  const r = c.r, th = c.b / r.count * TAU + r.angle + r.shown, cl = Math.cos(r.lat), sl = Math.sin(r.lat), ct = Math.cos(th), st = Math.sin(th), d = c.d;
+  d[0] = cl * ct; d[1] = sl; d[2] = cl * st; c.lon = th;
+  let n = [-sl * ct, cl, -sl * st], e = [-st, 0, ct];
+  if (r.twist) {                     // lean the block over, like a turbine blade
+    const c2 = Math.cos(r.twist), s2 = Math.sin(r.twist);
+    [n, e] = [[n[0] * c2 + e[0] * s2, n[1] * c2 + e[1] * s2, n[2] * c2 + e[2] * s2], [e[0] * c2 - n[0] * s2, e[1] * c2 - n[1] * s2, e[2] * c2 - n[2] * s2]];
+  }
+  return quatFromBasis(n, e, d);
+}
+// How far a block sits out: one pattern per state. `whole` moves every block of a ring together.
+function ringOffset(c, front, a, whole) {
+  const t = sim.t, w = sim.w, r = c.r; let off = 0;
+  if (w.standby > .01) {            // calm: one band of light climbing from the bottom to the top, then a pause
+    const dl = c.lat - (((t * .2) % 1.35 - .175) * Math.PI - Math.PI / 2);
+    off += w.standby * a.S * 1.5 * Math.exp(-dl * dl * 14);
+  }
+  if (w.listening > .01) {          // ripples, stronger as you talk: from the point facing you, or out from the middle
+    if (whole) off += w.listening * a.L * (.6 + .8 * sim.level) * Math.pow(Math.max(0, Math.sin(Math.abs(c.lat) * 5 - t * 4.5)), 6);   // single discs step out, never in, so it stays a sphere
+    else { const ang = Math.acos(clamp(dot(c.d, front), -1, 1)); off += w.listening * a.L * (.55 + 2.2 * sim.level) * Math.sin(ang * 7 - t * 5.5) * Math.exp(-ang * .8); }
+  }
+  if (w.thinking > .01) {           // pops at random, and a scan line sweeping round
+    const slot = Math.floor(t * 2.4 + (whole ? r.seed : c.r1) * 5), val = hash((whole ? r.seed : c.r2) * 91.7 + slot * 7.13), cut = whole ? .6 : .78;
+    let scan = 0;
+    if (!whole) { let dl = ((c.lon - t * 1.9) % TAU + TAU) % TAU; if (dl > Math.PI) dl -= TAU; scan = Math.exp(-dl * dl * 10) * Math.cos(c.lat); }
+    off += w.thinking * a.T * ((val > cut ? (val - cut) / (1 - cut) : 0) * 1.3 + scan * 1.1 - .25);
+  }
+  if (w.speaking > .01) {           // his voice pushes out from the middle band towards the poles
+    const level = sim.lv(Math.abs(c.lat) * 14);
+    off += w.speaking * a.V * level * (whole ? .65 + .35 * Math.sin(r.phase + t * 3.1) : .15 + 1.05 * Math.pow(.5 + .5 * Math.sin(c.lon * r.lobes + t * 2.4 * r.dir + r.phase), 2));
+  }
+  return off;
+}
+function stepBlock(c, set, front, whole) {     // ease towards the target, which is always a whole number of steps
+  const target = c.r.rest + set.unit * Math.round(ringOffset(c, front, set.amp, whole) / set.unit);
+  c.h += (target - c.h) * (1 - Math.exp(-sim.dt * 11));
+  return c.h - c.r.rest;
+}
+/* ---------- Shells of blocks and thin arcs of light ---------- */
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+// Leaves a window of `open` blocks out of every five or six, so each ring becomes a string of short arcs you can see between.
+const GAPS = open => (r, b) => (b + r.j * 3) % (5 + r.j % 2) < open;
+function shrink(set, k) { set.unit *= k; for (const key in set.amp) set.amp[key] *= k; return set; }   // smaller steps for an inner shell
+// o: inner = where the blocks' inner ends sit (or thick = how deep each block is), kind, resting glow, open = gap between the halves.
+function putShell(out, at, set, front, o) {
+  const { blocks, amp } = set;
+  for (let i = 0; i < blocks.length; i++) {
+    const c = blocks[i], quat = aim(c), ext = stepBlock(c, set, front, false), lo = o.inner != null ? o.inner : c.r.rest - o.thick, mid = (c.h + lo) / 2, d = c.d;
+    const glow = (c.hub ? .4 : o.glow) + .9 * clamp01(ext / (amp.V * .8));
+    put(out, at + i, d[0] * mid, d[1] * mid + Math.sign(c.lat) * (o.open || 0), d[2] * mid, quat, c.hub ? c.width : c.r.tall, c.hub ? c.width : c.r.wide, c.h - lo, o.kind ? glow * .6 : glow, o.kind, glow * (o.kind ? .25 : .6), 0);
+  }
+  return at + blocks.length;
+}
+// Each arc: radius, tilt of its plane, direction of the tilt, start angle, length (radians), pieces, width, thickness, turn speed,
+// fill (below 1 = dashes) and brightness (1 if left out).
+function makeArcs(list) {
+  return list.map(([R, tilt, az, start, span, n, width, thick, speed, fill, bright = 1]) => {
+    const C = [Math.sin(tilt) * Math.cos(az), Math.cos(tilt), Math.sin(tilt) * Math.sin(az)];
+    const A = norm(cross(C, Math.abs(C[1]) > .95 ? AXES[0] : AXES[1])), B = cross(C, A);
+    return { R, A, B, C, start, span, n, width, thick, speed, fill, bright, angle: 0 };
+  });
+}
+const countArcs = arcs => arcs.reduce((sum, s) => sum + s.n, 0);
+function putArcs(out, at, arcs) {
+  const w = sim.w, voice = w.speaking + w.listening;
+  for (const s of arcs) {
+    s.angle += sim.dt * s.speed * (1 + 1.6 * w.thinking + 1.2 * sim.level);
+    const len = s.R * s.span / s.n * s.fill, { A, B, R } = s;
+    for (let i = 0; i < s.n; i++) {
+      const th = s.start + (i + .5) / s.n * s.span + s.angle, ct = Math.cos(th), st = Math.sin(th);
+      const d = [A[0] * ct + B[0] * st, A[1] * ct + B[1] * st, A[2] * ct + B[2] * st], T = [B[0] * ct - A[0] * st, B[1] * ct - A[1] * st, B[2] * ct - A[2] * st];
+      const glow = .22 + .78 * sim.lv(i % 16 * 2) * voice + .2 * w.thinking;     // his voice runs along the arc
+      put(out, at++, d[0] * R, d[1] * R, d[2] * R, quatFromBasis(T, s.C, d), len, s.width, s.thick, glow, 3, glow * .5, s.bright);
+    }
+  }
+  return at;
+}
+const shellSpin = () => .05 * (sim.w.standby + sim.w.listening) + .04 * sim.w.speaking;
+
+/* ---------- Tiny electric sparks: short-lived hair-thin jagged lines, drawn as chains of thin bright pieces ---------- */
+const rng = seed => () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+// mode: 'static' = tiny zaps between neighbouring blocks, 'streamer' = tufts of hairs reaching out from one spot, 'mix'.
+function makeSparks(mode, seed) {
+  const rnd = rng(seed), live = [], POOL = 720, SHELL = .87;
+  let waitZap = .2, waitTuft = .5;
+  const onSphere = R => { const u = rnd() * 2 - 1, th = rnd() * TAU, s = Math.sqrt(1 - u * u); return [s * Math.cos(th) * R, u * R, s * Math.sin(th) * R]; };
+  const toRadius = (p, R) => { const n = norm(p); return [n[0] * R, n[1] * R, n[2] * R]; };
+  const gap = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  // A jagged line from a to b: split in half again and again, pushing each midpoint sideways by less each time.
+  function jagged(a, b, n, sway, R) {
+    const pts = new Array(n + 1); pts[0] = a; pts[n] = b;
+    const split = (i, j, amp) => {
+      if (j - i < 2) return;
+      const m = (i + j) >> 1, A = pts[i], B = pts[j];
+      let p = [(A[0] + B[0]) / 2 + (rnd() - .5) * amp, (A[1] + B[1]) / 2 + (rnd() - .5) * amp, (A[2] + B[2]) / 2 + (rnd() - .5) * amp];
+      if (R) p = toRadius(p, R * (1 + (rnd() - .5) * .04));        // a zap hugs the shell
+      pts[m] = p; split(i, m, amp * .55); split(m, j, amp * .55);
+    };
+    split(0, n, sway); return pts;
+  }
+  function zap() {                  // about one block long, over in a tenth of a second
+    const a = onSphere(SHELL), o = onSphere(.1 + .12 * rnd()), b = toRadius([a[0] + o[0], a[1] + o[1], a[2] + o[2]], SHELL), span = gap(a, b);
+    live.push({ life: .07 + .09 * rnd(), age: 0, redraw: 0, power: .7 + .5 * rnd(), thick: .008, build: () => [[jagged(a, b, 4, span * .5, SHELL), 1]] });
+  }
+  function tuft() {                 // three to five hairs from one spot, each re-forming as it lives so the tuft dances
+    const a = onSphere(SHELL), n = norm(a), tips = [];
+    for (let i = 3 + Math.floor(rnd() * 3); i > 0; i--) {
+      const out = .13 + .17 * rnd(), o = onSphere(.06 + .1 * rnd()); tips.push([a[0] + n[0] * out + o[0], a[1] + n[1] * out + o[1], a[2] + n[2] * out + o[2]]);
+    }
+    live.push({ life: .25 + .2 * rnd(), age: 0, redraw: 0, power: .7 + .5 * rnd(), thick: .007, build() {
+      const lines = [];
+      for (const tip of tips) {
+        const main = jagged(a, tip, 4, gap(a, tip) * .4, 0); lines.push([main, 1]);
+        if (rnd() < .6) {           // a shorter side hair
+          const from = main[2], o = onSphere(.03 + .04 * rnd());
+          lines.push([jagged(from, [from[0] + (tip[0] - from[0]) * .6 + o[0], from[1] + (tip[1] - from[1]) * .6 + o[1], from[2] + (tip[2] - from[2]) * .6 + o[2]], 2, .02, 0), .6]);
+        }
+      }
+      return lines;
+    } });
+  }
+  return { POOL, put(out, at) {
+    const w = sim.w, level = sim.level, share = mode === 'mix' ? .6 : 1;
+    // How often they fire: a few at rest, busy while thinking, in time with the voice while speaking or listening.
+    if (mode !== 'streamer') {
+      waitZap -= sim.dt * share * (5 * w.standby + (6 + 40 * level) * w.listening + 26 * w.thinking + (6 + 50 * level) * w.speaking);
+      while (waitZap <= 0) { waitZap += .5 + rnd(); if (live.length < 70) zap(); }
+    }
+    if (mode !== 'static') {
+      waitTuft -= sim.dt * share * (1.5 * w.standby + (2 + 10 * level) * w.listening + 7 * w.thinking + (1.5 + 14 * level) * w.speaking);
+      while (waitTuft <= 0) { waitTuft += .5 + rnd(); if (live.length < 70) tuft(); }
+    }
+    let used = 0;
+    for (let k = live.length - 1; k >= 0; k--) {
+      const sp = live[k]; sp.age += sim.dt;
+      if (sp.age > sp.life) { live.splice(k, 1); continue; }
+      sp.redraw -= sim.dt; if (sp.redraw <= 0) { sp.redraw = .035; sp.lines = sp.build(); sp.flick = .55 + .45 * rnd(); }
+      const fade = Math.sqrt(1 - sp.age / sp.life) * sp.flick * sp.power;
+      for (const [pts, weight] of sp.lines) for (let i = 0; i + 1 < pts.length && used + 2 <= POOL; i++) {
+        const p = pts[i], q = pts[i + 1], len = gap(p, q); if (len < 1e-4) continue;
+        const z = [(q[0] - p[0]) / len, (q[1] - p[1]) / len, (q[2] - p[2]) / len], x = norm(cross(z, Math.abs(z[1]) < .9 ? AXES[1] : AXES[0])), quat = quatFromBasis(x, cross(z, x), z);
+        const cx = (p[0] + q[0]) / 2, cy = (p[1] + q[1]) / 2, cz = (p[2] + q[2]) / 2, thick = sp.thick * weight;
+        put(out, at + used++, cx, cy, cz, quat, thick, thick, len + thick, 1, 3, 1, 3 * fade * weight);               // white-hot hair
+        put(out, at + used++, cx, cy, cz, quat, thick * 3.2, thick * 3.2, len + thick, .2, 3, .2, .34 * fade * weight);   // faint coloured haze round it
+      }
+    }
+    for (let i = used; i < POOL; i++) put(out, at + i, 0, 0, 0, IDENTITY, 0, 0, 0, 0, 3, 0, 0);
+  } };
+}
+
+/* ---------- The hologram shell picked from the last round: nothing solid, nothing in the middle, no floating specks ---------- */
+function hologram(density, mode, seed) {
+  const outer = buildRings(density, { M: [9, 11, 13], factor: 2.6, wf: .88, hf: .85, trim: 1, skip: GAPS(1) });
+  const inner = shrink(buildRings(density, { M: [7, 9, 11], factor: 2.4, wf: .86, hf: .8, trim: 0, rest: () => .52, skip: GAPS(2) }), .6);
+  const arcs = makeArcs([
+    [.62, .5, 0, 0, 4.2, 56, .007, .004, .35, .96], [.62, 1.2, 2, 1, 2.6, 36, .007, .004, -.5, .96], [.4, .9, 4, 3, 5, 48, .005, .004, .4, .5],
+    [.42, .3, 2, 0, 3.4, 36, .006, .004, -.6, .96], [.86, .25, 1, 0, 2.4, 40, .01, .004, .18, .97], [.88, .85, 3, 2, 1.7, 28, .006, .004, -.22, .97],
+    [.84, 1.35, 5, 4, 3.2, 48, .005, .004, .3, .45],
+    [.85, .55, 0, .3, 2.2, 44, .045, .004, .12, .97, .3], [.85, .55, 0, 3.3, 1.5, 30, .045, .004, .12, .97, .3], [.885, .55, 0, 0, TAU, 90, .02, .004, .12, .16, .7]]);
+  const sparks = makeSparks(mode, seed);
+  return { count: outer.blocks.length + inner.blocks.length + countArcs(arcs) + sparks.POOL, solid: 0, seg: 0, update(out, front) {
+    spin(outer.rings, shellSpin()); spin(inner.rings, -2.5 * shellSpin() - .05);
+    let at = putShell(out, 0, outer, front, { inner: .68, kind: 4, glow: .25 });
+    at = putShell(out, at, inner, front, { thick: .035, kind: 4, glow: .2 });
+    at = putArcs(out, at, arcs); sparks.put(out, at);
+  } };
+}
+const BUILD = { static: d => hologram(d, 'static', 11), streamer: d => hologram(d, 'streamer', 23), mix: d => hologram(d, 'mix', 37) };
+
+/* ---------- Drawing: every block is the same cube, placed and stretched on the graphics card ---------- */
+const VERT = `#version 300 es
+layout(location=0) in vec3 aPos;layout(location=1) in vec3 aNormal;
+layout(location=2) in vec3 iCenter;layout(location=3) in vec4 iQuat;layout(location=4) in vec3 iScale;layout(location=5) in vec4 iFx;
+uniform mat3 uRot;uniform vec2 uView;
+out vec3 vLocal,vScale,vNormal,vN0,vWorld;out vec4 vFx;
+vec3 qrot(vec4 q,vec3 v){return v+2.*cross(q.xyz,cross(q.xyz,v)+q.w*v);}
+void main(){
+  vec3 w=uRot*(iCenter+qrot(iQuat,aPos*iScale));
+  vNormal=uRot*qrot(iQuat,aNormal);vLocal=aPos;vScale=iScale;vN0=aNormal;vFx=iFx;vWorld=w;
+  float cam=4.6,cw=cam-w.z;
+  gl_Position=vec4(w.xy*cam*uView,-w.z*.25*cw,cw);
+}`;
+const FRAG = `#version 300 es
+precision highp float;
+in vec3 vLocal,vScale,vNormal,vN0,vWorld;in vec4 vFx;out vec4 frag;
+uniform vec3 uTint,uHot;uniform float uEdge,uSeg,uEnergy;
+void main(){
+  vec3 a=abs(vN0),d=(.5-abs(vLocal))*vScale+a*1e3;
+  float e=min(d.x,min(d.y,d.z)),aa=fwidth(e)+1e-5;
+  float line=1.-smoothstep(uEdge-aa,uEdge+aa,e),bevel=1.-smoothstep(0.,uEdge*5.,e);   // sharp edge line and a soft glow beside it
+  float side=1.-a.z,cap=step(.5,vN0.z),depthIn=(.5-vLocal.z)*vScale.z,seg=0.;
+  if(uSeg>0.){float f=abs(fract(depthIn/uSeg+.5)-.5)*uSeg,fa=fwidth(depthIn)+1e-5;seg=side*(1.-smoothstep(uEdge*.7-fa,uEdge*.7+fa,f));}
+  float glow=vFx.x,kind=vFx.y;
+  vec3 n=normalize(vNormal),emit=mix(uTint,uHot,vFx.z),col;
+  if(kind>2.5){                                                  // made of light: added on top, dimmer at the back
+    float back=mix(.22,1.,smoothstep(-.5,.6,vWorld.z));
+    if(kind<3.5)col=emit*(.5+.9*glow)*back*vFx.w;                      // arc piece or a piece of a spark
+    else col=emit*(line*(.34+1.1*glow)+bevel*.06+side*.015+cap*(.03+.2*glow))*back;   // block drawn as an outline
+    frag=vec4(col,max(col.r,max(col.g,col.b)));return;
+  }
+  vec3 key=normalize(vec3(-.45,.65,.62)),r=reflect(vec3(0.,0.,-1.),n);
+  float diff=max(dot(n,key),0.),fill=max(dot(n,normalize(vec3(.75,-.25,.5))),0.);
+  float shine=pow(max(dot(r,key),0.),28.)*.5+smoothstep(.5,.95,r.y)*.2;      // a studio light caught in the faces
+  col=vec3(.036,.047,.066)*(.25+1.5*diff+.4*fill)+vec3(.4,.48,.62)*shine*.4;
+  col*=mix(1.,.3,side*smoothstep(0.,.18,depthIn));               // gaps get darker further in...
+  col+=uTint*side*smoothstep(.05,.36,depthIn)*(.4+.6*uEnergy);   // ...until the light inside reaches them
+  col+=uTint*pow(1.-abs(n.z),3.)*.1;
+  col+=emit*(line*(.32+1.5*glow)+bevel*(.05+.3*glow)+seg*.12+cap*glow*.35);
+  // The inside wall of the shell shows its block lines, so the hollow reads as a lit shell with nothing sitting in the middle.
+  col=mix(col,uTint*(.035+.1*uEnergy)+emit*line*(.4+.5*uEnergy),step(.5,-vN0.z));
+  frag=vec4(1.-exp(-col*1.15),1.);
+}`;
+function createOrb(tile, index) {
+  const kind = tile.dataset.kind, stage = tile.querySelector('.stage'), canvas = tile.querySelector('canvas.gl');
+  const glowCanvas = tile.querySelector('canvas.glow'), glow2d = glowCanvas.getContext('2d');
+  const gl = canvas.getContext('webgl2', { antialias: true, alpha: true, premultipliedAlpha: true });
+  if (!gl) { tile.querySelector('p').textContent = 'This browser cannot draw 3D here.'; return { frame() {} }; }
+  const program = gl.createProgram();
+  for (const [type, code] of [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, FRAG]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, code); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(s));
+    gl.attachShader(program, s);
+  }
+  gl.linkProgram(program); if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  const U = {}; for (const name of ['uRot', 'uView', 'uTint', 'uHot', 'uEdge', 'uSeg', 'uEnergy']) U[name] = gl.getUniformLocation(program, name);
+  const cube = [];
+  for (let a = 0; a < 3; a++) for (const s of [1, -1]) {
+    const n = AXES[a].map(x => x * s), eu = AXES[(a + 1) % 3], ev = AXES[(a + 2) % 3];
+    for (const [cu, cv] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) cube.push(n[0] * .5 + eu[0] * cu * .5 + ev[0] * cv * .5, n[1] * .5 + eu[1] * cu * .5 + ev[1] * cv * .5, n[2] * .5 + eu[2] * cu * .5 + ev[2] * cv * .5, ...n);
+  }
+  gl.bindVertexArray(gl.createVertexArray());
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cube), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+  const instances = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, instances);
+  const from = first => {            // which block the next draw starts at
+    for (const [loc, size, offset] of [[2, 3, 0], [3, 4, 12], [4, 3, 28], [5, 4, 40]]) gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 56, first * 56 + offset);
+  };
+  for (const loc of [2, 3, 4, 5]) { gl.enableVertexAttribArray(loc); gl.vertexAttribDivisor(loc, 1); }
+  let model = null, data = null, density = -1;
+  return { frame(draw = true) {
+    const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(stage.clientWidth * dpr), H = Math.round(stage.clientHeight * dpr);
+    if (!W || !H) return;                                           // hidden while another idea is enlarged
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; glowCanvas.width = Math.ceil(W / 3); glowCanvas.height = Math.ceil(H / 3); }
+    if (density !== ui.density) {
+      density = ui.density; model = BUILD[kind](density); data = new Float32Array(model.count * 14);
+      gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
+    }
+    // A steady, slow turn. No bounce, sway, squash or stretch.
+    const yaw = sim.t * .12 + index * .9, pitch = .3, cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    model.update(data, [-cp * sy, sp, cp * cy]);
+    if (!draw) return;
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+    const zoom = .7, fit = Math.min(W, H), tint = sim.tint;
+    gl.viewport(0, 0, W, H); gl.depthMask(true); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.uniformMatrix3fv(U.uRot, false, [cy, sp * sy, -cp * sy, 0, cp, sp, sy, -sp * cy, cp * cy]);
+    gl.uniform2f(U.uView, zoom * fit / W, zoom * fit / H);
+    gl.uniform3f(U.uTint, tint[0], tint[1], tint[2]);
+    gl.uniform3f(U.uHot, tint[0] * .5 + .5, tint[1] * .5 + .5, tint[2] * .5 + .5);
+    gl.uniform1f(U.uEdge, Math.max(.004, .75 / (zoom * fit / 2)));   // edge lines never thinner than about a pixel
+    gl.uniform1f(U.uSeg, model.seg); gl.uniform1f(U.uEnergy, sim.level);
+    gl.enable(gl.DEPTH_TEST);
+    // Solid blocks first; then everything made of light is added on top, hidden only where a solid block is in front.
+    if (model.solid) { gl.disable(gl.BLEND); from(0); gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, model.solid); }
+    if (model.count > model.solid) {
+      gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+      from(model.solid); gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, model.count - model.solid);
+    }
+    // Soft glow: blurred copies of the bright parts laid over the picture, one tight and one wide.
+    glow2d.clearRect(0, 0, glowCanvas.width, glowCanvas.height);
+    for (const [radius, alpha] of [[.012, .5], [.045, .4]]) {
+      glow2d.filter = `contrast(2.6) blur(${Math.max(1.5, fit / 3 * radius)}px)`; glow2d.globalAlpha = alpha;
+      glow2d.drawImage(canvas, 0, 0, glowCanvas.width, glowCanvas.height);
+    }
+  } };
+}
+
+/* ---------- Buttons ---------- */
+const grid = document.getElementById('grid'), controls = document.getElementById('controls');
+function group(label, key, options) {
+  const box = document.createElement('div'); box.className = 'group';
+  const name = document.createElement('span'); name.textContent = label; box.append(name);
+  const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', label);
+  for (const [value, text] of options) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.value = value;
+    b.setAttribute('aria-pressed', String(String(ui[key]) === String(value)));
+    b.onclick = () => { ui[key] = typeof ui[key] === 'number' ? +value : value; for (const x of seg.children) x.setAttribute('aria-pressed', String(x === b)); applyUi(); };
+    seg.append(b);
+  }
+  box.append(seg); controls.append(box); return seg;
+}
+const stateButtons = group('He is', 'state', [['auto', 'Cycle all'], ['standby', 'Standing by'], ['listening', 'Listening'], ['thinking', 'Thinking'], ['speaking', 'Speaking']]);
+group('Blocks', 'density', [[0, 'Big'], [1, 'Medium'], [2, 'Small']]);
+group('Size', 'size', [['full', 'Full'], ['corner', 'Corner orb']]);
+const colours = document.createElement('div'); colours.className = 'group';
+const colourLabel = document.createElement('span'); colourLabel.textContent = 'Colour'; colours.append(colourLabel);
+for (const [name, def] of Object.entries(THEMES)) {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'swatch'; b.title = def.label; b.setAttribute('aria-label', def.label);
+  b.style.setProperty('--c', def.swatch); b.setAttribute('aria-pressed', String(ui.theme === name));
+  b.onclick = () => { ui.theme = name; for (const x of colours.querySelectorAll('.swatch')) x.setAttribute('aria-pressed', String(x === b)); applyUi(); };
+  colours.append(b);
+}
+controls.append(colours);
+function applyUi() {
+  grid.classList.toggle('corner', ui.size === 'corner');
+  document.documentElement.style.setProperty('--accent', THEMES[ui.theme].swatch);
+}
+applyUi();
+const tiles = [...document.querySelectorAll('.tile')];
+for (const tile of tiles) tile.onclick = () => { const on = !tile.classList.contains('focus'); tiles.forEach(x => x.classList.toggle('focus', on && x === tile)); grid.classList.toggle('focusing', on); };
+if (params.get('focus')) { const tile = tiles.find(x => x.dataset.kind === params.get('focus')); if (tile) { tile.classList.add('focus'); grid.classList.add('focusing'); } }
+
+const orbs = tiles.map(createOrb);
+let last = performance.now();
+for (let i = +(params.get('skip') || 0) * 60; i > 0; i--) { stepSim(1 / 60); for (const orb of orbs) orb.frame(false); }   // ?skip=seconds
+function loop(now) {
+  stepSim(Math.min(.05, Math.max(0, (now - last) / 1000))); last = now;
+  for (const b of stateButtons.children) b.classList.toggle('live', ui.state === 'auto' && b.dataset.value === sim.now);
+  for (const orb of orbs) orb.frame();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
