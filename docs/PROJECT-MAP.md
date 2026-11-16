@@ -48,7 +48,7 @@ Move records and original shortcut backups are in `data/reports/ceo-separation-2
 | Project continuity | project_memory.py, hud/productivity.js |
 | Privacy | privacy.py (redaction before anything goes to a model), hud/automation.js |
 | Response preferences | response_settings.py, jarvis.py next-turn refresh, tools.py response_style, hud/automation.js |
-| Jarvis page | hud/brain.html, hud/brain.css, hud/brain.js (3D model, graph, inspector, chat), hud/console.js (the Console view: turns, tools and receipts), hud/cards.js (cards with their buttons), hud/panels.js (dialogs), hud/modes.js (Holo hand control) |
+| Jarvis page | hud/brain.html, hud/brain.css, hud/brain.js (3D model, graph, inspector, chat), hud/console.js (the Console view: turns, tools and receipts), hud/cards.js (cards with their buttons), hud/shell-orb.js (his orb: a hollow hologram shell of block outlines, arcs and tiny sparks), hud/holo.js (places the orb and draws what surrounds it: moons, document panes, gauges, colour themes), hud/panels.js (dialogs), hud/modes.js (Holo hand control) |
 | Brain server | brain.py, graph_organization.py (project neighborhoods, display labels and relationship evidence), integration_status.py, workspace.py |
 | Classic HUD | hud.py, hud/index.html |
 | Phone and gestures | telegram_bridge.py, holo_bridge.py |
