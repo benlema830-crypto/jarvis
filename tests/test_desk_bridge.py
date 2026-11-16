@@ -185,6 +185,18 @@ class DeskBridgeTest(unittest.TestCase):
         for heard in ("and the fan", "Cut!", "Thanks for listening.", "Go to www.btistudios.com"):
             self.assertEqual(json.loads(self.listen(heard, followup=True)[1]), {"ignored": True}, heard)
 
+    def test_his_name_alone_then_the_request(self):
+        # "Jarvis" ... chime ... "what time is it": the next clip is the request, once, and only for a few seconds.
+        self.assertEqual(json.loads(self.listen("Jarvis.")[1]), {"awake": True})
+        status, body, response = self.listen("what time is it", followup=True)
+        self.assertEqual((status, response.headers["X-Jarvis-Reply"]), (200, "Done%3A%20what%20time%20is%20it"))
+        self.assertEqual(json.loads(self.listen("and the fan", followup=True)[1]), {"ignored": True})
+        self.assertEqual(json.loads(self.listen("Jarvis.")[1]), {"awake": True})
+        self.assertEqual(json.loads(self.listen("Thank you.", followup=True)[1]), {"ignored": True})  # a cough
+        self.assertEqual(json.loads(self.listen("Jarvis.")[1]), {"awake": True})
+        with mock.patch.object(desk_bridge.time, "time", return_value=time.time() + 60):
+            self.assertEqual(json.loads(self.listen("what time is it", followup=True)[1]), {"ignored": True})
+
     def test_a_quiet_answer_is_not_spoken(self):
         self.bridge.transcribe = lambda audio: "Jarvis, never mind that"
         self.bridge.speak = lambda text: phone_bridge.to_wav(phone_bridge.np.zeros(160, "float32"), 16000)

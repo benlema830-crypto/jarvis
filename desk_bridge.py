@@ -42,6 +42,7 @@ MAX_UPLOAD = 100_000_000  # the workshop page may hand over a large model
 REPLY_SECONDS = 170
 PAIR_SECONDS = 600
 HEARD_AT_PC_SECONDS = 8
+CALLED_SECONDS = 15           # after "Jarvis" alone: time to say the request and for the clip to arrive
 LOCKOUT_FAILS, LOCKOUT_SECONDS = 10, 600
 HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-authenticate",
        "proxy-authorization", "content-length"}
@@ -108,6 +109,7 @@ class Bridge:
         self.running = False
         self.error = ""
         self.fails = []
+        self.called_until = 0.0
         self.busy = threading.Lock()
 
     def start(self) -> bool:
@@ -186,11 +188,16 @@ class Bridge:
         if phone_bridge.hint_echo(text):
             return {"ignored": True}
         command = phone_bridge.wake_command(text, "Jarvis")
+        called, self.called_until = arrived < self.called_until, 0.0  # the one clip after "Jarvis" on its own
         if command is None:
-            # Always his name here, even right after an answer (`followup`). Nothing checks whose voice this is,
-            # so stray sound in that window became requests and every answer opened it again (2026-11-15).
-            return {"ignored": True}
+            # Without his name he takes only that one clip (he chimed; the request follows). Not any clip after an
+            # answer (`followup`): nothing checks whose voice this is, so stray sound in that window became
+            # requests and every answer opened it again (2026-11-15).
+            if not called or text.lower().strip(" .,!?") in phone_bridge.NOISE:
+                return {"ignored": True}
+            command = text
         if not command.strip(" .,!?"):
+            self.called_until = time.time() + CALLED_SECONDS
             return {"awake": True}
         # The laptop next to the PC: both microphones hear "Jarvis, ...". Give the PC a moment to claim it.
         time.sleep(max(0.0, 2.0 - (time.time() - arrived)))
