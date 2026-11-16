@@ -64,21 +64,38 @@ def _close_if_stuck(grace=STARTUP_GRACE) -> bool:
     return True
 
 
-def _tuck_away(focus, seconds=25):
-    """Minimize VoiceStudio's windows as they appear after a launch, and give focus back."""
-    import win32con
+def _app_windows(visible: bool) -> list[int]:
+    """VoiceStudio's main window(s): titled Chrome_WidgetWin_1 windows of the app, shown or hidden."""
     import win32gui
     import win32process
+    pids = _app_processes()
+    found = []
+    def visit(hwnd, _):
+        if (bool(win32gui.IsWindowVisible(hwnd)) == visible and win32gui.GetClassName(hwnd) == "Chrome_WidgetWin_1"
+                and win32gui.GetWindowText(hwnd) and win32process.GetWindowThreadProcessId(hwnd)[1] in pids):
+            found.append(hwnd)
+        return True
+    win32gui.EnumWindows(visit, None)
+    return found
+
+
+def hide_app() -> int:
+    """Hide VoiceStudio's window so it runs in the background, off the taskbar. Returns windows hidden."""
+    import win32con
+    import win32gui
+    windows = _app_windows(visible=True)
+    for hwnd in windows:
+        win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+    return len(windows)
+
+
+def _tuck_away(focus, seconds=25):
+    """Hide VoiceStudio's window as it appears after a launch (off the taskbar), and give focus back."""
+    import win32gui
     end = time.monotonic() + seconds
     while time.monotonic() < end:
-        pids = _app_processes()
-        def visit(hwnd, _):
-            if (win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd) and win32gui.GetWindowText(hwnd)
-                    and win32process.GetWindowThreadProcessId(hwnd)[1] in pids):
-                win32gui.ShowWindow(hwnd, win32con.SW_SHOWMINNOACTIVE)
-            return True
         try:
-            win32gui.EnumWindows(visit, None)
+            hide_app()
             if focus and win32gui.IsWindow(focus) and win32gui.GetForegroundWindow() != focus:
                 win32gui.SetForegroundWindow(focus)
         except Exception:
@@ -127,6 +144,18 @@ def open_app() -> bool:
     """Open (or bring forward) the VoiceStudio app so the user can make a new voice."""
     if not APP.is_file():
         return False
+    try:  # Jarvis keeps it hidden in the background; show that window rather than starting the app again
+        import win32con
+        import win32gui
+        hidden = _app_windows(visible=False)
+        for hwnd in hidden:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
+        if hidden:
+            return True
+    except Exception:
+        pass
     subprocess.Popen([str(APP)], cwd=APP.parent, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     return True
 
@@ -151,7 +180,17 @@ class VoiceStudioEngine:
 
         Its window ignores a minimized start, so it is minimized as it appears and focus goes back to the
         user's window. Never starts a second copy while one is still starting up."""
-        if self.running() or not APP.is_file():
+        if self.running():
+            try:  # already up (e.g. Jarvis restarted): put a minimized window away, but never one in use
+                import win32con
+                import win32gui
+                for hwnd in _app_windows(visible=True):
+                    if win32gui.IsIconic(hwnd):
+                        win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+            except Exception:
+                pass
+            return False
+        if not APP.is_file():
             return False
         if _app_processes():
             if not _close_if_stuck():

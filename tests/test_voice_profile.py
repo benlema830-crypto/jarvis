@@ -98,6 +98,39 @@ class VoiceStudioTest(unittest.TestCase):
         stuck.assert_called_once()
         popen.assert_not_called()
 
+    def test_voicestudio_is_hidden_off_the_taskbar_not_minimized(self):
+        import win32con
+        import voicestudio_voice
+        with mock.patch.object(voicestudio_voice, "_app_windows", return_value=[11, 12]), \
+                mock.patch("win32gui.ShowWindow") as show:
+            self.assertEqual(voicestudio_voice.hide_app(), 2)
+        show.assert_has_calls([mock.call(11, win32con.SW_HIDE), mock.call(12, win32con.SW_HIDE)])
+
+    def test_already_running_hides_only_a_minimized_window(self):
+        import win32con
+        import voicestudio_voice
+        engine = voicestudio_voice.VoiceStudioEngine()
+        with mock.patch.object(engine, "running", return_value=True), \
+                mock.patch.object(voicestudio_voice, "_app_windows", return_value=[11, 12]), \
+                mock.patch("win32gui.IsIconic", side_effect=lambda h: h == 11), \
+                mock.patch("win32gui.ShowWindow") as show, \
+                mock.patch.object(voicestudio_voice.subprocess, "Popen") as popen:
+            self.assertFalse(engine.launch())
+        show.assert_called_once_with(11, win32con.SW_HIDE)  # 12 is open on screen: the user is using it
+        popen.assert_not_called()
+
+    def test_open_app_shows_the_hidden_window_instead_of_relaunching(self):
+        import voicestudio_voice
+        with mock.patch.object(voicestudio_voice, "_app_windows", return_value=[11]) as windows, \
+                mock.patch("win32gui.ShowWindow") as show, mock.patch("win32gui.SetForegroundWindow") as front, \
+                mock.patch.object(voicestudio_voice.subprocess, "Popen") as popen, \
+                mock.patch.object(voicestudio_voice.Path, "is_file", return_value=True):
+            self.assertTrue(voicestudio_voice.open_app())
+        windows.assert_called_once_with(visible=False)
+        self.assertTrue(show.called)
+        front.assert_called_once_with(11)
+        popen.assert_not_called()
+
     def test_no_waiting_on_voicestudio_while_it_reopens(self):
         instance = voice.Voice.__new__(voice.Voice)
         instance.studio = mock.Mock()
