@@ -166,7 +166,7 @@ function ringOffset(c, front, a, whole) {
     off += w.standby * a.S * 1.5 * Math.exp(-dl * dl * 14);
   }
   if (w.listening > .01) {          // ripples, stronger as you talk: from the point facing you, or out from the middle
-    if (whole) off += w.listening * a.L * (.3 + .45 * sim.level) * Math.sin(Math.abs(c.lat) * 6 - t * 5) * Math.cos(c.lat);   // one step at most, so it stays a sphere
+    if (whole) off += w.listening * a.L * (.6 + .8 * sim.level) * Math.pow(Math.max(0, Math.sin(Math.abs(c.lat) * 5 - t * 4.5)), 6);   // single discs step out, never in, so it stays a sphere
     else { const ang = Math.acos(clamp(dot(c.d, front), -1, 1)); off += w.listening * a.L * (.55 + 2.2 * sim.level) * Math.sin(ang * 7 - t * 5.5) * Math.exp(-ang * .8); }
   }
   if (w.thinking > .01) {           // pops at random, and a scan line sweeping round
