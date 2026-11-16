@@ -51,7 +51,7 @@ class ResumePanelsTest(unittest.TestCase):
 
     def test_ui_commands_and_resource_hints_are_not_replayed(self):
         with patch.object(hud,'_history',deque()),patch.object(hud,'_subscribers',[]):
-            for kind in ['holo-panel','project-resume','visual-model','resources']:
+            for kind in ['holo-panel','project-resume','resources']:
                 hud.emit(kind,action='test')
             self.assertEqual(len(hud._history),0)
 

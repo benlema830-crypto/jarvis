@@ -95,7 +95,7 @@ ASSETS = {"/brain.css": ("brain.css", "text/css"), "/brain.js": ("brain.js", "te
           "/productivity.js": ("productivity.js", "text/javascript"),
           "/automation.js": ("automation.js", "text/javascript"),
           "/panels.js": ("panels.js", "text/javascript"), "/modes.js": ("modes.js", "text/javascript"),
-          "/holo.js": ("holo.js", "text/javascript"),
+          "/holo.js": ("holo.js", "text/javascript"), "/shell-orb.js": ("shell-orb.js", "text/javascript"),
           "/experience.js": ("experience.js", "text/javascript"),
           "/console.js": ("console.js", "text/javascript"),
           "/cards.js": ("cards.js", "text/javascript"),

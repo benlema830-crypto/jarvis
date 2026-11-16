@@ -806,9 +806,6 @@ function drawReactor(t) {
   const cx = graphMini ? stageX * DPR : w / 2, cy = compact ? h*.43 : graphMini ? h * .4 : h / 2;
   const box = rc.getBoundingClientRect();  // page position, for beams and clicks drawn outside this canvas
   J.view.sphere = { x: box.left + cx / DPR, y: box.top + cy / DPR, size: S / DPR };
-  if (graphMini && $('showStars').checked) {
-    for (const s of stars) { rx.fillStyle = `rgba(150,200,205,${.25 + Math.sin(t * .4 + s.p) * .15})`; rx.fillRect(s.x * w, s.y * h, s.r * 1.6 * DPR, s.r * 1.6 * DPR); }
-  }
   rx.save(); rx.translate(cx, cy); rx.lineCap = 'round';
   if (look === 'sphere') {
     J.holo?.drawSphere(rx, S, t, col, pulse, spin, graphMini);

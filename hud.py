@@ -42,7 +42,7 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 INTEL_TTL = 600
 TRANSCRIPTS = os.path.join(HERE, "data", "transcripts")
 TRANSCRIBED = {"you", "jarvis", "tool", "error", "event"}
-LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume", "visual-model",
+LIVE_ONLY = {"level", "usage", "settings", "ui", "resources", "holo-panel", "project-resume",
              "workshop"}  # not replayed to pages that connect later
 
 # Read by jarvis.py: typed commands (str) and background events (dict)

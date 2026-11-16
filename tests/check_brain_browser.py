@@ -205,7 +205,8 @@ addEventListener('load', async () => {
     assert($('graph').getBoundingClientRect().width === innerWidth, 'graph fills the screen again');
 
     stage('themes'); assert(J.holo && document.querySelectorAll('.themes button').length === 5, 'theme picker');
-    assert(document.body.dataset.theme === 'violet', 'holographic core starts violet');
+    assert(document.body.dataset.theme === 'cyan', 'the orb starts cyan');
+    assert(J.shellOrb && typeof J.shellOrb.draw === 'function', 'shell orb loaded');
     document.querySelector('.themes [data-theme=mark42]').click();
     assert(document.body.dataset.theme === 'mark42' && J.stateColors.standby === '#f59e0b' && J.linkColors.note === '#f59e0b', 'mark 42 theme');
     document.querySelector('.themes [data-theme=cyan]').click(); assert(J.stateColors.standby === '#5eead4', 'cyan theme');
@@ -245,7 +246,7 @@ addEventListener('load', async () => {
     assert(['webgl2', 'canvas2d'].includes(J.holo.renderer), 'core renderer available');
     uiState = 'standby';
 
-    stage('cinematic audio motion');
+    stage('audio reaction');
     const audioBurst=async(input,output,count=7)=>{
       window.motionTestState=uiState;
       const frames=[];
@@ -256,27 +257,21 @@ addEventListener('load', async () => {
       }
       return frames;
     };
-    for(const model of ['holographic-core','jarvis-orbit','fracture-sphere']){
-      J.holo.setModel(model);uiState='thinking';
-      const thought=await audioBurst(0,0,32);
-      assert(J.holo.motion.energy<.02 && J.holo.motion.activity>.5,'thinking moves without invented audio for '+model+': '+JSON.stringify(J.holo.motion));
-      const sizes=thought.slice(-12).map(m=>m.expansion);
-      assert(Math.max(...sizes)-Math.min(...sizes)>.025,'thinking visibly breathes for '+model);
-      uiState='standby';await audioBurst(.06,0);
-      assert(J.holo.motion.input>.6,'microphone drives '+model+' even before wake word');
-      assert(J.holo.motion.swell>.45 && Math.abs(J.holo.motion.lift)>.005,'visible displacement for '+model);
-      uiState='speaking';await audioBurst(0,.08);
-      assert(J.holo.motion.output>.6 && J.holo.motion.input<.2,'separate speech reaction for '+model);
-      assert(J.holo.motion.expansion>1.16,'speech has a much larger physical pulse for '+model);
-    }
+    uiState='thinking';await audioBurst(0,0,32);
+    assert(J.holo.motion.energy<.02 && J.holo.motion.thinking>.5,'thinking shows without invented audio: '+JSON.stringify(J.holo.motion));
+    uiState='standby';await audioBurst(.06,0);
+    assert(J.holo.motion.input>.6,'microphone drives the orb even before wake word');
+    uiState='speaking';await audioBurst(0,.08);
+    assert(J.holo.motion.output>.6 && J.holo.motion.input<.2,'separate speech reaction');
+    for(const bounce of ['sway','lift','roll','stretch','expansion','swell'])assert(!(bounce in J.holo.motion),'the orb has no '+bounce+': he stays put');
     J.audio.at=performance.now()-1000;uiState='standby';
     window.motionTestState='standby';
     for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,65));drawReactor(performance.now()/1000);}
-    assert(J.holo.motion.energy<.01 && J.holo.motion.swell<.015,'stale/disconnected audio settles to rest');
-    J.holo.setModel('holographic-core');
+    assert(J.holo.motion.energy<.01,'stale/disconnected audio settles to rest');
     delete window.motionTestState;
 
-    stage('moons'); $('stageSlot').click(); await wait(() => document.body.classList.contains('jarvis-main'), 'main view for moons');
+    // The resume step above may already have brought the orb forward; clicking again would send it back to the graph.
+    stage('moons'); if(!J.view.jarvisMain)$('stageSlot').click(); await wait(() => document.body.classList.contains('jarvis-main'), 'main view for moons');
     await wait(() => J.holo.moons.length === 4, 'agent, event and song moons (' + J.holo.moons.length + ')');
     const moonKinds = J.holo.moons.map(h => h.m.kind).sort().join();
     assert(moonKinds === 'agent,agent,event,track', 'moon kinds ' + moonKinds);
@@ -368,12 +363,6 @@ addEventListener('load', async () => {
     healthButton('Reconnect microphone').click();
     await wait(()=>window.posts.some(p=>p.path==='/voice-recovery' && p.body.component==='microphone'),'microphone recovery');
     $('healthDialog').close();
-    stage('saved visual models');
-    J.holo.setModel('fracture-sphere');J.holo.setTheme('violet');
-    J.holo.setModel('jarvis-orbit');assert(J.holo.model==='jarvis-orbit','orbit selected');
-    J.holo.setModel('fracture-sphere');assert(document.body.dataset.theme==='violet','per-model palette restored');
-    assert(JSON.parse(localStorage.getItem('jarvis.visualModel'))==='fracture-sphere','model persisted');
-    J.holo.setModel('holographic-core');
     stage('job controls');$('agentsBtn').click();
     await wait(()=>$('agentsDialog').textContent.includes('Reading source'),'observed milestone displayed');
     [...$('agentsDialog').querySelectorAll('button')].find(b=>b.textContent==='Pause').click();
@@ -450,6 +439,7 @@ addEventListener('load', async () => {
     const cardOf = id => document.querySelector(`#cards [data-card="${id}"]`);
     const press = (id, label) => [...cardOf(id).querySelectorAll('button')].find(b => b.textContent === label).click();
     const sent = () => window.posts.filter(p => p.path === '/command').map(p => p.body.text);
+    await J.cards.poll();  // ask now: the page only re-reads jobs every 15 s, which this check used to reach by being slow
     await wait(() => cardOf('ask') && cardOf('held') && cardOf('job:a1'), 'cards for the question, held updates and the finished job');
     assert($('cards').closest('.console-rail'), 'in the Console the cards sit at the top of the rail');
     assert(cardOf('ask').querySelector('h3').textContent === 'Delete the old build folder?', 'the question is the card');
@@ -538,7 +528,7 @@ def serve(with_checks=True):
             if path == "/":
                 script = CHECK if with_checks else '<script>window.EventSource=class {close(){} addEventListener(){}};</script>'
                 return self.send((ROOT / "hud/brain.html").read_text(encoding="utf-8").replace("<head>", "<head>" + script, 1), "text/html")
-            if path in ("/brain.js", "/holo.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/console.js", "/cards.js", "/brain.css"):
+            if path in ("/brain.js", "/holo.js", "/shell-orb.js", "/experience.js", "/panels.js", "/modes.js", "/productivity.js", "/automation.js", "/console.js", "/cards.js", "/brain.css"):
                 return self.send((ROOT / "hud" / path[1:]).read_text(encoding="utf-8"), "text/css" if path.endswith(".css") else "text/javascript")
             routes = {
                 "/brain-data": {"nodes": graph_nodes, "links": graph_links, "vault": {"name": "Test Vault", "notes": 3, "unresolved": 0}},

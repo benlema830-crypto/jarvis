@@ -4,10 +4,6 @@ import re
 
 def dispatch(text, emit):
     text = str(text).strip().rstrip('.!?')
-    model = re.fullmatch(r'(?:switch to|use|show) (?:the )?(holographic core|jarvis orbit|fracture sphere)(?: model)?',text,re.I)
-    if model:
-        emit('visual-model',model=model[1].lower().replace(' ','-'))
-        return ''
     if re.fullmatch(r'(?:please )?(?:bring|pull) (?:that|this|it)(?: panel)? (?:closer|up)', text, re.I):
         emit('holo-panel', action='focus', query='')
         return ''
