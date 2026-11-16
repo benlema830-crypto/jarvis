@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Jarvis orb: hologram with tiny sparks</title>
-<!-- Fifth round of orb mockups (2026-11-16): the full hologram from shell-orbs.html with tiny electric sparks (the bolts in lightning-orbs.html were too big). Nothing here is wired into Jarvis: the voice is made up
+<!-- Fifth round of orb mockups (2026-11-16): the full hologram from shell-orbs.html with tiny electric sparks kept inside the sphere (the bolts in lightning-orbs.html were too big). Nothing here is wired into Jarvis: the voice is made up
      and the states are switched by the buttons. The chosen idea gets ported into hud/holo.js. -->
 <style>
 :root{--bg:#04060b;--line:#1b2433;--text:#d7e0ee;--dim:#8391a8;--accent:#b18aff}
@@ -42,15 +42,15 @@ main.corner .stage{aspect-ratio:auto;width:250px;height:250px;margin:14px auto}
 <body>
 <header>
   <h1>Jarvis orb: the hologram with tiny sparks</h1>
-  <p>The same hologram, with the big bolts gone and small electric sparks instead, three ways. They are sparse when he is standing by,
+  <p>The same hologram, with small electric sparks inside it, three ways. Nothing sticks out of the sphere. They are sparse when he is standing by,
      busier while he thinks, and follow the voice when he speaks or listens. The voice here is made up. Click one to see it large.</p>
 </header>
 <div class="controls" id="controls"></div>
 <main id="grid">
   <section class="tile" data-kind="static"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
-    <div class="cap"><b>A · Static</b><p>Tiny zaps that jump from one block to the next and are gone in a blink.</p></div></section>
+    <div class="cap"><b>A · Static</b><p>Tiny zaps in the space between the two shells, gone in a blink.</p></div></section>
   <section class="tile" data-kind="streamer"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
-    <div class="cap"><b>B · Streamers</b><p>Little tufts of thin hairs that reach out from one spot on the shell and dance for a moment, like the top of a Tesla coil.</p></div></section>
+    <div class="cap"><b>B · Streamers</b><p>Little tufts of thin hairs that reach from one spot on a wall into the hollow and dance for a moment, like the top of a Tesla coil.</p></div></section>
   <section class="tile" data-kind="mix"><div class="stage"><canvas class="gl"></canvas><canvas class="glow"></canvas></div>
     <div class="cap"><b>C · Mix</b><p>A little of each.</p></div></section>
 </main>
@@ -226,11 +226,12 @@ function putArcs(out, at, arcs) {
 }
 const shellSpin = () => .05 * (sim.w.standby + sim.w.listening) + .04 * sim.w.speaking;
 
-/* ---------- Tiny electric sparks: short-lived hair-thin jagged lines, drawn as chains of thin bright pieces ---------- */
+/* ---------- Tiny electric sparks inside the shell: short-lived hair-thin jagged lines, drawn as chains of thin bright pieces ---------- */
+// Everything stays between the inner shell and the inside face of the outer blocks, so nothing sticks out of the sphere.
 const rng = seed => () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-// mode: 'static' = tiny zaps between neighbouring blocks, 'streamer' = tufts of hairs reaching out from one spot, 'mix'.
+// mode: 'static' = tiny zaps in the space between the two shells, 'streamer' = tufts of hairs from one spot on a wall, 'mix'.
 function makeSparks(mode, seed) {
-  const rnd = rng(seed), live = [], POOL = 720, SHELL = .87;
+  const rnd = rng(seed), live = [], POOL = 720, WALL = .66, INNER = .54, DEEP = .34;
   let waitZap = .2, waitTuft = .5;
   const onSphere = R => { const u = rnd() * 2 - 1, th = rnd() * TAU, s = Math.sqrt(1 - u * u); return [s * Math.cos(th) * R, u * R, s * Math.sin(th) * R]; };
   const toRadius = (p, R) => { const n = norm(p); return [n[0] * R, n[1] * R, n[2] * R]; };
@@ -242,19 +243,21 @@ function makeSparks(mode, seed) {
       if (j - i < 2) return;
       const m = (i + j) >> 1, A = pts[i], B = pts[j];
       let p = [(A[0] + B[0]) / 2 + (rnd() - .5) * amp, (A[1] + B[1]) / 2 + (rnd() - .5) * amp, (A[2] + B[2]) / 2 + (rnd() - .5) * amp];
-      if (R) p = toRadius(p, R * (1 + (rnd() - .5) * .04));        // a zap hugs the shell
+      if (R) p = toRadius(p, R * (1 + (rnd() - .5) * .04));        // a zap keeps to its own depth
       pts[m] = p; split(i, m, amp * .55); split(m, j, amp * .55);
     };
     split(0, n, sway); return pts;
   }
   function zap() {                  // about one block long, over in a tenth of a second
-    const a = onSphere(SHELL), o = onSphere(.1 + .12 * rnd()), b = toRadius([a[0] + o[0], a[1] + o[1], a[2] + o[2]], SHELL), span = gap(a, b);
-    live.push({ life: .07 + .09 * rnd(), age: 0, redraw: 0, power: .7 + .5 * rnd(), thick: .008, build: () => [[jagged(a, b, 4, span * .5, SHELL), 1]] });
+    const R = INNER + .02 + (WALL - INNER - .04) * rnd(), a = onSphere(R), o = onSphere(.1 + .12 * rnd()), b = toRadius([a[0] + o[0], a[1] + o[1], a[2] + o[2]], R), span = gap(a, b);
+    live.push({ life: .07 + .09 * rnd(), age: 0, redraw: 0, power: .7 + .5 * rnd(), thick: .008, build: () => [[jagged(a, b, 4, span * .5, R), 1]] });
   }
   function tuft() {                 // three to five hairs from one spot, each re-forming as it lives so the tuft dances
-    const a = onSphere(SHELL), n = norm(a), tips = [];
+    // It starts on the inside face of the outer blocks and reaches inwards, or on the inner shell and reaches out to the blocks.
+    const inward = rnd() < .5, a = onSphere(inward ? WALL : INNER), n = norm(a), tips = [];
     for (let i = 3 + Math.floor(rnd() * 3); i > 0; i--) {
-      const out = .13 + .17 * rnd(), o = onSphere(.06 + .1 * rnd()); tips.push([a[0] + n[0] * out + o[0], a[1] + n[1] * out + o[1], a[2] + n[2] * out + o[2]]);
+      const out = inward ? -(.1 + .14 * rnd()) : .04 + .07 * rnd(), o = onSphere(.05 + .08 * rnd()), tip = [a[0] + n[0] * out + o[0], a[1] + n[1] * out + o[1], a[2] + n[2] * out + o[2]];
+      tips.push(toRadius(tip, clamp(Math.hypot(tip[0], tip[1], tip[2]), DEEP, WALL)));   // never past the blocks, never into the very middle
     }
     live.push({ life: .25 + .2 * rnd(), age: 0, redraw: 0, power: .7 + .5 * rnd(), thick: .007, build() {
       const lines = [];
