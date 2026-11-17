@@ -6,7 +6,7 @@ focus, have no taskbar button, and (unless made clickable, like the cards' close
 through them. All of them live on one background thread that pumps their messages and runs their animations.
 
 The look is the Jarvis page's own: the dark panels, teal accent, hairline borders and mono labels of hud/brain.css,
-and the violet holographic core of hud/holo.js for the orb.
+and the cyan hologram shell of hud/shell-orb.js for the orb.
 """
 import ctypes
 import ctypes.wintypes as wt
@@ -29,10 +29,10 @@ FAINT = (130, 152, 149)         # --faint
 ACCENT = (94, 234, 212)         # --accent (teal)
 LINE = (130, 220, 200)          # --line-strong is this at 28%
 AMBER = (245, 184, 61)          # --amber
-CORE = {"standby": (137, 56, 255), "listening": (160, 90, 255), "speaking": (177, 120, 255),
-        "thinking": (112, 37, 239), "offline": (100, 116, 139)}     # holo.js THEMES.violet.states
-CORE_SPARK = (228, 213, 255)    # noteSpark
-CORE_WHITE = (248, 239, 255)    # the sphere's glow centre
+CORE = {"standby": (94, 234, 212), "listening": (34, 211, 238), "speaking": (125, 211, 252),
+        "thinking": (245, 184, 61), "offline": (100, 116, 139)}     # holo.js THEMES.cyan.states, the orb's starting colours
+CORE_SPARK = (167, 243, 228)    # noteSpark
+CORE_WHITE = (240, 255, 252)    # the orb's sparks
 
 
 @functools.lru_cache(maxsize=64)

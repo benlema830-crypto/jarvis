@@ -3,6 +3,8 @@ import queue
 import unittest
 from unittest import mock
 
+import numpy as np
+
 import cursor_companion as companion
 import explain_cards as cards
 import screen_pointer as pointer
@@ -122,13 +124,27 @@ class CompanionPlacementTest(unittest.TestCase):
 
 
 class CompanionLookTest(unittest.TestCase):
-    def test_the_orb_is_round_glowing_and_see_through_at_the_corners(self):
+    def test_the_orb_is_a_hollow_glowing_shell_and_see_through_at_the_corners(self):
         frame = companion.render_orb("speaking", 3)
         self.assertEqual(frame.size, (companion.ORB, companion.ORB))
         self.assertEqual(frame.getpixel((0, 0))[3], 0)
-        centre = frame.getpixel((companion.ORB // 2, companion.ORB // 2))
-        self.assertGreater(centre[3], 240)
-        self.assertGreater(centre[2], 200)                    # the hot violet-white core
+        pixels = np.asarray(frame)
+        lit = (pixels[..., 3] > 200) & (pixels[..., :3].max(axis=2) > 180)
+        self.assertGreater(int(lit.sum()), 60)                # block outlines in his colour
+        middle = [frame.getpixel((companion.ORB // 2 + dx, companion.ORB // 2 + dy)) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+        self.assertLess(sum(max(p[:3]) for p in middle) / 9, 235)   # no white-hot core: nothing sits in the middle
+
+    def test_the_orb_stays_put_and_its_loop_repeats(self):
+        for state in ("standby", "listening", "thinking", "speaking"):
+            first = np.asarray(companion.render_orb(state, 0), dtype=np.int16)
+            again = np.asarray(companion.render_orb(state, companion.FRAMES), dtype=np.int16)
+            self.assertEqual(int(np.abs(first - again).max()), 0, state)     # the last frame runs into the first
+            for i in range(0, companion.FRAMES, 6):                          # he never bounces: his weight stays on the centre
+                alpha = np.asarray(companion.render_orb(state, i), dtype=np.float32)[..., 3]
+                rows, columns = np.mgrid[0:alpha.shape[0], 0:alpha.shape[1]]
+                middle = (companion.ORB - 1) / 2
+                self.assertLess(abs(float((rows * alpha).sum() / alpha.sum()) - middle), 2, (state, i))
+                self.assertLess(abs(float((columns * alpha).sum() / alpha.sum()) - middle), 2, (state, i))
 
     def test_a_long_reply_shows_its_latest_lines_in_a_bounded_bubble(self):
         short, _ = companion.render_bubble("Hello.")
