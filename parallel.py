@@ -13,6 +13,9 @@ to cheaper ones. The lead works in steps, as one conversation it keeps throughou
      settle. If the job isn't finished (a part failed, or the next step needed these results) it orders another
      round of agents, up to MAX_ROUNDS in all. Otherwise it writes the one answer the owner hears.
 So a led job may have steps that depend on each other: they are rounds. And a led round may be a single agent.
+When the next step needs something that is still running (a long test run, a download), the lead orders the round
+with a wait in front of it. Nothing runs during the wait, so it costs nothing; before 2026-11-17 a whole round, or an
+agent's whole 30 minutes, went on waiting, and jobs ran out of rounds with the result still to collect.
 The lead only reads. If it fails at any step the job carries on without it: Jarvis's own split runs, and
 Jarvis's own brain combines every report there is, as for a job with no lead.
 
@@ -35,7 +38,11 @@ import time
 from pathlib import Path
 
 MAX_PARTS = 4
-MAX_ROUNDS = 3                # how many times a lead may send agents out on one job
+MAX_ROUNDS = 5                # how many times a lead may send agents out on one job (3 until 2026-11-17: jobs
+                              # kept ending "partly finished" with the work for one more round plainly named)
+AGENT_MINUTES = 30            # terminal.MAX_MINUTES, repeated so the lead can be told without loading the agents
+MAX_WAIT_MINUTES = 90         # the longest one wait a lead may order before a round, for a run that is still going
+MAX_WAITING_MINUTES = 180     # ...and all the waits of one job together
 NAMES = ("Parallel A", "Parallel B", "Parallel C", "Parallel D")
 LEAD = "Parallel Lead"
 LEADS = ("fable", "opus")     # who may lead; a lead weaker than its agents would be the wrong way round
@@ -106,7 +113,8 @@ class Groups:
             self._count += 1
             group = {"id": f"p{self._count}", "goal": str(goal).strip()[:600], "mode": mode, "project": project,
                      "parts": {}, "began": time.time(), "touched": time.time(), "sessions": sessions, "lead": None,
-                     "draft": clean, "note": "", "round": 1, "earlier": []}   # earlier: the parts of rounds already run
+                     "draft": clean, "note": "", "round": 1, "earlier": [],   # earlier: the parts of rounds already run
+                     "wait_until": 0.0, "waited": 0, "timer": None}           # a wait the lead ordered before a round
         if lead:
             return self._start_lead(group, lead)
         ok, message = self._launch(group, clean)
@@ -201,6 +209,8 @@ class Groups:
         """Forget a group nothing is working on any more (an agent that died without reporting, a part cancelled
         while paused). Without this it would refuse every later parallel job until a restart. Called with the lock."""
         for ident, group in list(self.groups.items()):
+            if group.get("lead") and group["lead"]["phase"] == "waiting":
+                continue  # nothing is meant to be running: its next round starts when the wait is over
             waiting = [key for key, part in group["parts"].items() if part["report"] is None]
             if group.get("lead") and group["lead"]["phase"] in ("planning", "merging"):
                 waiting.append(LEAD.casefold())
@@ -327,10 +337,45 @@ class Groups:
             clean, why = self._check(order["parts"], least=1)
         if clean is None:
             return self._without_lead(group, f"{lead['words']} ordered another round of agents that couldn't be run ({why}).")
+        wait = self._wait_minutes(group, order)
         with self.lock:
             group["earlier"] += group["parts"].values()
             group["parts"], group["round"] = {}, group["round"] + 1
-            lead["phase"], group["touched"] = "working", time.time()
+            lead["phase"], group["touched"] = "waiting" if wait else "working", time.time()
+            if wait:
+                group["wait_until"], group["waited"] = time.time() + wait * 60, group["waited"] + wait
+                group["timer"] = threading.Timer(wait * 60, self._after_wait, args=(group, clean))
+                group["timer"].daemon = True
+                group["timer"].start()
+        if not wait:
+            return self._start_round(group, clean)
+        try:
+            import hud
+            hud.emit("event", text=f"The lead is waiting {wait} minutes for a long run to finish; round "
+                                   f"{group['round']} starts after that.")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _wait_minutes(group, order) -> int:
+        """The wait the lead asked for before this round, in whole minutes, within the limits. 0 for none."""
+        try:
+            asked = float(order.get("wait_minutes") or 0)
+        except (TypeError, ValueError):
+            return 0
+        if not asked > 0:  # also turns away NaN
+            return 0
+        return int(max(0, min(max(1, round(asked)), MAX_WAIT_MINUTES, MAX_WAITING_MINUTES - group["waited"])))
+
+    def _after_wait(self, group, clean):
+        with self.lock:
+            if self.groups.get(group["id"]) is not group or group["lead"]["phase"] != "waiting":
+                return  # stopped while it waited
+            group["lead"]["phase"], group["wait_until"], group["timer"] = "working", 0.0, None
+            group["touched"] = time.time()
+        self._start_round(group, clean)
+
+    def _start_round(self, group, clean):
         ok, message = self._launch(group, clean)
         if not ok:
             return self._without_lead(group, f"Round {group['round']} of agents couldn't start. {message}")
@@ -339,6 +384,21 @@ class Groups:
             hud.emit("event", text=f"The lead sent agents out again, round {group['round']}: {message}"[:600])
         except Exception:
             pass
+
+    def stop_waiting(self) -> str:
+        """The owner said stop while a job was waiting to start its next round: nothing more starts. Returns
+        what was stopped, in words, or "" when no job was waiting."""
+        with self.lock:
+            waiting = [g for g in self.groups.values() if g.get("lead") and g["lead"]["phase"] == "waiting"]
+            for group in waiting:
+                if group["timer"]:
+                    group["timer"].cancel()
+                del self.groups[group["id"]]
+        if not waiting:
+            return ""
+        print("(parallel job stopped while waiting to start its next round)", flush=True)
+        return ("Stopped the parallel job, which was waiting to start its next round. The reports from the rounds "
+                "it did run are in the session panel.")
 
     def _without_lead(self, group, why):
         """The lead can't finish the job, so Jarvis's own brain combines every report there is."""
@@ -360,6 +420,12 @@ class Groups:
                 head = f"Parallel job \"{group['goal'][:120]}\": "
                 if lead and lead["phase"] == "planning":
                     lines.append(head + f"{lead['words']} is planning the split. No agents have started yet.")
+                    continue
+                if lead and lead["phase"] == "waiting":
+                    minutes = max(1, round((group["wait_until"] - time.time()) / 60))
+                    lines.append(head + f"round {group['round']} of at most {MAX_ROUNDS} starts in about {minutes} "
+                                 f"minute(s). {lead['words']} ordered the wait for a long run to finish; no agent is "
+                                 "running meanwhile.")
                     continue
                 done = sum(p["report"] is not None for p in group["parts"].values())
                 if group["round"] > 1:
@@ -462,6 +528,10 @@ def plan_prompt(group, folder) -> str:
         "another part's result goes in a later round: plan only the first round now. When its reports come back "
         f"you can order the next, up to {MAX_ROUNDS} rounds in all, so a job in stages (find out, then build, then "
         "check) is fine. If the job is too small to be worth a lead and agents, don't plan it: say so instead.\n"
+        f"- Each agent is stopped after {AGENT_MINUTES} minutes; it then gets a few minutes to report where it got "
+        "to, and its part counts as unfinished. Size every part to fit well inside that. A part that needs "
+        "something slower (a long test run, a download, a backtest) starts it running on its own, reports how to "
+        "tell when it has finished, and ends; it never sits waiting for it. A later round collects the result.\n"
         "- Each task is a complete brief for an agent that knows nothing else, because it sees only its own task: "
         "what the whole job is for, exactly what to look at or change, what counts as finished, and what to report "
         "back so the reports can be compared.\n"
@@ -491,7 +561,12 @@ def lead_merge_prompt(group) -> str:
             "answering: end your message with a plan in the same JSON shape as your first, with 1 to "
             f"{MAX_PARTS} parts. Each task must carry over what its agent needs from these reports, because it sees "
             "only its own task. Order a round only for work the job needs, never to polish. An order for another "
-            "round is OUTCOME: done.\n\nOtherwise write the combined answer for the user, with no JSON in it. ")
+            "round is OUTCOME: done.\n"
+            "If the next step needs something that is still running (a long test run, a download), don't send an "
+            "agent to sit and wait for it, and don't answer with the job half done: put \"wait_minutes\" in the "
+            f"plan (a number, up to {MAX_WAIT_MINUTES}; long enough for the run to finish) and Jarvis starts that "
+            "round after the wait. Nothing runs meanwhile, so the wait costs nothing. Its agents then collect the "
+            "result and carry on.\n\nOtherwise write the combined answer for the user, with no JSON in it. ")
     else:
         again = "That was the last round, so now write the combined answer for the user, with no JSON in it. "
     return (

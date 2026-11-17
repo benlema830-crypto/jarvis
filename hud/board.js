@@ -11,6 +11,7 @@
   const LEAD_WORDS = {
     planning: () => 'Planning the split. The agents start when its plan is ready.',
     working: job => `Waiting for round ${job.round}'s agents. It checks their reports next.`,
+    waiting: job => `Holding round ${job.round} for about ${Math.max(1, Math.round(job.wait / 60))} min while a long run finishes. No agent is running meanwhile.`,
     merging: () => 'Reading the reports. It either sends agents out again or writes the answer.' };
   const QUIET_AFTER = 120;  // seconds without a new step before a working agent is called quiet
 
@@ -95,7 +96,7 @@
     const bar = $('lead');
     bar.replaceChildren();
     const running = agent && agent.live, phase = job.lead.phase;
-    bar.append(mark(running ? 'running' : phase === 'working' ? 'waiting' : agent ? agent.status : 'waiting'),
+    bar.append(mark(running ? 'running' : phase === 'working' || phase === 'waiting' ? 'waiting' : agent ? agent.status : 'waiting'),
       make('span', 'Lead', 'who'), make('span', job.lead.model, 'model'),
       make('span', (LEAD_WORDS[phase] || (() => ''))(job), 'saying'));
     if (running) { const clock = make('span', span(agent.seconds), 'clock num'); clock.dataset.since = agent.seconds; bar.append(clock); }
@@ -153,7 +154,7 @@
     if (counts.working) {
       tally.append(make('b', String(counts.working)), ` agent${counts.working === 1 ? '' : 's'} working`);
       if (job) tally.append(` · round ${job.round} of at most ${job.max_rounds}`);
-    } else tally.append(job ? 'Between rounds' : 'No agents working');
+    } else tally.append(job ? (job.wait ? 'Waiting on a long run' : 'Between rounds') : 'No agents working');
 
     $('job').hidden = !job;
     if (job) {

@@ -9,7 +9,7 @@ import time
 
 LIVE = ("running", "waiting")
 LEAD = "Parallel Lead"
-MAX_ROUNDS = 3      # parallel.MAX_ROUNDS; repeated so this module can be read and tested without the agents loaded
+MAX_ROUNDS = 5      # parallel.MAX_ROUNDS; repeated so this module can be read and tested without the agents loaded
 STEPS = 5           # of an agent's latest actions
 EARLIER = 12        # finished agents listed
 SHELL = '"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command '
@@ -83,6 +83,8 @@ def _job(group, now):
     return {"goal": short(group.get("goal"), 400), "mode": group.get("mode") or "", "round": int(group.get("round") or 1),
             "max_rounds": MAX_ROUNDS, "seconds": max(0, round(now - _number(group.get("began")))),
             "lead": {"model": lead.get("words", ""), "phase": lead.get("phase", "")} if lead else None,
+            # between rounds, on a wait the lead ordered for a long run: seconds until the next round starts
+            "wait": max(0, round(_number(group.get("wait_until")) - now)) if lead and lead.get("phase") == "waiting" else 0,
             "stages": _stages(group), "note": short(group.get("note"), 300),
             "rounds": [{"round": number, "parts": parts} for number, parts in sorted(rounds.items())]}
 

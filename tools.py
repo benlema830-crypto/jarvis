@@ -1103,8 +1103,9 @@ def parallel_agents(goal: str, parts: list[dict], mode: str = "research", projec
             approach would waste the plan): Claude Fable 5.2, the most capable model, plans the first round and
             writes each agent's instructions, or advises against running it this way; the agents run on the
             cheaper models it names; it then checks their reports against each other and the files, and if the job
-            isn't finished it sends agents out again, up to three rounds, before it writes the combined answer. So
-            the steps may depend on each other. It only reads. It adds a few minutes before the agents start and
+            isn't finished it sends agents out again, up to five rounds, before it writes the combined answer. So
+            the steps may depend on each other, and it can hold a round back until a long run has finished. It
+            only reads. It adds a few minutes before the agents start and
             uses more of the plan, so say so. Your parts are its starting draft, and they run as they are if its
             plan can't be used.
             "opus" for the same on Claude Opus 5.5: when the user asks for Opus to lead, or Fable can't be used.
@@ -1160,6 +1161,12 @@ def stop_agent_session(name: str = "") -> str:
     Args:
         name: Session to stop. Blank stops every running agent.
     """
+    import parallel
+    waiting = "" if name.strip() and not name.strip().casefold().startswith("parallel") else parallel.GROUPS.stop_waiting()
+    if waiting:  # between rounds no agent is running, but the next round would start when the wait ends
+        if SESSIONS.running and not name.strip():
+            SESSIONS.cancel("")
+        return waiting
     if not SESSIONS.running:
         return "No project agent task is running."
     if name.strip() and not SESSIONS.is_running(name):

@@ -1,4 +1,5 @@
 """Parallel work: several agents at once on one job, all or nothing, one combined answer."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -322,6 +323,99 @@ class LeadTest(ParallelTest):
         self.assertIn("Importer half built.", item["prompt"])
         self.assertEqual(self.groups.status(), "No parallel job is running.")
 
+    # ---------- a wait before a round, for a run that is still going ----------
+
+    def waiting_round(self, minutes=40):
+        """Round one ends and the lead orders round two with a wait in front. Returns the timers that were set."""
+        timers = []
+
+        class Timer:
+            def __init__(self, seconds, call, args=()):
+                self.seconds, self.call, self.args, self.cancelled = seconds, call, args, False
+                timers.append(self)
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                self.cancelled = True
+
+            def fire(self):
+                self.call(*self.args)
+        patcher = mock.patch.object(parallel.threading, "Timer", Timer)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.round_one()
+        self.lead_reports(ROUND_TWO.replace('{"split": true,', '{"split": true, "wait_minutes": %s,' % json.dumps(minutes)))
+        return timers
+
+    def test_the_lead_can_hold_a_round_until_a_long_run_has_finished(self):
+        timers = self.waiting_round(40)
+        started = len(self.sessions.started)
+        self.assertEqual([t.seconds for t in timers], [40 * 60])
+        self.assertEqual(self.sessions.workers, {})                  # nothing runs, so the wait costs nothing
+        self.assertIn("round 2 of at most 5 starts in about 40 minute(s)", self.groups.status())
+        self.assertEqual(self.queued, [])                            # and nothing is said yet
+        # it isn't taken for a dead job while it waits, however long ago it was touched
+        self.groups.groups["p1"]["touched"] -= parallel.STALE_SECONDS + 60
+        self.assertIn("already running", self.start([{"task": "x"}, {"task": "y"}]))
+        timers[0].fire()
+        self.assertEqual(len(self.sessions.started), started + 1)
+        self.assertIn("Build the importer", self.sessions.started[-1]["task"])
+        self.assertIn("round 2 of at most 5, 0 of 1 parts finished", self.groups.status())
+        self.part_reports("Parallel A", "Importer built.")
+        self.assertEqual(self.sessions.started[-1]["name"], "Parallel Lead")   # and the job goes on as usual
+
+    def test_a_wait_is_kept_within_its_limits(self):
+        wait = parallel.Groups._wait_minutes
+        self.assertEqual(wait({"waited": 0}, {"wait_minutes": 600}), parallel.MAX_WAIT_MINUTES)
+        self.assertEqual(wait({"waited": parallel.MAX_WAITING_MINUTES - 10}, {"wait_minutes": 60}), 10)
+        self.assertEqual(wait({"waited": parallel.MAX_WAITING_MINUTES}, {"wait_minutes": 60}), 0)
+        self.assertEqual(wait({"waited": 0}, {"wait_minutes": 0.2}), 1)
+        for nothing in (None, 0, -5, "soon", [], float("nan")):
+            self.assertEqual(wait({"waited": 0}, {"wait_minutes": nothing}), 0, nothing)
+        self.assertEqual(wait({"waited": 0}, {}), 0)
+
+    def test_a_round_with_no_wait_starts_at_once(self):
+        timers = self.waiting_round(0)
+        self.assertEqual(timers, [])
+        self.assertIn("Build the importer", self.sessions.started[-1]["task"])
+
+    def test_stop_during_a_wait_means_the_next_round_never_starts(self):
+        timers = self.waiting_round(40)
+        started = len(self.sessions.started)
+        self.assertIn("waiting to start its next round", self.groups.stop_waiting())
+        self.assertTrue(timers[0].cancelled)
+        self.assertEqual(self.groups.status(), "No parallel job is running.")
+        timers[0].fire()                                             # even if the timer had already gone off
+        self.assertEqual(len(self.sessions.started), started)
+        self.assertEqual(self.groups.stop_waiting(), "")             # nothing waiting: nothing to say
+
+    def test_stop_agent_session_stops_a_waiting_job_but_not_for_another_agents_name(self):
+        self.waiting_round(40)
+        import tools
+        stop = tools.TOOLS_BY_NAME["stop_agent_session"].call
+        with mock.patch.object(parallel, "GROUPS", self.groups), mock.patch.object(tools, "SESSIONS") as sessions:
+            sessions.running = False
+            self.assertEqual(stop({"name": "Frontier"}), "No project agent task is running.")
+            self.assertIn("starts in about", self.groups.status())
+            self.assertIn("waiting to start its next round", stop({"name": ""}))
+        self.assertEqual(self.groups.status(), "No parallel job is running.")
+
+    def test_the_lead_is_told_about_the_time_limit_and_the_wait(self):
+        import terminal
+        self.assertEqual(parallel.AGENT_MINUTES, terminal.MAX_MINUTES)   # the number the plan names
+        self.lead()
+        plan = self.sessions.started[0]["task"]
+        self.assertIn("Each agent is stopped after 30 minutes", plan)
+        self.assertIn("never sits waiting", plan)
+        self.lead_reports(PLAN)
+        self.part_reports("Parallel A")
+        self.part_reports("Parallel B")
+        check = self.sessions.started[-1]["task"]
+        self.assertIn('"wait_minutes"', check)
+        self.assertIn("round 1 of at most 5", check)
+
     def test_a_round_that_cannot_run_ends_the_job_with_what_there_is(self):
         self.round_one()
         self.lead_reports('```json\n{"split": true, "reason": "r", "parts": [{"task": "x", "model": "gemini"}]}\n```')
@@ -414,8 +508,8 @@ class WiringTest(unittest.TestCase):
         self.assertIn("Big jobs get a lead.", jarvis.SYSTEM_PROMPT)          # he starts it himself, without asking
         self.assertIn("don't ask first: start parallel_agents with lead \"fable\"", jarvis.SYSTEM_PROMPT)
         lead = tools.TOOLS_BY_NAME["parallel_agents"].to_dict()["input_schema"]["properties"]["lead"]["description"]
-        self.assertIn("sends agents out again, up to three rounds", " ".join(lead.split()))
-        self.assertEqual(parallel.MAX_ROUNDS, 3)                             # the number both texts name
+        self.assertIn("sends agents out again, up to five rounds", " ".join(lead.split()))
+        self.assertEqual(parallel.MAX_ROUNDS, 5)                             # the number both texts name
         self.assertIsNone(jarvis.truth_guard.classify("parallel_status", True, "x"))
 
 

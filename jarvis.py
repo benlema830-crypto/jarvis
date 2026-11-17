@@ -1347,6 +1347,12 @@ def main():
             worker.cancel()
         if running and everything:
             hud.emit("event", text="Stopped every running agent")
+        if everything:  # a parallel job between rounds has no agent to stop, but would start some when its wait ends
+            import parallel
+            waiting = parallel.GROUPS.stop_waiting()
+            if waiting:
+                hud.emit("event", text=waiting)
+                return True
         return bool(running)
 
     def stop(cancel_tasks=True, everything=True):

@@ -74,7 +74,7 @@ class BoardTest(unittest.TestCase):
         board = self.board([session("Parallel Lead", "running", started_at=NOW - 30, group="p1")], Groups(group("planning")))
         job = board["job"]
         self.assertEqual((job["goal"], job["round"], job["max_rounds"], job["seconds"]),
-                         ("Build the backtester and check it", 1, 3, 900))
+                         ("Build the backtester and check it", 1, 5, 900))
         self.assertEqual(job["lead"], {"model": "Claude Fable 5.2, high effort", "phase": "planning"})
         self.assertEqual([(s["label"], s["state"]) for s in job["stages"]],
                          [("Plan", "now"), ("Round 1", "next"), ("Check", "next"), ("Answer", "next")])
@@ -104,6 +104,18 @@ class BoardTest(unittest.TestCase):
         job = self.board([], Groups(group("merging", 1, [part("Parallel A", True, "done")])))["job"]
         self.assertEqual([(s["label"], s["state"]) for s in job["stages"]],
                          [("Plan", "done"), ("Round 1", "done"), ("Check", "now"), ("Answer", "next")])
+
+    def test_a_job_holding_its_next_round_for_a_long_run(self):
+        import parallel
+        self.assertEqual(agent_board.MAX_ROUNDS, parallel.MAX_ROUNDS)   # the number the board names
+        waiting = group("waiting", 2, [], earlier=[part("Parallel A", True, "done")])
+        waiting["wait_until"] = NOW + 25 * 60
+        job = self.board([], Groups(waiting))["job"]
+        self.assertEqual((job["lead"]["phase"], job["wait"]), ("waiting", 25 * 60))
+        self.assertEqual([(s["label"], s["state"]) for s in job["stages"]],
+                         [("Plan", "done"), ("Round 1", "done"), ("Check", "done"), ("Round 2", "next"),
+                          ("Check", "next"), ("Answer", "next")])
+        self.assertEqual(self.board([], Groups(group("working", 1, [part("Parallel A")])))["job"]["wait"], 0)
 
     def test_a_job_without_a_lead(self):
         job = self.board([], Groups(group(parts=[part("Parallel A"), part("Parallel B")], lead=False)))["job"]
