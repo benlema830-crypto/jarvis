@@ -1,4 +1,5 @@
-/* Real content on the hologram, project resume and accessible pane controls. */
+/* Panels of real content (notes, tasks, sources, agent jobs) that open in a viewer, and project resume.
+   They no longer float around the orb: they are reached from the More menu, the list below or by voice. */
 'use strict';
 (() => {
   const panes=new Map(), hidden=new Set(store.get('hiddenPanes',[]));
@@ -10,7 +11,7 @@
   viewer.append(button('Close',()=>viewer.close()),heading,source,body,actions);document.body.append(viewer);
   const listDialog=make('dialog'),list=make('div',null,'pane-library');listDialog.id='paneLibrary';listDialog.setAttribute('aria-label','Holographic panels');
   listDialog.append(button('Close',()=>listDialog.close()),make('h2','Holographic panels'),
-    make('p','Click a floating panel or choose one below. Say “bring that closer” after selecting a note, or “put that away” to dismiss it.'),list);
+    make('p','Choose a panel below. Say “bring that closer” after selecting a note, or “put that away” to dismiss it.'),list);
   document.body.append(listDialog);
   function library(){
     list.replaceChildren();
@@ -53,16 +54,7 @@
   }
   function dismiss(id=current||selected){if(!id)return;hidden.add(id);saveHidden();if(current===id){viewer.close();current=null;}if(selected===id)selected=null;library();}
   J.panes={add,focus,dismiss,select(id){selected=id;},get selected(){return selected;},
-    get visible(){return [...panes.values()].filter(p=>!hidden.has(p.id)).reverse().slice(0,7);},
-    paint(ctx,pane,w,h){
-      const x=-w/2,y=-h/2;ctx.textAlign='left';ctx.textBaseline='top';
-      ctx.fillStyle='#e8d9ff';ctx.font=`600 ${h*.095}px Consolas,monospace`;ctx.fillText(pane.title.slice(0,22),x+w*.08,y+h*.055,w*.84);
-      ctx.fillStyle='#b993fa';ctx.font=`${h*.07}px Consolas,monospace`;
-      ctx.fillText(pane.kind.toUpperCase(),x+w*.08,y+h*.19,w*.84);
-      ctx.save();ctx.beginPath();ctx.rect(x+w*.08,y+h*.31,w*.84,h*.6);ctx.clip();
-      ctx.fillStyle='#c4b4e0';ctx.font=`${h*.064}px Consolas,monospace`;
-      pane.lines.slice(0,9).forEach((line,i)=>ctx.fillText(line.slice(0,45),x+w*.08,y+h*(.32+i*.065),w*.84));ctx.restore();
-    }
+    get visible(){return [...panes.values()].filter(p=>!hidden.has(p.id)).reverse().slice(0,7);}
   };
   function notes(){for(const n of J.graph.nodes.filter(n=>n.kind==='Note').slice(0,8))add({id:n.id,title:n.label,kind:'note',body:n.body,source:n.source,uri:n.uri});}
   J.on('graph-loaded',notes);notes();

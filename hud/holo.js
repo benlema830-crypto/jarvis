@@ -2,8 +2,7 @@
    - Sphere: the hollow hologram shell drawn by shell-orb.js. This file places it, feeds it what he is doing,
      and lets it be grabbed and spun (mouse or HOLO hand tracking) when he is the main view.
    - Thought beams: when he reads vault notes, beams run from the sphere to those notes in the graph.
-   - Main view only: status gauges (CPU/GPU/memory/network) and moons for agent tasks, the next
-     calendar events and the Spotify track; clicking a moon opens its card.
+   - Main view only: status gauges (CPU/GPU/memory/network). Nothing else floats around him.
    - Holographic replies, a boot sequence and colour themes.
    All remote text is rendered with textContent; nothing here uses innerHTML. */
 'use strict';
@@ -64,7 +63,7 @@ if (store.get('orbLook', null) !== 'shell') { store.set('theme', 'cyan'); store.
 setTheme(store.get('theme', 'cyan'));
 
 /* ---------- Live data, polled only while it is shown ---------- */
-const data = { status: null, sessions: [], events: [], track: null, trackAt: 0, mic: 0 };
+const data = { status: null };
 const refreshers = [];
 function poll(path, every, when, take) {
   let timer = 0;
@@ -77,24 +76,12 @@ function poll(path, every, when, take) {
 }
 const main = () => J.view.jarvisMain;
 poll('/status', 2000, main, s => { data.status = s; });
-poll('/sessions', 5000, main, s => { data.sessions = Array.isArray(s?.sessions) ? s.sessions : []; J.emit('sessions',s); });
-poll('/orbit', 5000, main, o => {
-  data.events = Array.isArray(o?.events) ? o.events : [];
-  data.track = o?.track && typeof o.track === 'object' ? o.track : null; data.trackAt = performance.now();
-});
-J.on('stage', jarvisMain => { if (jarvisMain) refreshers.forEach(refresh => refresh()); });  // gauges and moons appear at once
+poll('/sessions', 5000, main, s => J.emit('sessions', s));  // the agents dialog and the panel list listen for this
+J.on('stage', jarvisMain => { if (jarvisMain) refreshers.forEach(refresh => refresh()); });  // gauges appear at once
 
 /* ---------- Sphere ---------- */
 const bootAt = performance.now();
 const spinner = { yaw: 0, pitch: 0, vy: 0, vp: 0, held: false, samples: [] };
-const images = new Map();
-function image(url) {
-  if (!url || !url.startsWith('https://i.scdn.co/')) return null;
-  if (!images.has(url)) { const img = new Image(); img.referrerPolicy = 'no-referrer'; img.src = url; images.set(url, img); }
-  return images.get(url);
-}
-let moonHits = [], paneHits = [];
-
 /* What he is doing, blended over time so the orb never jumps: how much he is listening, thinking or speaking, and how loud
    the microphone and his own voice are. Nothing here moves or resizes him; the orb's blocks do the moving (shell-orb.js). */
 const coreMotion = { at: 0, dt: 0, phase: 0, listening: 0, thinking: 0, speaking: 0, energy: 0, input: 0, output: 0, color: [94, 234, 212] };
@@ -120,18 +107,8 @@ function drawSphere(rx, S, t, col, pulse, spin, big) {
   const motion = advanceCore(performance.now(), pulse, col);
   t = motion.phase;
   col = '#' + motion.color.map(v => Math.round(v).toString(16).padStart(2,'0')).join('');
-  // He stays in one spot at one size. R is only the yardstick the panes, moons and gauges are placed by.
-  const R = S * .255, yaw = t * .12 + spinner.yaw, tilt = .18 + spinner.pitch;
-  const cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
-  const turn = (x, y, z) => {
-    const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
-    return [x1, y * ct - z1 * st, y * st + z1 * ct];
-  };
-  const onOrbit = (radius, inc, u) => {
-    const v = turn(Math.cos(u) * radius, Math.sin(u) * radius * Math.sin(inc), Math.sin(u) * radius * Math.cos(inc));
-    const p = 4.5 / (4.5 - v[2] / radius);
-    return [v[0] * R * p, v[1] * R * p, v[2]];
-  };
+  // He stays in one spot at one size, with nothing floating around him. R is the yardstick the gauges and his name are placed by.
+  const R = S * .255, yaw = t * .12 + spinner.yaw;
 
   rx.save();
   rx.globalCompositeOperation = 'lighter';
@@ -139,46 +116,9 @@ function drawSphere(rx, S, t, col, pulse, spin, big) {
   const halo = rx.createRadialGradient(0, 0, 0, 0, 0, R * 1.9);
   halo.addColorStop(0, hex(col, (.09 + motion.energy * .05) * build)); halo.addColorStop(.6, hex(col, .04 * build)); halo.addColorStop(1, hex(col, 0));
   rx.fillStyle = halo; rx.beginPath(); rx.arc(0, 0, R * 1.9, 0, TAU); rx.fill();
-  const moons = big ? buildMoons(col) : [];
-  // The paths the moons travel on. The paths themselves are no longer drawn.
-  const rings = [{ radius: 1.48, inc: .57, rate: .22, phase: 0, kind: 'agent' },
-                 { radius: 1.65, inc: -.65, rate: -.16, phase: 2, kind: 'event' }];
-
-  // Real document panes follow the audio-driven orbital tilt; hit regions use the same transform.
-  paneHits = [];
-  const content = J.panes?.visible || [];
-  const panels = content.slice(0, big ? 7 : 4).map((pane, i, all) => {
-    const a = i / all.length * TAU + t * .055 + .35;
-    const radius=1.6 + motion.output*.32 - motion.input*.16 + motion.thinking*.14*Math.sin(t*.8+i);
-    const [x, y, z] = onOrbit(radius, .72+motion.thinking*.23*Math.sin(t*.5), a);
-    return { x, y: y*.72 - S*.055, z, i, a, pane };
-  });
-  const drawPanel = p => {
-    rx.save(); rx.globalCompositeOperation = 'source-over';
-    rx.translate(p.x, p.y); rx.rotate(Math.sin(p.a) * .19);
-    rx.transform(.78 + .18 * Math.abs(Math.cos(p.a)), .16 * Math.cos(p.a), 0, 1, 0, 0);
-    const w = S * (.122 + motion.speaking*.012), h = S * (p.i % 2 ? .139 : .104), x = -w/2, y = -h/2;
-    rx.globalAlpha = (p.z > 0 ? .85 : .4) * build;
-    const glass = rx.createLinearGradient(x, y, x+w, y+h);
-    glass.addColorStop(0, hex(col, .21)); glass.addColorStop(.5, '#111022b0'); glass.addColorStop(1, hex(col, .08));
-    rx.fillStyle = glass; rx.strokeStyle = hex(col, .8); rx.lineWidth = S * .0015;
-    rx.shadowColor = col; rx.shadowBlur = S * .01; rx.fillRect(x, y, w, h); rx.strokeRect(x, y, w, h); rx.shadowBlur = 0;
-    J.panes.paint(rx, p.pane, w, h);
-    if (big) {
-      const matrix = rx.getTransform(), box = $('reactor').getBoundingClientRect();
-      const corners = [[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(([cx,cy]) => {
-        const point = matrix.transformPoint({x:cx,y:cy});
-        return {x:box.left+point.x/D,y:box.top+point.y/D};
-      });
-      paneHits.push({pane:p.pane,corners,z:p.z});
-    }
-    rx.restore();
-  };
-  panels.filter(p => p.z <= 0).forEach(drawPanel);
-
   // The orb itself. Its yaw and pitch follow the same grab-and-spin as before; the signs differ because its "up" is up.
   const compact = document.body.classList.contains('compact-orb');
-  const drawn = J.shellOrb?.draw(rx, R * 1.22, { dt: motion.dt, listening: motion.listening, thinking: motion.thinking, speaking: motion.speaking,
+  const drawn = J.shellOrb?.draw(rx, compact ? S * .38 : R * 1.4, { dt: motion.dt, listening: motion.listening, thinking: motion.thinking, speaking: motion.speaking,
     level: Math.max(motion.input, motion.output), color: motion.color, yaw: -yaw, pitch: .3 - spinner.pitch,
     density: compact || J.graphics.quality === 'economy' ? 0 : 1, alpha: build, still: reduced.matches });
   if (!drawn) {  // no WebGL2: a plain stack of rings in his colour
@@ -188,23 +128,10 @@ function drawSphere(rx, S, t, col, pulse, spin, big) {
       rx.beginPath(); rx.ellipse(0, y, half, half * .28, 0, 0, TAU); rx.stroke();
     }
   }
-  panels.filter(p => p.z > 0).forEach(drawPanel);
   rx.restore();
 
-  moonHits = [];
   if (!big) return;
-  if(!document.body.classList.contains('compact-orb'))drawGauges(rx, S, col, build);
-  const centre = J.view.sphere;
-  moons.forEach((m, i) => {
-    const same = moons.filter(o => o.kind === m.kind), k = same.indexOf(m);
-    const ring = m.kind === 'track' ? { radius: 1.9, inc: .22, rate: .12 } : rings[m.kind === 'agent' ? 0 : 1];
-    const radius = m.kind === 'event' ? m.orbit : ring.radius;
-    const [X, Y, z] = onOrbit(radius, ring.inc, t * ring.rate * .5 + k / same.length * 6.283 + (m.kind === 'event' ? 1.3 : 0));
-    const r = S * (m.kind === 'track' ? .034 : .022);
-    drawMoon(rx, m, X, Y, z, r, S, t, build);
-    if (centre) moonHits.push({ x: centre.x + X / D, y: centre.y + Y / D, r: r / D, z, m, X, Y });
-  });
-  for (const h of moonHits) drawMoonLabel(rx, h.m, h.X, h.Y, h.z, h.r * D, S, build);  // labels above every moon body
+  if (!compact) drawGauges(rx, S, col, build);
   rx.fillStyle = '#e8fffb'; rx.font = `700 ${S * .032}px Consolas, monospace`; rx.textAlign = 'center'; rx.textBaseline = 'middle';
   rx.globalAlpha = build; rx.fillText('J.A.R.V.I.S.', 0, S * .52);
   rx.fillStyle = hex(col, .85); rx.font = `600 ${S * .019}px Consolas, monospace`;
@@ -253,103 +180,6 @@ function drawGauges(rx, S, col, build) {
   rx.restore();
 }
 
-/* ---------- Moons: agent tasks, upcoming events, the current song ---------- */
-function until(iso) {
-  const minutes = Math.round((Date.parse(iso) - Date.now()) / 60000);
-  if (!Number.isFinite(minutes)) return '';
-  if (minutes <= 0) return 'now';
-  return minutes < 60 ? `in ${minutes}m` : `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-function buildMoons(col) {
-  const moons = [];
-  const sessions = [...data.sessions].sort((a, b) => (b.status === 'running') - (a.status === 'running')).slice(0, 4);
-  for (const s of sessions) {
-    const status = String(s.status || 'idle');
-    moons.push({ kind: 'agent', data: s, label: String(s.name || 'Agent').slice(0, 24), sub: status,
-                 color: status === 'running' ? '#f5b83d' : status === 'failed' ? '#f87171' : col, spinning: status === 'running', glyph: '⚙' });
-  }
-  for (const e of data.events.slice(0, 3)) {
-    const minutes = (Date.parse(e.start) - Date.now()) / 60000;
-    moons.push({ kind: 'event', data: e, label: String(e.title || 'Event').slice(0, 26), sub: e.all_day ? 'today' : until(e.start),
-                 color: '#c4b5fd', glyph: '◷', orbit: 1.3 + .45 * clamp01((Number.isFinite(minutes) ? minutes : 720) / 720) });
-  }
-  const tr = data.track;
-  if (tr && tr.name) {
-    const elapsed = tr.playing ? performance.now() - data.trackAt : 0;
-    const progress = tr.duration_ms ? clamp01((tr.progress_ms + elapsed) / tr.duration_ms) : 0;
-    moons.push({ kind: 'track', data: tr, label: String(tr.name).slice(0, 26), sub: (tr.artists || []).join(', ').slice(0, 30),
-                 color: '#1ed760', glyph: '♫', progress, playing: tr.playing, img: image(tr.art) });
-  }
-  return moons;
-}
-function drawMoon(rx, m, X, Y, z, r, S, t, build) {
-  rx.save();
-  rx.globalAlpha = (z > 0 ? 1 : .42) * build;
-  let g = rx.createRadialGradient(X, Y, r * .5, X, Y, r * 2.6);
-  g.addColorStop(0, hex(m.color, .35)); g.addColorStop(1, hex(m.color, 0));
-  rx.fillStyle = g; rx.beginPath(); rx.arc(X, Y, r * 2.6, 0, 6.283); rx.fill();
-  rx.fillStyle = '#04090c'; rx.beginPath(); rx.arc(X, Y, r, 0, 6.283); rx.fill();
-  if (m.img?.complete && m.img.naturalWidth) {
-    rx.save(); rx.beginPath(); rx.arc(X, Y, r * .9, 0, 6.283); rx.clip();
-    rx.translate(X, Y); rx.rotate(m.playing && !reduced.matches ? t * .6 : 0); rx.drawImage(m.img, -r, -r, r * 2, r * 2); rx.restore();
-  } else {
-    rx.fillStyle = m.color; rx.font = `${r * 1.05}px "Segoe UI Symbol", sans-serif`; rx.textAlign = 'center'; rx.textBaseline = 'middle';
-    rx.fillText(m.glyph, X, Y + r * .05);
-  }
-  rx.lineWidth = Math.max(1.5, S * .0035); rx.strokeStyle = hex(m.color, .9);
-  if (m.spinning) {
-    rx.beginPath(); rx.arc(X, Y, r, 0, 6.283); rx.strokeStyle = hex(m.color, .35); rx.stroke();
-    rx.strokeStyle = hex(m.color, .95); rx.beginPath(); rx.arc(X, Y, r * 1.3, t * 3, t * 3 + 1.7); rx.stroke();
-  } else if (m.progress != null) {
-    rx.strokeStyle = hex(m.color, .25); rx.beginPath(); rx.arc(X, Y, r * 1.18, 0, 6.283); rx.stroke();
-    rx.strokeStyle = hex(m.color, .95); rx.beginPath(); rx.arc(X, Y, r * 1.18, -Math.PI / 2, -Math.PI / 2 + 6.283 * m.progress); rx.stroke();
-  } else { rx.beginPath(); rx.arc(X, Y, r, 0, 6.283); rx.stroke(); }
-  rx.restore();
-}
-function drawMoonLabel(rx, m, X, Y, z, r, S, build) {
-  rx.save(); rx.globalAlpha = build;
-  if (z > -.2) {
-    rx.textAlign = 'left'; rx.textBaseline = 'middle';
-    rx.fillStyle = '#e8fffb'; rx.font = `600 ${px(S * .019, 12)}px Consolas, monospace`; rx.fillText(m.label, X + r * 1.7, Y - S * .011);
-    rx.fillStyle = hex(m.color, .9); rx.font = `500 ${px(S * .016, 11)}px Consolas, monospace`; rx.fillText(m.sub, X + r * 1.7, Y + S * .014);
-  }
-  rx.restore();
-}
-
-/* ---------- Moon cards ---------- */
-const card = make('div', null, 'card moon-card'); card.hidden = true; card.setAttribute('role', 'dialog'); document.body.append(card);
-function showCard(hit) {
-  const m = hit.m, d = m.data; card.replaceChildren();
-  const actions = make('div', null, 'moon-actions');
-  const action = (text, fn) => { const b = make('button', text); b.type = 'button'; b.onclick = fn; actions.append(b); };
-  if (m.kind === 'agent') {
-    card.append(make('h4', String(d.name || 'Agent session')), make('small', `${d.project || ''} · ${d.provider || 'codex'} · ${d.status || 'idle'}`));
-    if (d.task) card.append(make('p', String(d.task).slice(0, 220) + (String(d.task).length > 220 ? '…' : '')));
-    if (d.report) card.append(make('p', 'Last report: ' + String(d.report).slice(0, 220), 'muted'));
-    action('Open tasks & agents', () => { hideCard(); $('agentsBtn').click(); });
-  } else if (m.kind === 'event') {
-    const when = new Date(d.start);
-    card.append(make('h4', String(d.title || 'Event')),
-      make('small', d.all_day ? 'All day' : when.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' · ' + until(d.start)));
-    if (d.location) card.append(make('p', String(d.location)));
-  } else {
-    card.append(make('h4', String(d.name || 'Spotify')), make('small', (d.artists || []).join(', ')));
-    if (d.album) card.append(make('p', String(d.album), 'muted'));
-    action(d.playing ? 'Pause' : 'Play', () => { hideCard(); J.send(d.playing ? 'pause the music' : 'resume the music'); });
-    action('Next song', () => { hideCard(); J.send('next song'); });
-  }
-  const close = make('button', '×', 'moon-close'); close.type = 'button'; close.setAttribute('aria-label', 'Close'); close.onclick = hideCard;
-  card.prepend(close);
-  if (actions.children.length) card.append(actions);
-  card.hidden = false;
-  const box = card.getBoundingClientRect();
-  card.style.left = Math.max(12, Math.min(innerWidth - box.width - 12, hit.x + hit.r + 14)) + 'px';
-  card.style.top = Math.max(12, Math.min(innerHeight - box.height - 12, hit.y - box.height / 2)) + 'px';
-}
-function hideCard() { card.hidden = true; }
-J.on('escape', hideCard); J.on('stage', hideCard);
-document.addEventListener('pointerdown', e => { if (!card.hidden && !card.contains(e.target) && e.target !== $('reactor')) hideCard(); });
-
 /* ---------- Grab to spin: mouse in the main view, or a HOLO hand ---------- */
 const hand = {
   begin(now) { spinner.held = true; spinner.vy = spinner.vp = 0; spinner.samples = [{ at: now, yaw: spinner.yaw, pitch: spinner.pitch }]; },
@@ -372,11 +202,6 @@ const hand = {
 };
 const rc = $('reactor');
 let grab = null;
-const paneAt = (x,y) => paneHits.filter(hit => {
-  const signs=hit.corners.map((a,i)=>{const b=hit.corners[(i+1)%4];return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);});
-  return signs.every(v=>v>=0)||signs.every(v=>v<=0);
-}).sort((a,b)=>b.z-a.z)[0];
-const moonAt = (x, y) => moonHits.filter(h => Math.hypot(h.x - x, h.y - y) < h.r * 1.8).sort((a, b) => b.z - a.z)[0];
 rc.addEventListener('pointerdown', e => {
   if (!main() || e.button !== 0) return;
   grab = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
@@ -384,7 +209,7 @@ rc.addEventListener('pointerdown', e => {
 });
 rc.addEventListener('pointermove', e => {
   if (!main()) return;
-  if (!grab) { const pane=paneAt(e.clientX,e.clientY); if(pane)J.panes.select(pane.pane.id); rc.style.cursor = moonAt(e.clientX, e.clientY) || pane ? 'pointer' : 'grab'; return; }
+  if (!grab) { rc.style.cursor = 'grab'; return; }
   if (!grab.moved && Math.hypot(e.clientX - grab.sx, e.clientY - grab.sy) > 4) { grab.moved = true; hand.begin(performance.now()); rc.style.cursor = 'grabbing'; }
   if (grab.moved) hand.move(e.clientX - grab.x, e.clientY - grab.y, performance.now());
   grab.x = e.clientX; grab.y = e.clientY;
@@ -392,7 +217,6 @@ rc.addEventListener('pointermove', e => {
 rc.addEventListener('pointerup', e => {
   if (!grab) return;
   if (grab.moved) hand.end(performance.now());
-  else { const hit = moonAt(e.clientX, e.clientY), pane=paneAt(e.clientX,e.clientY); if (hit) showCard(hit); else if(pane)J.panes.focus(pane.pane.id); else hideCard(); }
   grab = null; rc.style.cursor = '';
 });
 rc.addEventListener('pointercancel', () => { if (grab?.moved) hand.cancel(); grab = null; });
@@ -546,8 +370,8 @@ function boot() {
 }
 boot();
 
-J.holo = { drawSphere, hand, setTheme, showCard, themes: Object.keys(THEMES),
+J.holo = { drawSphere, hand, setTheme, themes: Object.keys(THEMES),
   get renderer() { return J.shellOrb?.ready ? 'webgl2' : 'canvas2d'; },
   get motion() { return { ...coreMotion, color: [...coreMotion.color] }; },
-  get moons() { return moonHits; }, get beams() { return beams; } };
+  get beams() { return beams; } };
 })();

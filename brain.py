@@ -239,9 +239,6 @@ def serve():
             if route == "/knowledge-search" and post:
                 import semantic_search
                 return semantic_search.search(self.payload(4000).get('query', '')), 200
-            if route == "/orbit" and get:
-                import orbit
-                return orbit.snapshot(), 200
             if route == "/tasks" and get:
                 import tasks
                 return {"tasks": tasks.items()}, 200

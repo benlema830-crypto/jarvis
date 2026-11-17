@@ -271,14 +271,9 @@ addEventListener('load', async () => {
     delete window.motionTestState;
 
     // The resume step above may already have brought the orb forward; clicking again would send it back to the graph.
-    stage('moons'); if(!J.view.jarvisMain)$('stageSlot').click(); await wait(() => document.body.classList.contains('jarvis-main'), 'main view for moons');
-    await wait(() => J.holo.moons.length === 4, 'agent, event and song moons (' + J.holo.moons.length + ')');
-    const moonKinds = J.holo.moons.map(h => h.m.kind).sort().join();
-    assert(moonKinds === 'agent,agent,event,track', 'moon kinds ' + moonKinds);
-    const song = J.holo.moons.find(h => h.m.kind === 'track');
-    J.holo.showCard(song); assert(!document.querySelector('.moon-card').hidden && document.querySelector('.moon-card').textContent.includes('Thunderstruck'), 'song card');
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    document.querySelector('.moon-card .moon-close')?.click(); assert(document.querySelector('.moon-card').hidden, 'card closes');
+    stage('main view'); if(!J.view.jarvisMain)$('stageSlot').click(); await wait(() => document.body.classList.contains('jarvis-main'), 'his view comes forward');
+    drawReactor(performance.now()/1000);
+    assert(!('moons' in J.holo) && !document.querySelector('.moon-card') && !('paint' in J.panes), 'nothing floats around the orb: no moons, no panes');
 
     stage('holo reply'); window.testStream.emit({ type: 'you', text: 'Status?', t: 2 }); window.testStream.emit({ type: 'jarvis', text: 'Systems nominal, sir.', t: 3 });
     const holoText = () => document.querySelector('.holo-reply').textContent;
@@ -555,12 +550,6 @@ def serve(with_checks=True):
                 '/conversation-settings': {'pause_seconds':1.2,'followup_seconds':12,'first_clause_chars':85},
                 '/response-settings': {'humor':25,'directness':75,'detail':'brief','tone':'classic','pushback':'balanced','address':'occasionally'},
             }
-            if path == "/orbit":
-                import datetime
-                soon = (datetime.datetime.now().astimezone() + datetime.timedelta(minutes=40)).isoformat()
-                return self.send({"events": [{"title": "Team sync", "location": "Zoom", "all_day": False, "start": soon}],
-                                  "track": {"name": "Thunderstruck", "artists": ["AC/DC"], "album": "The Razors Edge", "art": "",
-                                            "uri": "spotify:track:T", "playing": True, "progress_ms": 60000, "duration_ms": 292000}})
             if path == "/integration-status":
                 from unittest.mock import patch
                 sys.path.insert(0, str(ROOT))
