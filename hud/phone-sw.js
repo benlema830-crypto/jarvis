@@ -15,11 +15,13 @@ self.addEventListener('activate', event => {
     .then(() => self.clients.claim()));
 });
 
-// The page itself: the newest copy when the PC answers, the saved one when it doesn't.
+// The page itself: the newest copy when the PC answers, the saved one when it doesn't. Only the chat page is
+// saved: the agent board (/board) is live or nothing, and must never take the chat page's place in the cache.
 self.addEventListener('fetch', event => {
   if (event.request.mode !== 'navigate') return;
+  const home = new URL(event.request.url).pathname === '/';
   event.respondWith(fetch(event.request).then(response => {
-    if (response.ok) { const copy = response.clone(); caches.open(SHELL).then(cache => cache.put('/', copy)); }
+    if (response.ok && home) { const copy = response.clone(); caches.open(SHELL).then(cache => cache.put('/', copy)); }
     return response;
   }).catch(() => caches.match('/')));
 });

@@ -162,7 +162,19 @@ h2{font:600 14px/1.2 var(--sans);color:var(--muted);margin-bottom:12px}
  .bar-end{margin-left:auto}
  main{overflow:visible;padding:20px 16px 28px}
  .job-head{flex-direction:column;gap:6px}
+ .job h1{font-size:19px}
+ .lead{flex-wrap:wrap;gap:6px 12px}
+ .lead .saying{flex:1 1 100%;order:1}
+ .lead .clock{margin-left:auto}
  .rail{border-left:0;border-top:1px solid var(--line);overflow:visible}
  .earlier summary{grid-template-columns:18px minmax(0,1fr) auto}
  .earlier .line{display:none}
 }
+
+/* Inside the phone app (full screen, no browser bars): room for the notch and the home bar, a way back to the
+   chat, and no clock of its own because the phone's is right above it. */
+body[data-phone] .bar{height:calc(var(--bar) + env(safe-area-inset-top));padding-top:env(safe-area-inset-top)}
+body[data-phone] .jarvis{min-width:0;overflow:hidden;text-overflow:ellipsis}
+body[data-phone] .quiet-link{display:inline-block;min-height:36px;line-height:22px;padding:6px 14px}
+body[data-phone] #clock{display:none}
+body[data-phone] .rail{padding-bottom:calc(20px + env(safe-area-inset-bottom))}

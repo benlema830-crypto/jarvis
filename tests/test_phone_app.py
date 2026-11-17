@@ -157,6 +157,76 @@ class HandsFreeAndFeedTest(unittest.TestCase):
             self.assertEqual(again.to_feed("jarvis", "next"), 3)
 
 
+class AgentBoardTest(unittest.TestCase):
+    """The laptop's agent board inside the phone app: a public page, data only with the key, read-only."""
+    setUp, request = PhoneAppTest.setUp, PhoneAppTest.request
+
+    def page_server(self):
+        """A stand-in for Jarvis's own page server (hud.py); it records what reached it."""
+        seen = []
+
+        class Page(phone_bridge.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Host"), self.headers.get("Authorization")))
+                stream = self.path == "/events"
+                body = b'data: {"type": "hello"}\n\n' if stream else json.dumps({"counts": {"working": 2}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream" if stream else "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+        server = phone_bridge.ThreadingHTTPServer(("127.0.0.1", 0), Page)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        patcher = mock.patch.object(phone_bridge, "HUD_PORT", server.server_port)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return seen
+
+    def test_the_board_page_is_marked_for_the_phone_and_is_the_laptops_page(self):
+        status, page = self.request("GET", "/board")
+        self.assertEqual(status, 200)
+        self.assertIn(b"data-phone", page)  # board.js sends the phone key only when it sees this
+        self.assertNotIn(b"data-phone", (phone_bridge.PAGE.parent / "board.html").read_bytes())
+        self.assertIn(b"'jarvis-key'", self.request("GET", "/board.js")[1])  # the key the chat page saved
+        self.assertEqual(self.request("GET", "/board.css")[0], 200)
+
+    def test_board_data_needs_the_key(self):
+        seen = self.page_server()
+        for path in phone_bridge.BOARD_DATA:
+            self.assertEqual(self.request("GET", path)[0], 401, path)
+            self.assertEqual(self.request("GET", path, headers={"Authorization": "Bearer nope"})[0], 401, path)
+        self.assertEqual(seen, [])
+
+    def test_board_data_comes_from_jarvis_and_the_key_stays_here(self):
+        seen = self.page_server()
+        status, body = self.request("GET", "/agents?x=1", headers=AUTH)
+        self.assertEqual((status, json.loads(body)), (200, {"counts": {"working": 2}}))
+        self.assertEqual(self.request("GET", "/events", headers=AUTH), (200, b'data: {"type": "hello"}\n\n'))
+        self.assertEqual(self.request("GET", "/jobs", headers=AUTH)[0], 200)
+        port = phone_bridge.HUD_PORT
+        self.assertEqual(seen, [(path, f"127.0.0.1:{port}", None) for path in ("/agents", "/events", "/jobs")])
+
+    def test_the_board_can_only_read(self):
+        self.page_server()
+        for path in ("/agents", "/board", "/session-control", "/command"):
+            self.assertEqual(self.request("POST", path, "{}", {**AUTH, "Content-Type": "application/json"})[0], 404, path)
+
+    def test_a_page_server_that_is_down_says_so(self):
+        with mock.patch.object(phone_bridge, "HUD_PORT", 1):
+            status, body = self.request("GET", "/agents", headers=AUTH)
+        self.assertEqual(status, 503)
+        self.assertIn("page server", json.loads(body)["error"])
+
+    def test_the_chat_page_links_to_the_board_and_the_cache_keeps_only_the_chat_page(self):
+        self.assertIn(b'href="/board"', self.request("GET", "/")[1])
+        self.assertIn(b"response.ok && home", self.request("GET", "/sw.js")[1])
+
+
 class RealListTest(unittest.TestCase):
     def test_a_test_run_never_reads_the_real_alert_list(self):
         self.assertEqual(phone_push.SUBSCRIPTIONS, phone_push.DEFAULT_SUBSCRIPTIONS)

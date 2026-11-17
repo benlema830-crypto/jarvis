@@ -14,6 +14,12 @@
     merging: () => 'Reading the reports. It either sends agents out again or writes the answer.' };
   const QUIET_AFTER = 120;  // seconds without a new step before a working agent is called quiet
 
+  // Inside the phone app (phone_bridge.py marks the page) the phone key goes with each request, as in the chat page.
+  const PHONE = 'phone' in document.body.dataset;
+  let key = ''; if (PHONE) { try { key = localStorage.getItem('jarvis-key') || ''; } catch (error) { /* no key */ } }
+  const get = path => fetch(path, { cache: 'no-store', headers: key ? { Authorization: 'Bearer ' + key } : {} });
+  const signIn = () => location.replace(PHONE ? '/' : '/login');  // the chat page asks for the phone key
+
   let board = null, fetchedAt = 0, timer = 0;
   const open = new Set();   // which "brief" / report folds the reader opened, kept across refreshes
 
@@ -142,7 +148,7 @@
     const inJob = agents.filter(a => a.role !== 'solo'), solo = agents.filter(a => a.role === 'solo');
     const working = solo.filter(a => a.live), earlier = solo.filter(a => !a.live);
 
-    $('headset').hidden = !(board.room && board.room.headset);
+    $('headset').hidden = PHONE || !(board.room && board.room.headset);  // it is about the laptop's microphone
     const tally = $('tally'); tally.replaceChildren();
     if (counts.working) {
       tally.append(make('b', String(counts.working)), ` agent${counts.working === 1 ? '' : 's'} working`);
@@ -181,8 +187,8 @@
   async function refresh() {
     clearTimeout(timer);
     try {
-      const response = await fetch('/agents', { cache: 'no-store' });
-      if (response.status === 401) return location.replace('/login');  // the laptop's key went: sign in again
+      const response = await get('/agents');
+      if (response.status === 401) return signIn();  // the key went: sign in again
       if (!response.ok) throw new Error(response.status);
       board = await response.json(); fetchedAt = performance.now();
       if (document.body.dataset.state === 'lost') setState(lastState);
@@ -195,7 +201,7 @@
 
   async function queue() {
     try {
-      const data = await (await fetch('/jobs', { cache: 'no-store' })).json(), jobs = (data.jobs || []).slice(0, 5);
+      const data = await (await get('/jobs')).json(), jobs = (data.jobs || []).slice(0, 5);
       $('queueSection').hidden = !jobs.length;
       $('queue').replaceChildren(...jobs.map(job => { const li = make('li'); li.append(make('b', job.label), make('span', job.what)); return li; }));
     } catch (error) { /* the board works without it */ }
@@ -219,22 +225,48 @@
     while (feed.children.length > 60) feed.lastChild.remove();
     $('feedEmpty').hidden = true;
   }
+  function onEvent(data) {
+    let event; try { event = JSON.parse(data); } catch (error) { return; }
+    if (event.type === 'hello') {
+      setState(event.state || 'standby'); $('feed').replaceChildren();
+      for (const past of (event.history || []).slice(-40)) feedLine(past, false);
+      refresh();
+    } else if (event.type === 'state') setState(event.state);
+    else if (event.type === 'sessions') { clearTimeout(timer); timer = setTimeout(refresh, 250); }
+    else feedLine(event, true);
+  }
   function listen() {
     const stream = new EventSource('/events');
-    stream.onmessage = message => {
-      let event; try { event = JSON.parse(message.data); } catch (error) { return; }
-      if (event.type === 'hello') {
-        setState(event.state || 'standby'); $('feed').replaceChildren();
-        for (const past of (event.history || []).slice(-40)) feedLine(past, false);
-        refresh();
-      } else if (event.type === 'state') setState(event.state);
-      else if (event.type === 'sessions') { clearTimeout(timer); timer = setTimeout(refresh, 250); }
-      else feedLine(event, true);
-    };
+    stream.onmessage = message => onEvent(message.data);
     stream.onerror = () => setState('lost', true);  // EventSource reconnects by itself
   }
+  // An EventSource can't carry the phone key, so the phone app reads the same stream itself and reconnects itself.
+  async function listenWithKey() {
+    for (;;) {
+      try {
+        const response = await get('/events');
+        if (response.status === 401) return signIn();
+        if (!response.ok || !response.body) throw new Error(response.status);
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += decoder.decode(value, { stream: true });
+          const blocks = text.split('\n\n'); text = blocks.pop();
+          for (const block of blocks) for (const line of block.split('\n')) if (line.startsWith('data: ')) onEvent(line.slice(6));
+        }
+      } catch (error) { /* the phone slept or the PC went away: try again below */ }
+      setState('lost', true);
+      await new Promise(done => setTimeout(done, 3000));
+    }
+  }
 
+  if (PHONE) {
+    const back = document.querySelector('.quiet-link'); back.textContent = 'Chat'; back.setAttribute('aria-label', 'Back to the chat');
+    if (!key) return signIn();
+  }
   tick(); setInterval(tick, 1000);
   refresh(); queue(); setInterval(queue, 30000);
-  listen();
+  if (PHONE) listenWithKey(); else listen();
 })();

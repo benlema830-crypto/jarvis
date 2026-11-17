@@ -23,10 +23,16 @@ GET /push/key, POST /push/subscribe and /push/unsubscribe {subscription} turn al
 Hands-free (the app open on screen): POST /listen with a short WAV the app cut at a pause. It is transcribed on
 this PC (the same Whisper as Telegram voice notes) and acted on only when it starts with the phone persona's name
 ("Friday, ...") or comes as a follow-up right after an answer (?followup=1). Anything else is dropped unread.
+
+The agent board (the owner asked for the laptop's dashboard in the phone app, 2026-11-17): GET /board is the same
+page the laptop shows (hud/board.html), marked so it sends the phone key itself. Its data, GET /agents, /jobs and
+/events, needs the key and is passed read-only to Jarvis's own page server in this process (hud.py). Nothing on
+the board starts, stops or changes anything.
 """
 import collections
 import base64
 import hmac
+import http.client
 import io
 import json
 import os
@@ -40,6 +46,7 @@ import wave
 
 import numpy as np
 
+from instance_config import HUD_PORT
 import preferences
 
 ROOT = Path(__file__).resolve().parent
@@ -59,7 +66,12 @@ APP_FILES = {  # the installable app's files: public, like the page
     "/phone-icon-180.png": ("phone-icon-180.png", "image/png"),
     "/phone-icon-192.png": ("phone-icon-192.png", "image/png"),
     "/phone-icon-512.png": ("phone-icon-512.png", "image/png"),
+    "/board": ("board.html", "text/html; charset=utf-8"),  # the agent board: the page is public, its data is not
+    "/board.css": ("board.css", "text/css; charset=utf-8"),
+    "/board.js": ("board.js", "text/javascript; charset=utf-8"),
 }
+BOARD_DATA = {"/agents", "/jobs", "/events"}  # what the board reads; each needs the key
+BOARD_MARK = (b'<body data-state="connecting">', b'<body data-state="connecting" data-phone>')
 LOCKOUT_FAILS, LOCKOUT_SECONDS = 10, 600
 
 
@@ -342,7 +354,13 @@ def make_handler(bridge: Bridge):
                 return self.reply(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             if route in APP_FILES:
                 name, kind = APP_FILES[route]
-                return self.reply(200, (PAGE.parent / name).read_bytes(), kind)
+                body = (PAGE.parent / name).read_bytes()
+                # In the phone app the board sends the phone key with each request (board.js looks for this mark)
+                return self.reply(200, body.replace(*BOARD_MARK) if route == "/board" else body, kind)
+            if route in BOARD_DATA:
+                if not bridge.allowed(self.headers):
+                    return self.reply(401, {"error": "key refused"})
+                return self.pass_on(route)
             if route in ("/pending", "/inbox", "/push/key"):
                 if not bridge.allowed(self.headers):
                     return self.reply(401, {"error": "key refused"})
@@ -360,6 +378,31 @@ def make_handler(bridge: Bridge):
                         return self.reply(500, {"error": "Alerts can't be set up on this PC."})
                 return self.reply(200, bridge.pending())
             self.reply(404, {"error": "not found"})
+
+        def pass_on(self, route):
+            """One of the board's read-only routes, answered by Jarvis's own page server (hud.py, this process).
+            Only the bare route goes through: nothing the phone sent is passed on."""
+            streaming, started = route == "/events", False
+            connection = http.client.HTTPConnection("127.0.0.1", HUD_PORT, timeout=None if streaming else 30)
+            try:
+                connection.request("GET", route, headers={"Host": f"127.0.0.1:{HUD_PORT}"})
+                upstream = connection.getresponse()
+                started = True
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", upstream.getheader("Content-Type") or "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")  # the end of the body is the end of the connection
+                self.end_headers()
+                while chunk := (upstream.read1(65536) if streaming else upstream.read(65536)):
+                    self.wfile.write(chunk)
+                    if streaming:
+                        self.wfile.flush()
+            except OSError:  # the page server is down, or the phone went away mid-stream
+                if not started:
+                    self.reply(503, {"error": "Jarvis's page server isn't answering on the PC."})
+            finally:
+                connection.close()
 
         def audio(self, text):
             try:
